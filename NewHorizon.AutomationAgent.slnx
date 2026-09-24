@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NewHorizon.Automation.Application/NewHorizon.Automation.Application.csproj" />
+    <Project Path="src/NewHorizon.Automation.Domain/NewHorizon.Automation.Domain.csproj" />
+    <Project Path="src/NewHorizon.Automation.ErpClient/NewHorizon.Automation.ErpClient.csproj" />
+    <Project Path="src/NewHorizon.Automation.Infrastructure/NewHorizon.Automation.Infrastructure.csproj" />
+    <Project Path="src/NewHorizon.Automation.Worker/NewHorizon.Automation.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NewHorizon.Automation.IntegrationTests/NewHorizon.Automation.IntegrationTests.csproj" />
+    <Project Path="tests/NewHorizon.Automation.UnitTests/NewHorizon.Automation.UnitTests.csproj" />
+  </Folder>
+</Solution>

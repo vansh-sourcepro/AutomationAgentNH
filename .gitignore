@@ -1,0 +1,57 @@
+# ---- Build output ----
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+
+# ---- Worker run copy: `dotnet publish -o run` output. Kept separate from bin/ on purpose so a
+# running instance never locks the files `dotnet build` needs to overwrite (see CLAUDE.md). ----
+/run/
+
+# ---- Visual Studio / Rider / VS Code ----
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+.vscode/*
+!.vscode/extensions.json
+
+# ---- .NET ----
+project.lock.json
+project.fragment.lock.json
+*.nuget.props
+*.nuget.targets
+msbuild.log
+msbuild.err
+msbuild.wrn
+TestResults/
+coverage*.json
+coverage*.xml
+*.coverage
+*.trx
+
+# ---- Secrets / machine-local config (NEVER commit) ----
+appsettings.*.local.json
+appsettings.Production.json
+secrets.json
+*.pfx
+*.snk
+
+# ---- Docs: the Markdown is the source, the Word copy is generated ----
+doc/*.docx
+
+# ---- Claude Code: shared config IS committed, machine-local is not ----
+.claude/settings.local.json
+.claude/**/*.local.json
+
+# ---- OS ----
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- Generated documentation artifacts ----
+doc/__pycache__/

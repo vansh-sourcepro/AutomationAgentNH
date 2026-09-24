@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NewHorizon.Automation.Application\NewHorizon.Automation.Application.csproj" />
+    <ProjectReference Include="..\NewHorizon.Automation.Domain\NewHorizon.Automation.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.10" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The PO payload builder is internal: it is an implementation detail of IIndentToPoService and
+      nothing outside this assembly should assemble an ERP payload. It is also the one piece worth
+      testing hardest, because the recorded traces make an exact expected output available.
+    -->
+    <InternalsVisibleTo Include="NewHorizon.Automation.UnitTests" />
+    <!-- IntegrationTests needs DependencyInjection.NonRetryableKey to prove, against the real Polly
+         pipeline, that a request marked non-retryable really does skip the transport-level retry. -->
+    <InternalsVisibleTo Include="NewHorizon.Automation.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

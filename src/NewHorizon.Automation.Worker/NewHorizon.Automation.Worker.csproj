@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup> 
+    <ProjectReference Include="..\NewHorizon.Automation.Application\NewHorizon.Automation.Application.csproj" />
+    <ProjectReference Include="..\NewHorizon.Automation.Domain\NewHorizon.Automation.Domain.csproj" />
+    <ProjectReference Include="..\NewHorizon.Automation.Infrastructure\NewHorizon.Automation.Infrastructure.csproj" />
+    <ProjectReference Include="..\NewHorizon.Automation.ErpClient\NewHorizon.Automation.ErpClient.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.10" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Real connection strings and ERP credentials live in the per-developer secret store,
+         never in appsettings.json. See .claude/README.md and deploy/README.md. -->
+    <UserSecretsId>newhorizon-automation-agent</UserSecretsId>
+  </PropertyGroup>
+
+</Project>
