@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NewHorizon.Automation.Domain.Configuration;
 using NewHorizon.Automation.Domain.Errors;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.Domain.Logging;
 
@@ -40,6 +41,15 @@ public sealed class AutomationDbContext : DbContext
 
     /// <summary>One indent type's automation settings — run mode, daily schedule, target sites. Three rows.</summary>
     public DbSet<IndentPoAutomationConfig> IndentPoAutomationConfigs => Set<IndentPoAutomationConfig>();
+
+    /// <summary>PO → GRN settings: toggle, receipt mode, invoice number, schedule. One row.</summary>
+    public DbSet<PoGrnAutomationConfig> PoGrnAutomationConfigs => Set<PoGrnAutomationConfig>();
+
+    /// <summary>One PO → GRN trigger invocation.</summary>
+    public DbSet<PoGrnRun> PoGrnRuns => Set<PoGrnRun>();
+
+    /// <summary>One PO at one warehouse in a run: the GRN made, or why there is none.</summary>
+    public DbSet<PoGrnReceipt> PoGrnReceipts => Set<PoGrnReceipt>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

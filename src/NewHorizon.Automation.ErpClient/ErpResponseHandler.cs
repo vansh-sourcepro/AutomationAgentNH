@@ -28,6 +28,10 @@ internal static class ErpResponseHandler
         // through to GlobalExceptionFilter's generic default -> 500 branch, the same shape a real
         // outage would produce. The indent genuinely has nothing left to order; retrying will not help.
         "Indent is close or Po Qty is more than indent qty.",
+
+        // CSP_XGRNDTL_UPDATEPOQTY: the PO has already been received (by a person, or an earlier
+        // attempt whose answer was lost). Same 500 shape, same reason retrying cannot help.
+        "GRN QTY Can not Be greter then Po QTY",
     ];
 
     public static async Task<T> ReadAsync<T>(

@@ -11,6 +11,7 @@ they live here so every machine and every developer gets them after a `git pull`
 | [autoshop-chain-ownership.md](autoshop-chain-ownership.md) | Who performs each step of SO → OAF → SJO → CBOM → AutoShop, and the confirmed AutoShop endpoints |
 | [batch-vs-per-document.md](batch-vs-per-document.md) | The agent is a site-scoped, timer-driven **batch cycle** — not a per-document workflow |
 | [single-tenant-deployment.md](single-tenant-deployment.md) | One server per client, so no Company/Tenant dimension anywhere |
+| [po-to-grn-decisions.md](po-to-grn-decisions.md) | PO → GRN scope: authorised POs, pending qty, invoice defaults, skip batch/heat/inward/serial items, no auto-authorise |
 
 ## Adding a note
 

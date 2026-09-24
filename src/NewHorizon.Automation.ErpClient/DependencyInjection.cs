@@ -5,6 +5,7 @@ using NewHorizon.Automation.Application.Configuration;
 using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.ErpClient.Authentication;
 using NewHorizon.Automation.ErpClient.Flows.IndentToPo;
+using NewHorizon.Automation.ErpClient.Flows.PoToGrn;
 using Polly;
 
 namespace NewHorizon.Automation.ErpClient;
@@ -57,6 +58,7 @@ public static class DependencyInjection
         // Automation flows that drive ERP screens the generic IErpClient does not cover. Each
         // borrows the named client above. A new flow adds its own line here.
         services.AddIndentToPoErp();
+        services.AddPoToGrnErp();
 
         services.AddHealthChecks()
             .AddCheck<ErpApiHealthCheck>("erpApi", tags: ["ready"]);

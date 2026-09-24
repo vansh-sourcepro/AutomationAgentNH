@@ -29,11 +29,16 @@ dotnet ef database update -p src/NewHorizon.Automation.Infrastructure -s src/New
 sqlcmd -S <server>\<instance> -d PGTPL_AutomationAgent -i deploy/sql/002_SeedAutomationConfig.sql
 sqlcmd -S <server>\<instance> -d PGTPL_AutomationAgent -i deploy/sql/flows/indent-to-po/003_SeedIndentToPoConfig.sql
 sqlcmd -S <server>\<instance> -d PGTPL_AutomationAgent -i deploy/sql/flows/indent-to-po/004_SeedIndentPoAutomation.sql
+sqlcmd -S <server>\<instance> -d PGTPL_AutomationAgent -i deploy/sql/flows/po-to-grn/005_SeedPoGrnAutomation.sql
 ```
 
 `004` ensures the three `IndentPoAutomationConfig` rows exist (the migration already seeds them; the
 script only matters if a row was deleted). All three ship inert — nothing converts on a schedule
 until a person turns a type on from the ERP's PO Automation screen.
+
+`005` does the same for the single `PoGrnAutomationConfig` row. It ships switched off with no
+invoice number, so no GRN is created until someone sets both through
+`PUT /api/automation/grn-automation` — see [`docs/flows/po-to-grn/README.md`](../docs/flows/po-to-grn/README.md).
 
 `READ_COMMITTED_SNAPSHOT` is on so the management/read API's queries never block the workers'
 job-claiming `UPDLOCK, READPAST` updates.

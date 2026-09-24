@@ -14,6 +14,7 @@ using NewHorizon.Automation.Worker.Configuration;
 using NewHorizon.Automation.Worker.Diagnostics;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IndentToPo;
+using NewHorizon.Automation.Worker.Flows.PoToGrn;
 using NewHorizon.Automation.Worker.Logging;
 using NewHorizon.Automation.Worker.Services;
 using Serilog;
@@ -194,6 +195,9 @@ try
 
             // Each automation flow's own timers, under the same usable-database gate.
             builder.Services.AddIndentToPoScheduler();
+
+            // PO → GRN's daily timer. Inert until its settings row is switched on and scheduled.
+            builder.Services.AddPoToGrnScheduler();
         }
     }
     else
@@ -262,6 +266,9 @@ try
 
     // Each automation flow maps its own endpoints and applies its own database/JWT gates.
     app.MapIndentToPoEndpoints(databaseConfigured, database.Usable, inboundJwt.IsConfigured);
+
+    // PO → GRN: settings (/api/automation/grn-automation) and trigger (/api/automation/po-to-grn).
+    app.MapPoToGrnEndpoints();
 
     // The startup verdict on the database, logged after the host is built so it reaches the
     // configured sinks rather than only the bootstrap console.

@@ -113,6 +113,7 @@ flow. A flow may use the shared code; **a flow never references another flow's f
 |---|---|---|
 | **Indent → PO** (Regular, Capital, Service) | live, outside the job engine | [`docs/flows/indent-to-po/README.md`](docs/flows/indent-to-po/README.md) — read it before touching `Flows/IndentToPo/` |
 | **AutoShop cycle** | live, through the job engine | described above; its definitions stay in `Application/Workflows/Definitions/` |
+| **PO → GRN** (Regular, Capital) | backend built, outside the job engine; API-key only, no dashboard yet | [`docs/flows/po-to-grn/README.md`](docs/flows/po-to-grn/README.md) — read it and `.claude/context/po-to-grn-decisions.md` before touching `Flows/PoToGrn/` |
 
 ```
 src/NewHorizon.Automation.Domain/Flows/<Name>/          entities, enums, value objects
