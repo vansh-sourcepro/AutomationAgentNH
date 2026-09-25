@@ -113,7 +113,7 @@ flow. A flow may use the shared code; **a flow never references another flow's f
 |---|---|---|
 | **Indent → PO** (Regular, Capital, Service) | live, outside the job engine | [`docs/flows/indent-to-po/README.md`](docs/flows/indent-to-po/README.md) — read it before touching `Flows/IndentToPo/` |
 | **AutoShop cycle** | live, through the job engine | described above; its definitions stay in `Application/Workflows/Definitions/` |
-| **PO → GRN** (Regular, Capital) | backend built, outside the job engine; API-key only, no dashboard yet | [`docs/flows/po-to-grn/README.md`](docs/flows/po-to-grn/README.md) — read it and `.claude/context/po-to-grn-decisions.md` before touching `Flows/PoToGrn/` |
+| **PO → GRN** (Regular, Capital) | backend built, outside the job engine; API key on every API (settings also accept an ERP token); no dashboard yet | [`docs/flows/po-to-grn/README.md`](docs/flows/po-to-grn/README.md) — read it and `.claude/context/po-to-grn-decisions.md` before touching `Flows/PoToGrn/` |
 
 ```
 src/NewHorizon.Automation.Domain/Flows/<Name>/          entities, enums, value objects
@@ -232,7 +232,8 @@ ERP's `sourcepro-secret-key` (already hard-coded in `WebAPICore` in this repo tr
 deployment rotates that secret and overrides via env/user-secrets. `ErpUserOrApiKeyFilter` accepts
 either an API key or a token on the reads WebApp2 needs (`/api/process-jobs*`,
 `/api/automation/indent-to-po/eligible`, `/api/automation/dashboard`);
-`/api/automation/po-automation/*` requires the token (`.RequireAuthorization()`). A blank
+`/api/automation/grn-automation/*` accepts either too (a token caller is also checked against form
+011171). `/api/automation/po-automation/*` requires the token (`.RequireAuthorization()`). A blank
 `SigningKey` leaves the JWT scheme unregistered and the `po-automation` endpoints unmapped — the
 API-key callers are unaffected. `AutomationAgent:Cors:AllowedOrigins` lists the WebApp2 origins;
 `Host:BindToLoopbackOnly` must be `false` for a deployment that serves the frontend, with the port

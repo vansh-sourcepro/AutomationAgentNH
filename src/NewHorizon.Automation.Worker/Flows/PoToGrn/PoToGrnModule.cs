@@ -37,7 +37,8 @@ public static class PoToGrnModule
 
     /// <summary>
     /// Mapped whether or not there is a database: without one both APIs answer 503 and say why,
-    /// which beats a 404 that leaves the caller wondering if the path is wrong.
+    /// which beats a 404 that leaves the caller wondering if the path is wrong. Both take the API
+    /// key, so neither depends on the JWT scheme being configured.
     /// </summary>
     public static WebApplication MapPoToGrnEndpoints(this WebApplication app)
     {

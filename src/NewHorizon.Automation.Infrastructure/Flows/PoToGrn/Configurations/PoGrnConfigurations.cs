@@ -24,6 +24,8 @@ public sealed class PoGrnAutomationConfigConfiguration : IEntityTypeConfiguratio
         builder.Property(config => config.LastScheduledRunDate).HasColumnType("date");
         builder.Property(config => config.InvoiceNumber).HasMaxLength(PoGrnAutomationConfig.InvoiceNumberMaxLength);
         builder.Property(config => config.Sites).HasMaxLength(200);
+        builder.Property(config => config.PoTypes).HasMaxLength(PoGrnAutomationConfig.PoTypesMaxLength);
+        builder.Property(config => config.PoNumbers).HasMaxLength(PoGrnAutomationConfig.PoNumbersMaxLength);
         builder.Property(config => config.LastRunStatus).HasMaxLength(20);
         builder.Property(config => config.UpdatedBy).HasMaxLength(100);
 

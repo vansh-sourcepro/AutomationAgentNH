@@ -91,7 +91,7 @@ public static class PoToGrnEndpoints
         {
             return Results.Problem(
                 title: "GRN Automation is turned off.",
-                detail: "Turn it on with PUT /api/automation/grn-automation {\"isActive\": true}.",
+                detail: "Turn it on with PUT /api/automation/grn-automation/enabled {\"enabled\": true}.",
                 statusCode: StatusCodes.Status409Conflict);
         }
 
@@ -107,12 +107,22 @@ public static class PoToGrnEndpoints
         var receiptMode = modeOverride ?? config.ReceiptMode;
         var sites = request.Sites is { Count: > 0 } ? request.Sites : config.SiteIds();
 
+        // The saved PO-type and PO-number limits apply to every run — Run, API and scheduler —
+        // unless this request names its own.
+        if (request.PoTypes is not { Count: > 0 } && config.PoTypeList() is { Count: > 0 } savedTypes)
+        {
+            poTypes = savedTypes;
+        }
+
+        var namesPos = request.PoIds is { Count: > 0 } || request.PoNumbers is { Count: > 0 };
+        var poNumbers = namesPos ? request.PoNumbers : config.PoNumberList() is { Count: > 0 } saved ? saved : null;
+
         var sweepRequest = new PoGrnSweepRequest
         {
             Sites = sites.Count > 0 ? sites : null,
             PoTypes = poTypes,
             PoIds = request.PoIds,
-            PoNumbers = request.PoNumbers,
+            PoNumbers = poNumbers,
             ReceiptMode = receiptMode,
             InvoiceNumber = config.InvoiceNumber,
             MaxPos = request.MaxPos is > 0 ? request.MaxPos.Value : config.MaxPosPerRun ?? DefaultMaxPos,

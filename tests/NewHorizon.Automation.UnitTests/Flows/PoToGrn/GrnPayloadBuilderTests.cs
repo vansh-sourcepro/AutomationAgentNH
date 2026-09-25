@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using NewHorizon.Automation.Application.Erp;
+using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.ErpClient.Flows.PoToGrn;
 
 namespace NewHorizon.Automation.UnitTests.Flows.PoToGrn;
@@ -21,6 +22,20 @@ public sealed class GrnPayloadBuilderTests
         line.PurchaseValue.Should().Be(1000m);
         line.UnitRate.Should().Be(100m);
         line.TaxRows.OfType<JsonObject>().Select(row => row["rateAmount"]!.GetValue<decimal>()).Should().Equal(90m, 90m);
+    }
+
+    [Fact]
+    public void Challan_quantity_is_only_what_the_ERP_sent_never_the_received_quantity()
+    {
+        static decimal Challan(JsonObject payload) =>
+            payload["grnitemDetails"]!.AsArray().OfType<JsonObject>().Single()["chalanqty"]!.GetValue<decimal>();
+
+        var absent = Build(Priced(GrnFixtures.Line(42, "A", pending: 10m)));
+        var present = Build(Priced(GrnFixtures.Line(42, "A", pending: 10m, tweak: row => row["chalanqty"] = 4m)));
+
+        Challan(absent).Should().Be(0m);
+        Challan(present).Should().Be(4m);
+        absent["vendchallannoControl"]!.GetValue<string>().Should().BeEmpty();
     }
 
     [Fact]

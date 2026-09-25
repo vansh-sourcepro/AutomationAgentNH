@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using NewHorizon.Automation.Domain.Flows.PoToGrn;
 
 namespace NewHorizon.Automation.ErpClient.Flows.PoToGrn;
 
@@ -220,8 +221,9 @@ internal static class GrnPayloadBuilder
             ["xgr23mfginvno"] = string.Empty,
             ["xgr23mfginvdt"] = null,
             ["xgr23assval"] = null,
-            // Delivered in full: the challan says what was received.
-            ["chalanqty"] = JsonValue.Create(line.QuantityPuom),
+            // Only what the ERP already holds for the line; the agent never invents a challan quantity.
+            // The PO carries none, so this is 0 — what the screen sends when the field is left blank.
+            ["chalanqty"] = JsonValue.Create(source.Number("chalanqty")),
             ["grnhsnCode"] = source.Text("grnhsncode"),
             ["pohsncode"] = source.Text("pohsncode"),
             ["shelfLifeDate"] = null,

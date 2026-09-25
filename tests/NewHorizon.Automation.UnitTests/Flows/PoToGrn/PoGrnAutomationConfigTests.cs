@@ -23,6 +23,61 @@ public sealed class PoGrnAutomationConfigTests
     }
 
     [Fact]
+    public void PO_types_are_parsed_deduplicated_and_all_of_them_means_no_limit()
+    {
+        var config = PoGrnAutomationConfig.CreateDefault(Now);
+
+        config.PoTypeList().Should().BeEmpty();
+
+        config.Update(new PoGrnAutomationConfigUpdate { PoTypes = [" capital ", "Capital"] }, Now, "test");
+        config.PoTypes.Should().Be("Capital");
+        config.PoTypeList().Should().Equal(PoGrnType.Capital);
+
+        config.Update(new PoGrnAutomationConfigUpdate { PoTypes = ["Regular", "Capital"] }, Now, "test");
+        config.PoTypes.Should().BeNull();
+
+        config.Update(new PoGrnAutomationConfigUpdate { PoTypes = ["Capital"] }, Now, "test");
+        config.Update(new PoGrnAutomationConfigUpdate { PoTypes = [] }, Now, "test");
+        config.PoTypeList().Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Service")]
+    [InlineData("0")]
+    public void Only_Regular_and_Capital_are_PO_types(string type)
+    {
+        var config = PoGrnAutomationConfig.CreateDefault(Now);
+
+        var act = () => config.Update(new PoGrnAutomationConfigUpdate { PoTypes = [type] }, Now, "test");
+
+        act.Should().Throw<DomainException>().WithMessage($"*'{type}' is not a PO type*");
+    }
+
+    [Fact]
+    public void PO_numbers_are_trimmed_deduplicated_and_blank_clears_them()
+    {
+        var config = PoGrnAutomationConfig.CreateDefault(Now);
+
+        config.Update(new PoGrnAutomationConfigUpdate { PoNumbers = " 26-27/TE/NF1/000190 , 26-27/te/nf1/000190,000012" }, Now, "test");
+        config.PoNumberList().Should().Equal("26-27/TE/NF1/000190", "000012");
+
+        config.Update(new PoGrnAutomationConfigUpdate { PoNumbers = "  " }, Now, "test");
+        config.PoNumbers.Should().BeNull();
+        config.PoNumberList().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Too_many_PO_numbers_are_refused()
+    {
+        var config = PoGrnAutomationConfig.CreateDefault(Now);
+        var many = string.Join(",", Enumerable.Range(1, 60).Select(n => $"26-27/TE/NF1/{n:000000}"));
+
+        var act = () => config.Update(new PoGrnAutomationConfigUpdate { PoNumbers = many }, Now, "test");
+
+        act.Should().Throw<DomainException>().WithMessage("*PoNumbers*");
+    }
+
+    [Fact]
     public void The_scheduler_fires_once_a_day_after_the_slot_when_on_and_timer_based()
     {
         var config = Scheduled(new TimeOnly(18, 0));

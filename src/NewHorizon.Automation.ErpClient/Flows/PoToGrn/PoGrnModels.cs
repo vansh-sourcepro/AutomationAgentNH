@@ -2,13 +2,6 @@ using NewHorizon.Automation.Domain.Flows.PoToGrn;
 
 namespace NewHorizon.Automation.ErpClient.Flows.PoToGrn;
 
-/// <summary>The material PO types a GRN is raised against. Service POs have no GRN.</summary>
-public enum PoGrnType
-{
-    Regular = 0,
-    Capital = 1,
-}
-
 public static class PoGrnTypes
 {
     public static IReadOnlyList<PoGrnType> All { get; } = [PoGrnType.Regular, PoGrnType.Capital];

@@ -2,6 +2,13 @@ using NewHorizon.Automation.Domain.Jobs;
 
 namespace NewHorizon.Automation.Domain.Flows.PoToGrn;
 
+/// <summary>The material PO types a GRN is raised against. Service POs have no GRN.</summary>
+public enum PoGrnType
+{
+    Regular = 0,
+    Capital = 1,
+}
+
 /// <summary>
 /// Which triggers may start a PO → GRN run. Its own enum rather than Indent → PO's, so the two
 /// flows' settings can never be changed by each other's code.

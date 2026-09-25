@@ -15,6 +15,10 @@ public sealed class PoGrnAutomationConfig
     /// <summary>Longest invoice number the ERP's <c>XGRNBILLNO</c> column is given here.</summary>
     public const int InvoiceNumberMaxLength = 50;
 
+    public const int PoTypesMaxLength = 50;
+
+    public const int PoNumbersMaxLength = 500;
+
     // Materialisation constructor for EF Core.
     private PoGrnAutomationConfig()
     {
@@ -45,6 +49,18 @@ public sealed class PoGrnAutomationConfig
 
     /// <summary>Comma-separated site ids to sweep; blank falls back to <c>AutomationAgent:PoToGrn:Sites</c>.</summary>
     public string? Sites { get; private set; }
+
+    /// <summary>
+    /// Comma-separated PO types every run is limited to (<c>"Regular"</c>, <c>"Capital"</c>);
+    /// blank means both.
+    /// </summary>
+    public string? PoTypes { get; private set; }
+
+    /// <summary>
+    /// Comma-separated PO numbers every run is limited to — whole (<c>26-27/TE/NF1/000190</c>) or bare
+    /// running number; blank means every eligible PO.
+    /// </summary>
+    public string? PoNumbers { get; private set; }
 
     public bool DryRun { get; private set; }
 
@@ -117,6 +133,16 @@ public sealed class PoGrnAutomationConfig
             Sites = NormaliseSites(update.Sites);
         }
 
+        if (update.PoTypes is not null)
+        {
+            PoTypes = NormalisePoTypes(update.PoTypes);
+        }
+
+        if (update.PoNumbers is not null)
+        {
+            PoNumbers = NormalisePoNumbers(update.PoNumbers);
+        }
+
         if (update.MaxPosPerRun is { } ceiling)
         {
             if (ceiling <= 0)
@@ -169,6 +195,67 @@ public sealed class PoGrnAutomationConfig
             ? []
             : [.. Sites.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse)];
 
+    /// <summary>The saved PO types; empty means both.</summary>
+    public IReadOnlyList<PoGrnType> PoTypeList() =>
+        string.IsNullOrWhiteSpace(PoTypes)
+            ? []
+            : [.. SplitList(PoTypes).Select(value => Enum.Parse<PoGrnType>(value, ignoreCase: true))];
+
+    /// <summary>The saved PO numbers; empty means every eligible PO.</summary>
+    public IReadOnlyList<string> PoNumberList() =>
+        string.IsNullOrWhiteSpace(PoNumbers) ? [] : SplitList(PoNumbers);
+
+    private static List<string> SplitList(string csv) =>
+        [.. csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    private static string? NormalisePoTypes(IReadOnlyList<string> types)
+    {
+        var parsed = new List<PoGrnType>();
+
+        foreach (var value in types.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!Enum.TryParse(value.Trim(), ignoreCase: true, out PoGrnType type)
+                || !Enum.IsDefined(type)
+                || int.TryParse(value.Trim(), out _))
+            {
+                throw new DomainException(
+                    $"'{value}' is not a PO type. Expected {string.Join(" and/or ", Enum.GetNames<PoGrnType>())}.");
+            }
+
+            if (!parsed.Contains(type))
+            {
+                parsed.Add(type);
+            }
+        }
+
+        // Every type named is the same as none: store "both" one way only.
+        return parsed.Count == 0 || parsed.Count == Enum.GetValues<PoGrnType>().Length
+            ? null
+            : string.Join(", ", parsed);
+    }
+
+    private static string? NormalisePoNumbers(string numbers)
+    {
+        var parsed = new List<string>();
+
+        foreach (var number in SplitList(numbers))
+        {
+            if (!parsed.Contains(number, StringComparer.OrdinalIgnoreCase))
+            {
+                parsed.Add(number);
+            }
+        }
+
+        var normalised = parsed.Count == 0 ? null : string.Join(", ", parsed);
+
+        if (normalised is { Length: > PoNumbersMaxLength })
+        {
+            throw new DomainException($"{nameof(PoNumbers)} must be at most {PoNumbersMaxLength} characters.");
+        }
+
+        return normalised;
+    }
+
     private static string? NormaliseSites(string sites)
     {
         if (string.IsNullOrWhiteSpace(sites))
@@ -213,6 +300,12 @@ public sealed record PoGrnAutomationConfigUpdate
 
     /// <summary>Comma-separated site ids; blank clears the list.</summary>
     public string? Sites { get; init; }
+
+    /// <summary><c>Regular</c> and/or <c>Capital</c>; an empty list clears the limit (both types).</summary>
+    public IReadOnlyList<string>? PoTypes { get; init; }
+
+    /// <summary>Comma-separated PO numbers; blank clears the limit (every eligible PO).</summary>
+    public string? PoNumbers { get; init; }
 
     public bool? DryRun { get; init; }
 

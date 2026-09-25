@@ -20,18 +20,32 @@ in [`.claude/context/po-to-grn-decisions.md`](../../../.claude/context/po-to-grn
 | Tests | `tests/*/Flows/PoToGrn/` | unit tests (classifier, pricing, payload, settings, service) and API tests |
 | SQL seed | `deploy/sql/flows/po-to-grn/005_SeedPoGrnAutomation.sql` | restores the settings row |
 
-## The two APIs
+## The APIs
 
-Both take the agent's inbound API key in `X-Automation-Api-Key` (value =
-`AutomationAgent:Host:InboundApiKey`). There is no ERP-login access yet — the dashboard section comes
-later.
+Every API takes the agent's inbound API key in `X-Automation-Api-Key` (value =
+`AutomationAgent:Host:InboundApiKey`), so no ERP login is needed. The settings API also accepts an
+ERP bearer token (for a future dashboard screen): a token caller is checked against Role Management
+form **011171** (`I` to view, `E` to change) and stamped as "updated by"; an API-key caller is
+stamped `api-key`.
 
-### Settings — `GET` / `PUT /api/automation/grn-automation`
+### Settings — `/api/automation/grn-automation` (one row for the whole flow)
+
+| Method | Route | Body | Right (token callers) |
+|---|---|---|---|
+| GET | `/api/automation/grn-automation` | – | `I` |
+| PUT | `/api/automation/grn-automation` | general settings, below | `E` |
+| PUT | `/api/automation/grn-automation/enabled` | `{ "enabled": true }` — the master switch; off ⇒ every run is refused 409 | `E` |
+| PUT | `/api/automation/grn-automation/po-types` | `{ "poTypes": ["Regular"] }` — `Regular` and/or `Capital`; `[]` = both. Anything else (Service too) is a 400 | `E` |
+| PUT | `/api/automation/grn-automation/po-numbers` | `{ "poNumbers": "26-27/TE/NF1/000190" }` — comma-separated whole or bare numbers; `""` = every eligible PO | `E` |
+
+The saved PO types and PO numbers limit **every** run — Run, API caller and scheduler — until
+cleared. A trigger request that names its own `poTypes` / `poIds` / `poNumbers` overrides them for
+that run only. Every PUT answers with the whole settings row.
 
 ```jsonc
-// PUT: every field optional; an absent field is left as it is
+// PUT /api/automation/grn-automation: every field optional; an absent field is left as it is
 {
-  "isActive": true,                 // master switch; off ⇒ every run is refused 409
+  "isActive": true,                 // same switch as /enabled
   "receiptMode": "Complete",        // Complete | Partial — see below
   "invoiceNumber": "INV-2026-09",   // stamped on every GRN; editable; blank stops runs
   "runMode": "Both",                // Api (PO-based) | Timer | Both
@@ -39,15 +53,17 @@ later.
   "clearScheduleTime": false,
   "sites": "1, 2, 4",               // blank ⇒ AutomationAgent:PoToGrn:Sites
   "dryRun": false,                  // what the scheduler's run does
-  "maxPosPerRun": 25,
-  "updatedBy": "postman"
+  "maxPosPerRun": 25
 }
 ```
+
+Refusals: `401` neither the API key nor a valid ERP token · `403` a token user whose role lacks
+`I`/`E` on form 011171 · `400` bad value · `503` no usable automation database.
 
 ### Trigger — `POST /api/automation/po-to-grn[?trigger=manual|timer|api]`
 
 ```jsonc
-{                                   // every field optional; {} = every eligible PO
+{                                   // every field optional; {} = every eligible PO within the saved limits
   "poNumbers": ["26-27/PR/NF1/000012"], // or the bare "000012"; a bare number fitting two POs is a 400
   "poIds": [101],                   // POHAUTOID
   "poTypes": ["Regular", "Capital"],
@@ -87,6 +103,11 @@ named POs that were not eligible.
   - **Complete**: any such line ⇒ the whole PO is skipped.
   - **Partial**: only clean lines are put on the GRN; the rest stay pending on the PO for a person.
     Such a PO is looked at again, and noted again, on every run until a person receives those lines.
+- **Don't trust `pendinggrniuom` from call 6. The ERP always sends 0.** Its `GRNRepository` reads
+  the SP column under a lowercase key that Dapper doesn't match, so the value comes back 0. `GrnPendingQuantity`
+  rebuilds it from the line's own PO IUOM columns (ordered − received − short-closed, plus rejected
+  when the PUOM figure shows the ERP adds rejections back), and uses the ERP's value whenever it is
+  non-zero. The GRN quantity rule does not change: it is still the full pending quantity.
 - **Tax rows must travel with every line.** The ERP raises the PO's received quantity
   (`CSP_XGRNDTL_UpdatePOQTY`) only when tax rows were inserted. A GRN without them leaves the PO
   looking unreceived and the next run would receive it again — so the builder refuses to send one.
@@ -116,7 +137,10 @@ failed. There is no history API yet.
 
 1. `dotnet ef database update -p src/NewHorizon.Automation.Infrastructure -s src/NewHorizon.Automation.Worker`
 2. Start the agent (publish to `run/`, see CLAUDE.md).
-3. `PUT /api/automation/grn-automation` `{"invoiceNumber":"INV-TEST","receiptMode":"Complete","isActive":true}`
-4. `POST /api/automation/po-to-grn` `{"dryRun":true}` — check which POs it would receive and why others are skipped.
+3. With the `X-Automation-Api-Key` header on every call:
+   `PUT /api/automation/grn-automation` `{"invoiceNumber":"INV-TEST","receiptMode":"Complete"}`, then
+   `PUT /api/automation/grn-automation/enabled` `{"enabled":true}`. Optionally limit it:
+   `PUT …/po-types` `{"poTypes":["Regular"]}` and `PUT …/po-numbers` `{"poNumbers":"<one PO>"}`.
+4. `POST /api/automation/po-to-grn` (API key) `{"dryRun":true}` — check which POs it would receive and why others are skipped.
 5. `POST /api/automation/po-to-grn` `{"poNumbers":["<one PO>"]}` — then open the ERP's GRN list: the
    GRN is there, unauthorised, at the pending quantity; running step 5 again finds nothing for that PO.

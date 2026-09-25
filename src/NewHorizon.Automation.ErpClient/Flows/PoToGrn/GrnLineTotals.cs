@@ -56,8 +56,8 @@ internal sealed class GrnLineTotals
         ArgumentNullException.ThrowIfNull(line);
         ArgumentNullException.ThrowIfNull(taxTemplate);
 
-        var quantityPuom = line.Number("pendinggrnpuom");
-        var quantityIuom = line.Number("pendinggrniuom");
+        var quantityPuom = GrnPendingQuantity.PendingPuom(line);
+        var quantityIuom = GrnPendingQuantity.PendingIuom(line);
 
         var basicPrice = line.Number("basicprice");
         var itemValue = basicPrice * quantityPuom;

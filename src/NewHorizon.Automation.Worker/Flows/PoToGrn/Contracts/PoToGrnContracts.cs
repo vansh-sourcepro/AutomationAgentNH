@@ -11,6 +11,8 @@ public sealed record GrnAutomationConfigResponse(
     string ReceiptMode,
     string? InvoiceNumber,
     string? Sites,
+    IReadOnlyList<string> PoTypes,
+    string? PoNumbers,
     bool DryRun,
     int? MaxPosPerRun,
     DateOnly? LastScheduledRunDate,
@@ -28,7 +30,6 @@ public sealed record GrnAutomationConfigResponse(
 /// <param name="ReceiptMode"><c>Complete</c> or <c>Partial</c>.</param>
 /// <param name="InvoiceNumber">Stamped on every GRN. Blank clears it, which stops runs.</param>
 /// <param name="Sites">Comma-separated site ids; blank clears the list.</param>
-/// <param name="UpdatedBy">Who made the change — an API-key caller has no login to read it from.</param>
 public sealed record UpdateGrnAutomationRequest(
     bool? IsActive = null,
     string? RunMode = null,
@@ -39,8 +40,25 @@ public sealed record UpdateGrnAutomationRequest(
     string? Sites = null,
     bool? DryRun = null,
     int? MaxPosPerRun = null,
-    bool ClearMaxPosPerRun = false,
-    string? UpdatedBy = null);
+    bool ClearMaxPosPerRun = false);
+
+/// <summary>The master on/off switch: <c>PUT /api/automation/grn-automation/enabled</c>.</summary>
+public sealed record SetGrnAutomationEnabledRequest(bool Enabled);
+
+/// <summary>
+/// Which PO types every run is limited to: <c>PUT /api/automation/grn-automation/po-types</c>.
+/// </summary>
+/// <param name="PoTypes"><c>Regular</c> and/or <c>Capital</c>; empty means both.</param>
+public sealed record SetGrnPoTypesRequest(IReadOnlyList<string>? PoTypes);
+
+/// <summary>
+/// Which POs every run is limited to: <c>PUT /api/automation/grn-automation/po-numbers</c>.
+/// </summary>
+/// <param name="PoNumbers">
+/// Comma-separated whole (<c>26-27/TE/NF1/000190</c>) or bare running numbers; blank means every
+/// eligible PO.
+/// </param>
+public sealed record SetGrnPoNumbersRequest(string? PoNumbers);
 
 /// <summary>
 /// The body of <c>POST /api/automation/po-to-grn</c>. Every field optional: an empty body receives

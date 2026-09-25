@@ -28,6 +28,12 @@ ERP APIs only, runs outside the job engine, ERP bookkeeping is what prevents dup
   (`CSP_XPOHead_GetPOSearch`, mode `DIS`). Each line already carries the item-master flags
   `mimbchreqd`, `miminwdreq`, `mimheatreq`, `mimitmsrreqd`, `mimmfgreq` (from `MITMMAST`), so the skip rule
   needs no extra call.
+- **`pendinggrniuom` from that call is always 0** (found 2026-09-25 on PO 26-27/TE/NF1/000190: PUOM 10,
+  IUOM 0). The SP returns `PEND_GRN_QTY_IUOM` correctly, but `GRNRepository.cs` reads it as
+  `"pend_grn_qty_iuom"` (lines 223, 412, 1455), and Dapper's row lookup is case-sensitive → null → 0.
+  The agent rebuilds it from the row's `poiuomqty − poiuomrcvd − poiuomsc (+ poiuomrej)` in
+  `GrnPendingQuantity`, and uses the ERP's value whenever it is non-zero. Reported fix for the ERP team:
+  change the key to `"PEND_GRN_QTY_IUOM"`. Don't remove the fallback until that ships.
 - Create: `POST inventory/grn/create` (`GRNDataModel`). The number comes back only in `message`:
   `GRNCreated#FY/grp/site/no#autoId`; `data` is empty.
 - **The PO's received quantity is updated only when tax rows are posted** (`insertRateStructureDetail`
@@ -41,5 +47,11 @@ ERP APIs only, runs outside the job engine, ERP bookkeeping is what prevents dup
 **Why:** these decide which POs the agent may touch and what it types into fields a storekeeper normally fills.
 
 **How to apply:** don't add an authorise step and don't relax the skip rule without a new confirmation
-here. Scope confirmed 2026-09-24: backend only for now — two APIs (settings, trigger), inbound API
-key only; no WebApp2 work yet. Implementation: [docs/flows/po-to-grn/README.md](../../docs/flows/po-to-grn/README.md). Related: [autoshop-chain-ownership.md](autoshop-chain-ownership.md) (same "agent's scope" principle).
+here. Scope confirmed 2026-09-24: backend only for now, no WebApp2 work yet. **Superseded
+2026-09-25 for the settings API:** it keeps **one row** for the whole flow, with separate routes
+for the master switch (`/enabled`), the PO types (`/po-types`, Regular/Capital only) and a
+PO-number limit (`/po-numbers`). The saved types and numbers apply to every run until cleared.
+Auth: the user does **not** want an ERP login for these — the inbound API key works on every
+PO → GRN API. An ERP bearer token is also accepted on the settings API (for a future screen) and
+is then checked against Role Management form **011171** (reused on purpose; no separate GRN form).
+The trigger stays API-key only. Implementation: [docs/flows/po-to-grn/README.md](../../docs/flows/po-to-grn/README.md). Related: [autoshop-chain-ownership.md](autoshop-chain-ownership.md) (same "agent's scope" principle).

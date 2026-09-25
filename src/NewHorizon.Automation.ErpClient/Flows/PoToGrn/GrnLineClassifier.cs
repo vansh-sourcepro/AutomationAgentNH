@@ -43,7 +43,7 @@ internal static class GrnLineClassifier
         }
 
         var pending = lines
-            .Where(line => line.Number("pendinggrnpuom") > 0m && line.Number("pendinggrniuom") > 0m)
+            .Where(line => GrnPendingQuantity.PendingPuom(line) > 0m && GrnPendingQuantity.PendingIuom(line) > 0m)
             .ToList();
 
         if (pending.Count == 0)
@@ -53,7 +53,8 @@ internal static class GrnLineClassifier
             var sample = lines.Count == 0
                 ? string.Empty
                 : $" (e.g. item {lines[0].Text("itmcode").Trim()}: pendinggrnpuom={lines[0].Text("pendinggrnpuom", "missing")}, "
-                    + $"pendinggrniuom={lines[0].Text("pendinggrniuom", "missing")})";
+                    + $"pendinggrniuom={lines[0].Text("pendinggrniuom", "missing")}, "
+                    + $"IUOM pending from PO columns={GrnPendingQuantity.PendingIuom(lines[0])})";
 
             return new GrnLineSelection(
                 [],
