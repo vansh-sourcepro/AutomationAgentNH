@@ -112,6 +112,7 @@ flow. A flow may use the shared code; **a flow never references another flow's f
 | Flow | Status | Docs |
 |---|---|---|
 | **Indent → PO** (Regular, Capital, Service) | live, outside the job engine | [`docs/flows/indent-to-po/README.md`](docs/flows/indent-to-po/README.md) — read it before touching `Flows/IndentToPo/` |
+| **Issue to Shop Floor** (SJO-, Work-Order- or Sales-OAF-wise) | built, outside the job engine; not yet run against the live ERP | [`docs/flows/issue-to-shop-floor/README.md`](docs/flows/issue-to-shop-floor/README.md) |
 | **AutoShop cycle** | live, through the job engine | described above; its definitions stay in `Application/Workflows/Definitions/` |
 
 ```

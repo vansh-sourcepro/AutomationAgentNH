@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace NewHorizon.Automation.ErpClient.Flows.IndentToPo;
+namespace NewHorizon.Automation.ErpClient;
 
 /// <summary>
 /// Tolerant readers for the ERP's JSON rows.

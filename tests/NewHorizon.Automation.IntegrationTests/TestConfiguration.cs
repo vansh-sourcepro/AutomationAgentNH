@@ -24,5 +24,11 @@ public static class TestConfiguration
         ["AutomationAgent:Defaults:ParallelWorkers"] = "4",
         ["AutomationAgent:Defaults:MaxRetry"] = "3",
         ["AutomationAgent:Serilog:MinimumLevel"] = "Warning",
+
+        // The shipped appsettings.json carries this installation's Issue To / Issue By. Blanked here so
+        // the Issue to Shop Floor endpoint tests exercise the "not configured" refusal and never reach
+        // for an ERP the test host does not have.
+        ["AutomationAgent:IssueToShopFloor:IssueTo"] = "",
+        ["AutomationAgent:IssueToShopFloor:IssueBy"] = "",
     };
 }

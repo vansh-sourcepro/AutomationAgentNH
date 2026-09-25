@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.ErpClient.Flows.IndentToPo;
+using NewHorizon.Automation.UnitTests.Erp;
 
 namespace NewHorizon.Automation.UnitTests.Flows.IndentToPo;
 

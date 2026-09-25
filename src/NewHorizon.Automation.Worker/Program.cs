@@ -14,6 +14,7 @@ using NewHorizon.Automation.Worker.Configuration;
 using NewHorizon.Automation.Worker.Diagnostics;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IndentToPo;
+using NewHorizon.Automation.Worker.Flows.IssueToShopFloor;
 using NewHorizon.Automation.Worker.Logging;
 using NewHorizon.Automation.Worker.Services;
 using Serilog;
@@ -262,6 +263,7 @@ try
 
     // Each automation flow maps its own endpoints and applies its own database/JWT gates.
     app.MapIndentToPoEndpoints(databaseConfigured, database.Usable, inboundJwt.IsConfigured);
+    app.MapIssueToShopFloorEndpoints();
 
     // The startup verdict on the database, logged after the host is built so it reaches the
     // configured sinks rather than only the bootstrap console.
