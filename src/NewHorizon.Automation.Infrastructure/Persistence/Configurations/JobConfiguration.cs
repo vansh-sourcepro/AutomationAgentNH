@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using NewHorizon.Automation.Application.Workflows.Definitions;
-using NewHorizon.Automation.Domain.Flows.IndentToPo;
 using NewHorizon.Automation.Domain.Jobs;
 
 namespace NewHorizon.Automation.Infrastructure.Persistence.Configurations;
@@ -53,17 +52,16 @@ public sealed class JobConfiguration : IEntityTypeConfiguration<Job>
             .HasForeignKey(step => step.JobId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Provenance. Both are NoAction rather than Cascade: deleting a run or a conversion must
-        // never silently take the execution history with it — the history is the point.
-        builder.HasOne<IndentPoConversion>()
-            .WithMany()
-            .HasForeignKey(job => job.ConversionId)
-            .OnDelete(DeleteBehavior.NoAction);
-
+        // Provenance: deleting a run must never silently take the execution history with it — the history is the point.
         builder.HasOne<AutomationRun>()
             .WithMany()
             .HasForeignKey(job => job.RunId)
             .OnDelete(DeleteBehavior.NoAction);
+
+        // Logical reference to the conversion row (IndentPoConversion, IssueToShopFloorConversion, etc.).
+        // Kept without a foreign key constraint so the single ConversionId column and the
+        // UX_AutomationJob_LiveIndentConversion index serve all conversion workflows.
+        builder.Property(job => job.ConversionId);
 
         // Claiming order: highest priority first, oldest first within a priority. NotBeforeUtc is
         // included so the backoff filter is served by the same index rather than a lookup per row.

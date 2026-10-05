@@ -261,6 +261,19 @@ public sealed class Job
         RunId = runId;
     }
 
+    /// <summary>
+    /// Links this job to a run when the workflow does not use IndentPoConversion.
+    /// </summary>
+    public void LinkToRun(Guid runId)
+    {
+        if (runId == Guid.Empty)
+        {
+            throw new DomainException($"Job {Id} cannot be linked to an empty run id.");
+        }
+
+        RunId = runId;
+    }
+
     // ---- transitions -------------------------------------------------------
 
     /// <summary>Pending → Running. Only a pending job can be claimed.</summary>

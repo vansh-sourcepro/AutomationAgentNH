@@ -37,7 +37,9 @@ public sealed class ErpUserOrApiKeyFilter : IEndpointFilter
             return await next(context);
         }
 
-        if (context.HttpContext.Request.Headers.TryGetValue(ApiKeyFilter.HeaderName, out var presented))
+        if (context.HttpContext.Request.Headers.TryGetValue(ApiKeyFilter.HeaderName, out var presented)
+            || context.HttpContext.Request.Query.TryGetValue("apiKey", out presented)
+            || context.HttpContext.Request.Query.TryGetValue("api_key", out presented))
         {
             var candidate = Encoding.UTF8.GetBytes(presented.ToString());
 

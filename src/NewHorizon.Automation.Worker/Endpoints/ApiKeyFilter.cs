@@ -33,7 +33,9 @@ public sealed class ApiKeyFilter : IEndpointFilter
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
-        if (!context.HttpContext.Request.Headers.TryGetValue(HeaderName, out var presented))
+        if (!context.HttpContext.Request.Headers.TryGetValue(HeaderName, out var presented)
+            && !context.HttpContext.Request.Query.TryGetValue("apiKey", out presented)
+            && !context.HttpContext.Request.Query.TryGetValue("api_key", out presented))
         {
             return Results.Problem(
                 $"The {HeaderName} header is required.",

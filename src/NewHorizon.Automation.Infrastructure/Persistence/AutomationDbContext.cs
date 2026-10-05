@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NewHorizon.Automation.Domain.Configuration;
 using NewHorizon.Automation.Domain.Errors;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.IssueToShopFloor;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.Domain.Logging;
 
@@ -40,6 +41,12 @@ public sealed class AutomationDbContext : DbContext
 
     /// <summary>One indent type's automation settings — run mode, daily schedule, target sites. Three rows.</summary>
     public DbSet<IndentPoAutomationConfig> IndentPoAutomationConfigs => Set<IndentPoAutomationConfig>();
+
+    /// <summary>One SJO, WO, or OAF document case for Issue to Shop Floor.</summary>
+    public DbSet<IssueToShopFloorConversion> IssueToShopFloorConversions => Set<IssueToShopFloorConversion>();
+
+    /// <summary>Detailed outcome of an Issue to Shop Floor execution attempt.</summary>
+    public DbSet<IssueToShopFloorOutcome> IssueToShopFloorOutcomes => Set<IssueToShopFloorOutcome>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

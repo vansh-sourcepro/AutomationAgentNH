@@ -36,6 +36,7 @@ public static class IssueToShopFloorModule
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapIssueToShopFloorApi();
+        app.MapIssueToShopFloorHistoryEndpoints();
 
         return app;
     }

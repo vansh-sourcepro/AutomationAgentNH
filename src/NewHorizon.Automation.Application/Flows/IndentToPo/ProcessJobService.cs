@@ -286,17 +286,7 @@ public sealed class ProcessJobService : IProcessJobService, IIndentPoTracker
         var running = job.Steps.FirstOrDefault(step => step.Status is StepStatus.Running);
         running?.Fail(now, requestPayload: null, responsePayload: null);
 
-        // Technical (transient) errors are recoverable — Failed, so retry/resume can pick them back
-        // up. A business-rule refusal is not: retrying without the underlying data changing just
-        // reproduces the same refusal, so it goes to the terminal Skipped status instead.
-        if (transient)
-        {
-            job.Fail(now);
-        }
-        else
-        {
-            job.Skip(now);
-        }
+        job.Fail(now);
 
         await _jobs.SaveAsync(job, cancellationToken);
 

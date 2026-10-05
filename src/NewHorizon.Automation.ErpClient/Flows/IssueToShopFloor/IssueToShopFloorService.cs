@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Erp;
+using NewHorizon.Automation.Application.Flows.IssueToShopFloor;
+using NewHorizon.Automation.Domain.Flows.IssueToShopFloor;
 using NewHorizon.Automation.ErpClient.Authentication;
 
 namespace NewHorizon.Automation.ErpClient.Flows.IssueToShopFloor;
@@ -75,6 +77,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
     private readonly IssueToShopFloorOptions _options;
     private readonly IClock _clock;
     private readonly ILogger<IssueToShopFloorService> _logger;
+    private readonly IIssueToShopFloorTracker _tracker;
 
     public IssueToShopFloorService(
         IHttpClientFactory httpClientFactory,
@@ -82,7 +85,8 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
         IOptions<ErpEndpointOptions> sharedEndpoints,
         IOptions<IssueToShopFloorOptions> options,
         IClock clock,
-        ILogger<IssueToShopFloorService> logger)
+        ILogger<IssueToShopFloorService> logger,
+        IIssueToShopFloorTracker? tracker = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(sharedEndpoints);
@@ -94,6 +98,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
         _options = options.Value;
         _clock = clock;
         _logger = logger;
+        _tracker = tracker ?? NullIssueToShopFloorTracker.Instance;
     }
 
     private IssueToShopFloorErpPaths Endpoints => _options.Endpoints;
@@ -110,179 +115,284 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
         }
 
         var run = new Run(source, documentNumber, dryRun);
+        bool shouldTrack = !dryRun && _tracker.IsEnabled;
 
-        if (!DocumentNumberSelection.TryParse(documentNumber, out var selection, out var parseError))
+        async Task<IssueToShopFloorResult> RefuseAndTrackAsync(IssueToShopFloorResult refusalResult)
         {
-            return run.Refuse("DocumentNumber", parseError!);
-        }
-
-        if (source == IssueSource.Sjo && _options.Sites.Count == 0)
-        {
-            return run.Refuse(
-                "Configuration",
-                $"No sites are configured to look SJOs up in. Set {IssueToShopFloorOptions.SectionName}:Sites.");
-        }
-
-        if (string.IsNullOrWhiteSpace(_options.IssueTo) || string.IsNullOrWhiteSpace(_options.IssueBy))
-        {
-            return run.Refuse(
-                "Configuration",
-                $"The ERP requires 'Issue To' and 'Issue By' on every issue. Set {IssueToShopFloorOptions.SectionName}:IssueTo and :IssueBy.");
-        }
-
-        // 1. Which document, and is it ready to be issued against.
-        var (document, refusal) = source == IssueSource.Sjo
-            ? await ResolveSjoAsync(run, selection!, cancellationToken)
-            : await ResolveWorkOrderOrOafAsync(run, source, selection!, cancellationToken);
-
-        if (refusal is not null)
-        {
-            return refusal;
-        }
-
-        // 2. Where the issue is numbered and raised.
-        var today = _clock.LocalDate;
-        var documentControl = await GetDocumentControlAsync(today, cancellationToken);
-        if (documentControl.Error is not null)
-        {
-            return run.Refuse("IssueNumbering", documentControl.Error);
-        }
-
-        var numbering = documentControl.Defaults!;
-        run.Pass("IssueNumbering", $"Issues are numbered {numbering.FinancialYear}/{numbering.GroupCode}/{numbering.LocationCode}.");
-
-        // 3. Work Allocation: stock reserved for the document and not yet issued, in warehouses the agent may use.
-        var userId = await _tokenProvider.GetUserIdAsync(cancellationToken);
-        var warehouses = await GetAllocatedWarehousesAsync(source, document!.Id, numbering.LocationId, userId, cancellationToken);
-        if (warehouses.Count == 0)
-        {
-            return run.Refuse(
-                "WorkAllocation",
-                $"No allocated stock is left to issue for {source.Noun()} {document.FullNumber}. Work Allocation has not been done, "
-                + "everything allocated has already been issued, or the agent's ERP user has no rights to the allocated "
-                + $"warehouses for Issue to Shop Floor (transaction {_options.WarehouseTransaction}).");
-        }
-
-        run.Pass("WorkAllocation", $"Allocated warehouse(s): {string.Join(", ", warehouses.Select(wh => wh.Code))}.");
-
-        // 4. SJO-wise only: the ERP's own verdict, the Issue screen's SJO validation. Work Order and
-        // Sales OAF already came through the equivalent validation when they were found.
-        if (document.Sjo is { } sjo)
-        {
-            if (!await IsSjoOfferedForIssueAsync(sjo, cancellationToken))
+            if (shouldTrack)
             {
-                return run.Refuse(
-                    "ErpEligibility",
-                    $"The ERP does not offer SJO {sjo.FullNumber} for Issue to Shop Floor: its Work Order is not authorised, "
-                    + "or nothing is left pending to issue.");
+                var checksJson = JsonSerializer.Serialize(refusalResult.Checks, SerializerOptions);
+                var shortagesJson = refusalResult.Shortages.Count > 0 ? JsonSerializer.Serialize(refusalResult.Shortages, SerializerOptions) : null;
+                await _tracker.CompleteExecutionAsync(
+                    "Refused",
+                    issueNumber: null,
+                    lineCount: 0,
+                    totalQuantity: 0,
+                    refusalResult.Reason,
+                    checksJson,
+                    shortagesJson,
+                    linesJson: null,
+                    cancellationToken);
+            }
+            return refusalResult;
+        }
+
+        if (shouldTrack)
+        {
+            await _tracker.StartExecutionAsync(
+                source.ToString(),
+                documentNumber,
+                documentId: 0,
+                siteId: 0,
+                siteCode: null,
+                cancellationToken);
+        }
+
+        try
+        {
+            if (!DocumentNumberSelection.TryParse(documentNumber, out var selection, out var parseError))
+            {
+                return await RefuseAndTrackAsync(run.Refuse("DocumentNumber", parseError!));
             }
 
-            run.Pass("ErpEligibility", "The ERP offers the SJO for Issue to Shop Floor.");
-        }
+            if (source == IssueSource.Sjo && _options.Sites.Count == 0)
+            {
+                return await RefuseAndTrackAsync(run.Refuse(
+                    "Configuration",
+                    $"No sites are configured to look SJOs up in. Set {IssueToShopFloorOptions.SectionName}:Sites."));
+            }
 
-        // 5. What to issue, and from where.
-        var warehouseIds = string.Join(',', warehouses.Select(wh => wh.Id.ToString(CultureInfo.InvariantCulture)));
-        var items = (await GetPendingItemsAsync(source, document.Id, warehouseIds, cancellationToken))
-            .Where(item => item.QuantityToIssue > 0)
-            .ToList();
+            if (string.IsNullOrWhiteSpace(_options.IssueTo) || string.IsNullOrWhiteSpace(_options.IssueBy))
+            {
+                return await RefuseAndTrackAsync(run.Refuse(
+                    "Configuration",
+                    $"The ERP requires 'Issue To' and 'Issue By' on every issue. Set {IssueToShopFloorOptions.SectionName}:IssueTo and :IssueBy."));
+            }
 
-        if (items.Count == 0)
-        {
-            return run.Refuse("PendingItems", $"Nothing is pending to issue for {source.Noun()} {document.FullNumber}.");
-        }
+            if (shouldTrack)
+            {
+                await _tracker.EnterStageAsync(IssueToShopFloorStages.Discovery, IssueToShopFloorTasks.ValidateDocument, cancellationToken);
+            }
 
-        var barcoded = _options.BarcodeScanningEnabled
-            ? items.Where(item => item.BarcodeRequired).Select(item => item.ItemCode).Distinct().ToList()
-            : [];
-        if (barcoded.Count > 0)
-        {
-            return run.Refuse(
+            // 1. Which document, and is it ready to be issued against.
+            var (document, refusal) = source == IssueSource.Sjo
+                ? await ResolveSjoAsync(run, selection!, cancellationToken)
+                : await ResolveWorkOrderOrOafAsync(run, source, selection!, cancellationToken);
+
+            if (refusal is not null)
+            {
+                return await RefuseAndTrackAsync(refusal);
+            }
+
+            if (shouldTrack)
+            {
+                await _tracker.EnterStageAsync(IssueToShopFloorStages.DocumentControl, IssueToShopFloorTasks.VerifyIssueNumbering, cancellationToken);
+            }
+
+            // 2. Where the issue is numbered and raised.
+            var today = _clock.LocalDate;
+            var documentControl = await GetDocumentControlAsync(today, cancellationToken);
+            if (documentControl.Error is not null)
+            {
+                return await RefuseAndTrackAsync(run.Refuse("IssueNumbering", documentControl.Error));
+            }
+
+            var numbering = documentControl.Defaults!;
+            run.Pass("IssueNumbering", $"Issues are numbered {numbering.FinancialYear}/{numbering.GroupCode}/{numbering.LocationCode}.");
+
+            if (shouldTrack)
+            {
+                await _tracker.EnterStageAsync(IssueToShopFloorStages.WorkAllocation, IssueToShopFloorTasks.CheckWorkAllocation, cancellationToken);
+            }
+
+            // 3. Work Allocation: stock reserved for the document and not yet issued, in warehouses the agent may use.
+            var userId = await _tokenProvider.GetUserIdAsync(cancellationToken);
+            var warehouses = await GetAllocatedWarehousesAsync(source, document!.Id, numbering.LocationId, userId, cancellationToken);
+            if (warehouses.Count == 0)
+            {
+                return await RefuseAndTrackAsync(run.Refuse(
+                    "WorkAllocation",
+                    $"No allocated stock is left to issue for {source.Noun()} {document.FullNumber}. Work Allocation has not been done, "
+                    + "everything allocated has already been issued, or the agent's ERP user has no rights to the allocated "
+                    + $"warehouses for Issue to Shop Floor (transaction {_options.WarehouseTransaction})."));
+            }
+
+            run.Pass("WorkAllocation", $"Allocated warehouse(s): {string.Join(", ", warehouses.Select(wh => wh.Code))}.");
+
+            // 4. SJO-wise only: the ERP's own verdict, the Issue screen's SJO validation. Work Order and
+            // Sales OAF already came through the equivalent validation when they were found.
+            if (document.Sjo is { } sjo)
+            {
+                if (shouldTrack)
+                {
+                    await _tracker.EnterStageAsync(IssueToShopFloorStages.ErpEligibility, IssueToShopFloorTasks.ValidateErpEligibility, cancellationToken);
+                }
+
+                if (!await IsSjoOfferedForIssueAsync(sjo, cancellationToken))
+                {
+                    return await RefuseAndTrackAsync(run.Refuse(
+                        "ErpEligibility",
+                        $"The ERP does not offer SJO {sjo.FullNumber} for Issue to Shop Floor: its Work Order is not authorised, "
+                        + "or nothing is left pending to issue."));
+                }
+
+                run.Pass("ErpEligibility", "The ERP offers the SJO for Issue to Shop Floor.");
+            }
+
+            if (shouldTrack)
+            {
+                await _tracker.EnterStageAsync(IssueToShopFloorStages.PendingItems, IssueToShopFloorTasks.FetchPendingItems, cancellationToken);
+            }
+
+            // 5. What to issue, and from where.
+            var warehouseIds = string.Join(',', warehouses.Select(wh => wh.Id.ToString(CultureInfo.InvariantCulture)));
+            var items = (await GetPendingItemsAsync(source, document.Id, warehouseIds, cancellationToken))
+                .Where(item => item.QuantityToIssue > 0)
+                .ToList();
+
+            if (items.Count == 0)
+            {
+                return await RefuseAndTrackAsync(run.Refuse("PendingItems", $"Nothing is pending to issue for {source.Noun()} {document.FullNumber}."));
+            }
+
+            var barcoded = _options.BarcodeScanningEnabled
+                ? items.Where(item => item.BarcodeRequired).Select(item => item.ItemCode).Distinct().ToList()
+                : [];
+            if (barcoded.Count > 0)
+            {
+                return await RefuseAndTrackAsync(run.Refuse(
+                    "PendingItems",
+                    $"Item(s) {string.Join(", ", barcoded)} must be scanned by barcode on the Issue to Shop Floor screen, "
+                    + $"so the agent cannot issue this {source.Noun()}."));
+            }
+
+            var inwardWiseAllocation = await UsesInwardWiseAllocationAsync(numbering.LocationCode, cancellationToken);
+
+            // Without inward-wise allocation the screen's Fill skips inward-tracked items (onFillData) and a
+            // person picks the inwards in a popup. The agent picks them itself, oldest inward first. With
+            // inward-wise allocation on, Fill takes the ERP's own order, and so does this.
+            var pickInwardsFifo = !inwardWiseAllocation;
+            var fifoItems = pickInwardsFifo ? items.Count(item => item.InwardRequired) : 0;
+
+            run.Pass(
                 "PendingItems",
-                $"Item(s) {string.Join(", ", barcoded)} must be scanned by barcode on the Issue to Shop Floor screen, "
-                + $"so the agent cannot issue this {source.Noun()}.");
-        }
+                fifoItems == 0
+                    ? $"{items.Count} item line(s) pending."
+                    : $"{items.Count} item line(s) pending; {fifoItems} inward-tracked line(s) take the oldest inward first.");
 
-        var inwardWiseAllocation = await UsesInwardWiseAllocationAsync(numbering.LocationCode, cancellationToken);
+            if (shouldTrack)
+            {
+                await _tracker.EnterStageAsync(IssueToShopFloorStages.StockAllocation, IssueToShopFloorTasks.AllocateStock, cancellationToken);
+            }
 
-        // Without inward-wise allocation the screen's Fill skips inward-tracked items (onFillData) and a
-        // person picks the inwards in a popup. The agent picks them itself, oldest inward first. With
-        // inward-wise allocation on, Fill takes the ERP's own order, and so does this.
-        var pickInwardsFifo = !inwardWiseAllocation;
-        var fifoItems = pickInwardsFifo ? items.Count(item => item.InwardRequired) : 0;
+            var stockByItem = new List<(IssueItem Item, IReadOnlyList<StockRow> Stock)>(items.Count);
+            foreach (var item in items)
+            {
+                var stock = await GetStockAsync(item, warehouseIds, inwardWiseAllocation, cancellationToken);
+                stockByItem.Add((item, pickInwardsFifo && item.InwardRequired ? InwardFifo.Order(stock) : stock));
+            }
 
-        run.Pass(
-            "PendingItems",
-            fifoItems == 0
-                ? $"{items.Count} item line(s) pending."
-                : $"{items.Count} item line(s) pending; {fifoItems} inward-tracked line(s) take the oldest inward first.");
+            var allocation = IssueAllocator.Allocate(stockByItem);
+            if (allocation.Shortages.Count > 0)
+            {
+                return await RefuseAndTrackAsync(run.Refuse(
+                    "Stock",
+                    $"{allocation.Shortages.Count} item(s) do not have enough stock in the allocated warehouses; nothing was issued.",
+                    allocation.Shortages));
+            }
 
-        var stockByItem = new List<(IssueItem Item, IReadOnlyList<StockRow> Stock)>(items.Count);
-        foreach (var item in items)
-        {
-            var stock = await GetStockAsync(item, warehouseIds, inwardWiseAllocation, cancellationToken);
-            stockByItem.Add((item, pickInwardsFifo && item.InwardRequired ? InwardFifo.Order(stock) : stock));
-        }
+            run.Pass("Stock", $"Every item is covered: {allocation.Lines.Count} line(s) across {allocation.Lines.Select(line => line.WarehouseCode).Distinct().Count()} warehouse(s).");
 
-        var allocation = IssueAllocator.Allocate(stockByItem);
-        if (allocation.Shortages.Count > 0)
-        {
-            return run.Refuse(
-                "Stock",
-                $"{allocation.Shortages.Count} item(s) do not have enough stock in the allocated warehouses; nothing was issued.",
-                allocation.Shortages);
-        }
+            // Read on a dry run too, so the answer shows the date a real run would send.
+            var (authorisationDate, authorisationDetail) = await GetAuthorisationDateAsync(numbering.LocationId, today, cancellationToken);
+            run.Pass("AuthorisationDate", authorisationDetail);
 
-        run.Pass("Stock", $"Every item is covered: {allocation.Lines.Count} line(s) across {allocation.Lines.Select(line => line.WarehouseCode).Distinct().Count()} warehouse(s).");
+            if (dryRun)
+            {
+                _logger.LogInformation(
+                    "{Source} {DocumentNumber}: dry run — would issue {LineCount} line(s); nothing created.",
+                    source.Noun(),
+                    document.FullNumber,
+                    allocation.Lines.Count);
 
-        // Read on a dry run too, so the answer shows the date a real run would send.
-        var (authorisationDate, authorisationDetail) = await GetAuthorisationDateAsync(numbering.LocationId, today, cancellationToken);
-        run.Pass("AuthorisationDate", authorisationDetail);
+                return run.Ready(allocation.Lines);
+            }
 
-        if (dryRun)
-        {
+            if (shouldTrack)
+            {
+                await _tracker.EnterStageAsync(IssueToShopFloorStages.CreateIssue, IssueToShopFloorTasks.CreateIssueSlip, cancellationToken);
+            }
+
+            // 6. The one write.
+            var header = new IssueHeader(
+                numbering.FinancialYear,
+                numbering.GroupCode,
+                numbering.LocationId,
+                numbering.LocationCode,
+                today,
+                authorisationDate,
+                _options.IssueTo,
+                _options.IssueBy,
+                numbering.AuthorisationRequired,
+                numbering.AutoNumberRequired,
+                numbering.SiteRequired,
+                _options.LocationId,
+                userId,
+                _options.FinFlag,
+                _options.CurrencyCode,
+                _options.CompanyId);
+
+            var remarks = items
+                .GroupBy(item => (item.ItemCode, item.RandomNumber))
+                .ToDictionary(group => group.Key, group => group.First().Remarks);
+
+            var payload = IssuePayloadBuilder.Build(source, header, allocation.Lines, remarks);
+            var issueNumber = await CreateIssueAsync(payload, cancellationToken);
+
             _logger.LogInformation(
-                "{Source} {DocumentNumber}: dry run — would issue {LineCount} line(s); nothing created.",
+                "{Source} {DocumentNumber}: created Issue to Shop Floor {IssueNumber} with {LineCount} line(s).",
                 source.Noun(),
                 document.FullNumber,
+                issueNumber ?? "(number not reported)",
                 allocation.Lines.Count);
 
-            return run.Ready(allocation.Lines);
+            var createdResult = run.Created(issueNumber, allocation.Lines);
+
+            if (shouldTrack)
+            {
+                var checksJson = JsonSerializer.Serialize(createdResult.Checks, SerializerOptions);
+                var linesJson = JsonSerializer.Serialize(createdResult.Lines, SerializerOptions);
+                var totalQty = createdResult.Lines.Sum(l => l.Quantity);
+                await _tracker.CompleteExecutionAsync(
+                    "Created",
+                    issueNumber,
+                    createdResult.Lines.Count,
+                    totalQty,
+                    refusalReason: null,
+                    checksJson,
+                    shortagesJson: null,
+                    linesJson,
+                    cancellationToken);
+            }
+
+            return createdResult;
         }
-
-        // 6. The one write.
-        var header = new IssueHeader(
-            numbering.FinancialYear,
-            numbering.GroupCode,
-            numbering.LocationId,
-            numbering.LocationCode,
-            today,
-            authorisationDate,
-            _options.IssueTo,
-            _options.IssueBy,
-            numbering.AuthorisationRequired,
-            numbering.AutoNumberRequired,
-            numbering.SiteRequired,
-            _options.LocationId,
-            userId,
-            _options.FinFlag,
-            _options.CurrencyCode,
-            _options.CompanyId);
-
-        var remarks = items
-            .GroupBy(item => (item.ItemCode, item.RandomNumber))
-            .ToDictionary(group => group.Key, group => group.First().Remarks);
-
-        var payload = IssuePayloadBuilder.Build(source, header, allocation.Lines, remarks);
-        var issueNumber = await CreateIssueAsync(payload, cancellationToken);
-
-        _logger.LogInformation(
-            "{Source} {DocumentNumber}: created Issue to Shop Floor {IssueNumber} with {LineCount} line(s).",
-            source.Noun(),
-            document.FullNumber,
-            issueNumber ?? "(number not reported)",
-            allocation.Lines.Count);
-
-        return run.Created(issueNumber, allocation.Lines);
+        catch (ErpException erp)
+        {
+            if (shouldTrack)
+            {
+                await _tracker.FailExecutionAsync(erp.LaymanMessage, erp.TechnicalMessage, erp.IsTransient, cancellationToken);
+            }
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (shouldTrack)
+            {
+                await _tracker.FailExecutionAsync(ex.Message, ex.ToString(), transient: false, cancellationToken);
+            }
+            throw;
+        }
     }
 
     // ---- Finding the document -------------------------------------------------------------------

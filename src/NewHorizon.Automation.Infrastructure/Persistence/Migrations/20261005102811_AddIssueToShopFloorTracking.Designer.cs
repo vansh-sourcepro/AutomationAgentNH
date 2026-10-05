@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NewHorizon.Automation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using NewHorizon.Automation.Infrastructure.Persistence;
 namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AutomationDbContext))]
-    partial class AutomationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261005102811_AddIssueToShopFloorTracking")]
+    partial class AddIssueToShopFloorTracking
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -843,6 +846,11 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("NewHorizon.Automation.Domain.Jobs.Job", b =>
                 {
+                    b.HasOne("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoConversion", null)
+                        .WithMany()
+                        .HasForeignKey("ConversionId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("NewHorizon.Automation.Domain.Jobs.AutomationRun", null)
                         .WithMany()
                         .HasForeignKey("RunId")

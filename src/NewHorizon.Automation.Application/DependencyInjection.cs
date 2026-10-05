@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using NewHorizon.Automation.Application.Flows.IndentToPo;
+using NewHorizon.Automation.Application.Flows.IssueToShopFloor;
 using NewHorizon.Automation.Application.Jobs;
 using NewHorizon.Automation.Application.Workflows;
 using NewHorizon.Automation.Application.Workflows.Definitions;
@@ -32,6 +33,7 @@ public static class DependencyInjection
 
         // Each automation flow's database-less defaults. A new flow adds its own line here.
         services.AddIndentToPoDefaults();
+        services.AddIssueToShopFloorDefaults();
 
         return services;
     }
@@ -71,6 +73,7 @@ public static class DependencyInjection
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddIndentToPoTracking();
+        services.AddIssueToShopFloorTracking();
 
         return services;
     }
