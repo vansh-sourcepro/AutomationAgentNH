@@ -214,12 +214,28 @@ public sealed class PoGrnAutomationConfig
 
         foreach (var value in types.Where(value => !string.IsNullOrWhiteSpace(value)))
         {
-            if (!Enum.TryParse(value.Trim(), ignoreCase: true, out PoGrnType type)
-                || !Enum.IsDefined(type)
-                || int.TryParse(value.Trim(), out _))
+            var trimmed = value.Trim();
+            PoGrnType type;
+            if (string.Equals(trimmed, "RP", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "Regular", StringComparison.OrdinalIgnoreCase))
+            {
+                type = PoGrnType.Regular;
+            }
+            else if (string.Equals(trimmed, "CP", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(trimmed, "Capital", StringComparison.OrdinalIgnoreCase))
+            {
+                type = PoGrnType.Capital;
+            }
+            else if (Enum.TryParse(trimmed, ignoreCase: true, out type)
+                && Enum.IsDefined(type)
+                && !int.TryParse(trimmed, out _))
+            {
+                // Enum match
+            }
+            else
             {
                 throw new DomainException(
-                    $"'{value}' is not a PO type. Expected {string.Join(" and/or ", Enum.GetNames<PoGrnType>())}.");
+                    $"'{value}' is not a PO type. Expected Regular (RP) and/or Capital (CP).");
             }
 
             if (!parsed.Contains(type))

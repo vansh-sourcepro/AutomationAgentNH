@@ -24,12 +24,25 @@ public sealed record GrnAutomationConfigResponse(
 
 /// <summary>
 /// A partial update: every field is optional and an absent one is left alone.
+/// <para>
+/// Behaviour when <c>isActive</c> is <c>true</c>:
+/// <list type="bullet">
+/// <item>If <c>scheduleTime</c> is provided — settings are saved and the daily scheduler fires at
+/// that time; nothing runs immediately.</item>
+/// <item>If <c>scheduleTime</c> is omitted / <c>null</c> — settings are saved and the PO → GRN
+/// execution is triggered immediately ("Run Now"). The response includes both the saved config
+/// and the execution results.</item>
+/// </list>
+/// When <c>isActive</c> is <c>false</c> the settings are saved and no run is started.
+/// </para>
 /// </summary>
 /// <param name="RunMode"><c>Api</c> (PO-based), <c>Timer</c> or <c>Both</c>.</param>
-/// <param name="ScheduleTime"><c>HH:mm</c>, local time. Ignored in <c>Api</c> mode.</param>
+/// <param name="ScheduleTime"><c>HH:mm</c>, local time. Omit to trigger immediately.</param>
 /// <param name="ReceiptMode"><c>Complete</c> or <c>Partial</c>.</param>
 /// <param name="InvoiceNumber">Stamped on every GRN. Blank clears it, which stops runs.</param>
 /// <param name="Sites">Comma-separated site ids; blank clears the list.</param>
+/// <param name="PoTypes"><c>Regular</c> and/or <c>Capital</c>; omit / empty means both.</param>
+/// <param name="PoNumbers">Comma-separated PO numbers; omit / blank means every eligible PO.</param>
 public sealed record UpdateGrnAutomationRequest(
     bool? IsActive = null,
     string? RunMode = null,
@@ -40,7 +53,20 @@ public sealed record UpdateGrnAutomationRequest(
     string? Sites = null,
     bool? DryRun = null,
     int? MaxPosPerRun = null,
-    bool ClearMaxPosPerRun = false);
+    bool ClearMaxPosPerRun = false,
+    IReadOnlyList<string>? PoTypes = null,
+    string? PoNumbers = null);
+
+/// <summary>
+/// Unified response for <c>PUT /api/automation/grn-automation</c>.
+/// <para>
+/// <c>Execution</c> is populated only when the settings are saved with <c>isActive = true</c>
+/// and no <c>scheduleTime</c>, causing an immediate "Run Now" trigger.
+/// </para>
+/// </summary>
+public sealed record UpdateGrnAutomationResponse(
+    GrnAutomationConfigResponse Config,
+    ReceivePosResponse? Execution);
 
 /// <summary>The master on/off switch: <c>PUT /api/automation/grn-automation/enabled</c>.</summary>
 public sealed record SetGrnAutomationEnabledRequest(bool Enabled);

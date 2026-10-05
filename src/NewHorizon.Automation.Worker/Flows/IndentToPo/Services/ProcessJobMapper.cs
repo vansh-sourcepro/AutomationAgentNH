@@ -1,6 +1,7 @@
 using NewHorizon.Automation.Application.Flows.IndentToPo;
 using NewHorizon.Automation.Domain.Errors;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.Worker.Contracts;
 using NewHorizon.Automation.Worker.Flows.IndentToPo.Contracts;
@@ -33,6 +34,27 @@ internal static class ProcessJobMapper
             run.StartedAtUtc,
             run.CompletedAtUtc,
             run.DurationMs);
+
+    public static ProcessRunResponse ToResponse(PoGrnRun run) =>
+        new(
+            run.Id,
+            CorrelationId: run.TriggerReference ?? string.Empty,
+            Workflow: "PoToGrn",
+            run.Trigger.ToString(),
+            run.TriggeredBy,
+            run.TriggerReference,
+            Mode: run.ReceiptMode.ToString(),
+            IndentTypes: "PO to GRN",
+            Sites: run.RequestedSites,
+            MaxIndents: null,
+            run.Status.ToString(),
+            IndentsExamined: run.PosExamined,
+            ExecutionsTracked: run.PosExamined,
+            PurchaseOrdersCreated: run.GrnsCreated,
+            run.FailureReason,
+            run.StartedAtUtc,
+            run.CompletedAtUtc,
+            run.CompletedAtUtc.HasValue ? (long?)(run.CompletedAtUtc.Value - run.StartedAtUtc).TotalMilliseconds : null);
 
     /// <summary>
     /// One grid line. The company is passed in rather than read from the row: it is configuration,

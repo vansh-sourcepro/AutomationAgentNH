@@ -1,8 +1,12 @@
 using System.Globalization;
 using System.Security.Claims;
+using NewHorizon.Automation.Application.Abstractions;
+using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.Application.Flows.PoToGrn;
 using NewHorizon.Automation.Domain;
 using NewHorizon.Automation.Domain.Flows.PoToGrn;
+using NewHorizon.Automation.Domain.Jobs;
+using NewHorizon.Automation.ErpClient.Flows.PoToGrn;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.PoToGrn.Contracts;
 
@@ -108,6 +112,11 @@ public static class GrnAutomationEndpoints
     private static async Task<IResult> UpdateAsync(
         UpdateGrnAutomationRequest? request,
         IPoGrnAutomationConfigRepository configs,
+        IPoToGrnService service,
+        IPoGrnHistory history,
+        IClock clock,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
@@ -136,6 +145,12 @@ public static class GrnAutomationEndpoints
             return timeError!;
         }
 
+        // Validate any PoTypes sent inline on this request.
+        if (!TryParsePoTypes(request.PoTypes, out var poTypesForConfig, out var poTypeError))
+        {
+            return poTypeError!;
+        }
+
         var update = new PoGrnAutomationConfigUpdate
         {
             IsActive = request.IsActive,
@@ -148,9 +163,169 @@ public static class GrnAutomationEndpoints
             DryRun = request.DryRun,
             MaxPosPerRun = request.MaxPosPerRun,
             ClearMaxPosPerRun = request.ClearMaxPosPerRun,
+            // PoTypes and PoNumbers can now be set directly from this unified request body.
+            PoTypes = request.PoTypes,
+            PoNumbers = request.PoNumbers,
         };
 
-        return await SaveAsync(update, configs, user, cancellationToken);
+        PoGrnAutomationConfig savedConfig;
+
+        try
+        {
+            savedConfig = await configs.UpdateAsync(update, ActorOf(user), cancellationToken);
+        }
+        catch (DomainException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var configResponse = ToResponse(savedConfig);
+
+        // ── Trigger logic ──────────────────────────────────────────────────────────────
+        // Toggle is OFF → just return the saved config; nothing runs.
+        if (!savedConfig.IsActive)
+        {
+            return Results.Ok(new UpdateGrnAutomationResponse(configResponse, Execution: null));
+        }
+
+        // Toggle is ON + scheduleTime is set → the scheduler will fire at that time; nothing now.
+        if (savedConfig.ScheduleTime.HasValue)
+        {
+            return Results.Ok(new UpdateGrnAutomationResponse(configResponse, Execution: null));
+        }
+
+        // Toggle is ON + no scheduleTime → "Run Now": execute immediately and return results.
+        if (!savedConfig.HasInvoiceNumber)
+        {
+            return Results.Problem(
+                title: "No invoice number is set.",
+                detail: "Set invoiceNumber in the request body before triggering an immediate run.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Resolve the effective filters from the freshly saved config.
+        var effectiveReceiptMode = savedConfig.ReceiptMode;
+        var effectiveSites = savedConfig.SiteIds();
+        var effectivePoTypes = savedConfig.PoTypeList();
+        var effectivePoNumbers = savedConfig.PoNumberList() is { Count: > 0 } saved ? saved : null;
+
+        var sweepRequest = new PoGrnSweepRequest
+        {
+            Sites = effectiveSites.Count > 0 ? effectiveSites : null,
+            PoTypes = effectivePoTypes,
+            PoIds = null,
+            PoNumbers = effectivePoNumbers,
+            ReceiptMode = effectiveReceiptMode,
+            InvoiceNumber = savedConfig.InvoiceNumber,
+            MaxPos = savedConfig.MaxPosPerRun ?? PoToGrnEndpoints.DefaultMaxPos,
+            DryRun = savedConfig.DryRun,
+        };
+
+        await history.StartRunAsync(
+            new StartGrnRunRequest(
+                TriggerSource.Manual,
+                "RunNow",
+                httpContext.TraceIdentifier,
+                effectiveReceiptMode,
+                effectiveSites.Count > 0 ? string.Join(", ", effectiveSites) : null),
+            cancellationToken);
+
+        try
+        {
+            var sweep = await service.ReceiveEligibleAsync(sweepRequest, cancellationToken);
+
+            await history.CompleteRunAsync(cancellationToken);
+            await StampRunAsync(configs, clock, RunStatus.Completed, history.RunId, loggerFactory.CreateLogger(nameof(GrnAutomationEndpoints)), cancellationToken);
+
+            var executionResponse = PoToGrnEndpoints.BuildReceivePosResponse(
+                TriggerSource.Manual, effectiveReceiptMode, effectivePoTypes, history.RunId, sweep);
+
+            // Re-read config so the response stamps (LastTriggeredAtUtc etc.) are fresh.
+            var stamped = await configs.GetAsync(cancellationToken);
+
+            return Results.Ok(new UpdateGrnAutomationResponse(ToResponse(stamped), executionResponse));
+        }
+        catch (ErpException ex)
+        {
+            await history.FailRunAsync(ex.LaymanMessage, CancellationToken.None);
+            await StampRunAsync(configs, clock, RunStatus.Failed, history.RunId, loggerFactory.CreateLogger(nameof(GrnAutomationEndpoints)), CancellationToken.None);
+
+            return Results.Problem(
+                title: ex.LaymanMessage,
+                detail: ex.TechnicalMessage,
+                statusCode: ex.IsTransient
+                    ? StatusCodes.Status503ServiceUnavailable
+                    : StatusCodes.Status400BadRequest);
+        }
+    }
+
+    // Validates PoTypes strings → PoGrnType enum values (shared with PoToGrnEndpoints logic).
+    private static bool TryParsePoTypes(
+        IReadOnlyList<string>? values,
+        out IReadOnlyList<PoGrnType> types,
+        out IResult? error)
+    {
+        types = PoGrnTypes.All;
+        error = null;
+
+        if (values is not { Count: > 0 })
+        {
+            return true;
+        }
+
+        var parsed = new List<PoGrnType>();
+
+        foreach (var value in values)
+        {
+            var trimmed = value?.Trim();
+            PoGrnType type;
+            if (string.Equals(trimmed, "RP", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "Regular", StringComparison.OrdinalIgnoreCase))
+            {
+                type = PoGrnType.Regular;
+            }
+            else if (string.Equals(trimmed, "CP", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(trimmed, "Capital", StringComparison.OrdinalIgnoreCase))
+            {
+                type = PoGrnType.Capital;
+            }
+            else
+            {
+                error = Results.Problem(
+                    $"'{value}' is not a PO type. Expected Regular (RP) and/or Capital (CP).",
+                    statusCode: StatusCodes.Status400BadRequest);
+                return false;
+            }
+
+            if (!parsed.Contains(type))
+            {
+                parsed.Add(type);
+            }
+        }
+
+        types = parsed;
+        return true;
+    }
+
+    /// <summary>Stamps LastRun / LastStatus on the settings row; a stale stamp is not worth a 500.</summary>
+    private static async Task StampRunAsync(
+        IPoGrnAutomationConfigRepository configs,
+        IClock clock,
+        RunStatus status,
+        Guid? runId,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fresh = await configs.GetAsync(cancellationToken);
+            fresh.MarkRun(clock.UtcNow, status, runId);
+            await configs.SaveAsync(fresh, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not stamp the GRN Automation Last Run columns");
+        }
     }
 
     /// <summary>

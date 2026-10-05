@@ -1,10 +1,12 @@
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Erp;
+using NewHorizon.Automation.Application.Flows.IndentToPo;
 using NewHorizon.Automation.Application.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.ErpClient.Flows.PoToGrn;
 using NewHorizon.Automation.Worker.Endpoints;
+using NewHorizon.Automation.Worker.Flows.IndentToPo.Endpoints;
 using NewHorizon.Automation.Worker.Flows.PoToGrn.Contracts;
 
 namespace NewHorizon.Automation.Worker.Flows.PoToGrn.Endpoints;
@@ -17,7 +19,7 @@ public static class PoToGrnEndpoints
 {
     public const string Route = "/api/automation/po-to-grn";
 
-    private const int DefaultMaxPos = 25;
+    internal const int DefaultMaxPos = 25;
 
     public static IEndpointRouteBuilder MapPoToGrnEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -26,6 +28,63 @@ public static class PoToGrnEndpoints
         endpoints.MapPost(Route, ReceiveAsync)
             .WithName("ReceiveAuthorisedPos")
             .AddEndpointFilter<ApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/po-to-grn/history", (
+            IProcessJobService processJobs,
+            IServiceProvider sp,
+            CancellationToken ct,
+            string? trigger,
+            string? status,
+            DateTimeOffset? from,
+            DateTimeOffset? to,
+            int page = 1,
+            int pageSize = 50) => ProcessJobEndpoints.ListRunsAsync(
+                processJobs, sp, ct, module: "po-to-grn", workflow: null, trigger, status, from, to, page, pageSize))
+            .WithName("ListPoToGrnRuns")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/po-to-grn/history/{runId:guid}", (
+            Guid runId,
+            IProcessJobService processJobs,
+            IServiceProvider sp,
+            CancellationToken ct) => ProcessJobEndpoints.GetRunAsync(runId, processJobs, sp, ct))
+            .WithName("GetPoToGrnRun")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/po-to-grn/summary", (
+            IProcessJobService processJobs,
+            IServiceProvider sp,
+            CancellationToken ct,
+            DateTimeOffset? from,
+            DateTimeOffset? to) => ProcessJobEndpoints.GetSummaryAsync(
+                processJobs, sp, ct, module: "po-to-grn", from: from, to: to))
+            .WithName("GetPoToGrnSummary")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/po-to-grn/daily-summary", (
+            IProcessJobService processJobs,
+            IServiceProvider sp,
+            CancellationToken ct,
+            int days = 30) => ProcessJobEndpoints.GetDailyStatsAsync(
+                processJobs, sp, ct, module: "po-to-grn", workflow: null, days: days))
+            .WithName("GetPoToGrnDailySummary")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/runs", (
+            IProcessJobService processJobs,
+            IServiceProvider sp,
+            CancellationToken ct,
+            string? module,
+            string? workflow,
+            string? trigger,
+            string? status,
+            DateTimeOffset? from,
+            DateTimeOffset? to,
+            int page = 1,
+            int pageSize = 50) => ProcessJobEndpoints.ListRunsAsync(
+                processJobs, sp, ct, module, workflow, trigger, status, from, to, page, pageSize))
+            .WithName("ListAllAutomationRuns")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         return endpoints;
     }
@@ -134,7 +193,7 @@ public static class PoToGrnEndpoints
         {
             try
             {
-                return Results.Ok(ToResponse(triggerSource, receiptMode, poTypes, runId: null,
+                return Results.Ok(BuildReceivePosResponse(triggerSource, receiptMode, poTypes, runId: null,
                     await service.ReceiveEligibleAsync(sweepRequest, cancellationToken)));
             }
             catch (ErpException ex)
@@ -159,7 +218,7 @@ public static class PoToGrnEndpoints
             await history.CompleteRunAsync(cancellationToken);
             await StampAsync(configs, clock, RunStatus.Completed, history.RunId, logger, cancellationToken);
 
-            return Results.Ok(ToResponse(triggerSource, receiptMode, poTypes, history.RunId, sweep));
+            return Results.Ok(BuildReceivePosResponse(triggerSource, receiptMode, poTypes, history.RunId, sweep));
         }
         catch (ErpException ex)
         {
@@ -228,10 +287,22 @@ public static class PoToGrnEndpoints
 
         foreach (var value in values)
         {
-            if (!Enum.TryParse(value?.Trim(), ignoreCase: true, out PoGrnType type) || !Enum.IsDefined(type))
+            var trimmed = value?.Trim();
+            PoGrnType type;
+            if (string.Equals(trimmed, "RP", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "Regular", StringComparison.OrdinalIgnoreCase))
+            {
+                type = PoGrnType.Regular;
+            }
+            else if (string.Equals(trimmed, "CP", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(trimmed, "Capital", StringComparison.OrdinalIgnoreCase))
+            {
+                type = PoGrnType.Capital;
+            }
+            else
             {
                 error = Results.Problem(
-                    $"'{value}' is not a PO type. Expected Regular and/or Capital.",
+                    $"'{value}' is not a PO type. Expected Regular (RP) and/or Capital (CP).",
                     statusCode: StatusCodes.Status400BadRequest);
                 return false;
             }
@@ -246,7 +317,7 @@ public static class PoToGrnEndpoints
         return true;
     }
 
-    private static ReceivePosResponse ToResponse(
+    internal static ReceivePosResponse BuildReceivePosResponse(
         TriggerSource trigger,
         GrnReceiptMode receiptMode,
         IReadOnlyList<PoGrnType> poTypes,
