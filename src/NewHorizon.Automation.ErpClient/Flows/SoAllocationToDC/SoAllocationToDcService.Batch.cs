@@ -297,6 +297,12 @@ public sealed partial class SoAllocationToDcService
                         continue;
                     }
 
+                    if (request?.OafNumbers != null && request.OafNumbers.Count > 0 &&
+                        !request.OafNumbers.Any(n => MatchesDocNumber(n, oaf.OafNumber)))
+                    {
+                        continue;
+                    }
+
                     if (!string.IsNullOrWhiteSpace(request?.OafYear) &&
                         !string.Equals(oaf.OafYear, request.OafYear.Trim(), StringComparison.OrdinalIgnoreCase))
                     {
@@ -396,6 +402,12 @@ public sealed partial class SoAllocationToDcService
                         {
                             if (request?.OafIds != null && request.OafIds.Count > 0 &&
                                 !request.OafIds.Contains(oafRow.OafId))
+                            {
+                                continue;
+                            }
+
+                            if (request?.OafNumbers != null && request.OafNumbers.Count > 0 &&
+                                !request.OafNumbers.Any(n => MatchesDocNumber(n, oafRow.Number)))
                             {
                                 continue;
                             }

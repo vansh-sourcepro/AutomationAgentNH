@@ -1,0 +1,3041 @@
+1. GET
+
+API:-
+http://192.168.0.147:8014/assets/languages/eng/common/component/login.json
+-----------------------------------------------------
+PREVIEW:-
+{common_component_login_userstackfull: "All users are logged in.",…}
+AuthMsg1
+: 
+"Authentication error occurred! Check server ports©"
+AuthMsg2
+: 
+"Insufficient Users base payload! Check server threads©"
+AuthMsg3
+: 
+"Web socket compromised! Check server sockets©"
+AuthMsg4
+: 
+"Transfer protocol failed! Check server core©"
+AuthMsg5
+: 
+"Recursion threshold activation fault! Check server temp environment©"
+AuthMsg6
+: 
+"Cryptography fabric overload! Check server security©"
+CheckSum_MisMatched
+: 
+"Critical Error-3. Please contact SourcePro."
+ErrorUnknownCode1
+: 
+"Unknown Error 1"
+ErrorUnknownCode2
+: 
+"Unknown Error 2"
+ErrorUnknownCode3
+: 
+"Unknown Error 3"
+ErrorUnknownCode4
+: 
+"Unknown Error 4"
+ErrorUnknownCode5
+: 
+"Unknown Error 5"
+ErrorUnknownCode6
+: 
+"Unknown Error 6"
+InvalidOTP
+: 
+"Invalid OTP"
+InvalidUsernamePasswordKey
+: 
+"Invalid Username or Password."
+NullPremierAPIURL
+: 
+"Premier authentication error occurred! Please contact SourcePro support!"
+OTPVerifiedSuccessfully
+: 
+"OTP varified successfully"
+PasswordKey
+: 
+"Password"
+SwitchCompanySiteValidation1
+: 
+"You are currently logged in to the chosen company and site."
+SwitchCompanySiteValidation2
+: 
+"Successfully switched company and site"
+System_Outof_Date
+: 
+"Critical Error-2. Please contact SourcePro."
+UnAuthorizeAccess
+: 
+"Access Denided.You are not an Authorised User."
+UserDateExpiredKey
+: 
+"Date of this user is expired. Please contact Admin."
+UserLoginExpiredKey
+: 
+"Login of this user is expired. Please contact Admin."
+UserNameKey
+: 
+"User Name"
+UserPasswordLimitExceededKey
+: 
+"Wrong password limit of this user is exceeded. Please contact Admin."
+UserPasswrodExpiredKey
+: 
+"Your password is expired. You must change your password."
+common_component_login_userstackfull
+: 
+"All users are logged in."
+common_component_login_userstackfullCompanyWise
+: 
+"Company's All users are logged in."
+license_expired
+: 
+"Authentication error occurred! Please contact SourcePro support!"
+license_missing_or_Invalid_key
+: 
+"Critical Error-1. Please contact SourcePro."
+license_missing_or_Invalid_key_MisMatch
+: 
+"Critical Error-4. Please contact SourcePro."
+license_missing_or_Invalid_key_MisMatch_Key
+: 
+"Critical Error-5. Please contact SourcePro."
+-----------------------------------------------------
+RESPONSE:-
+{
+  "common_component_login_userstackfull": "All users are logged in.",
+  "common_component_login_userstackfullCompanyWise": "Company's All users are logged in.",
+  "InvalidUsernamePasswordKey": "Invalid Username or Password.",
+  "license_expired": "Authentication error occurred! Please contact SourcePro support!",
+  "license_missing_or_Invalid_key": "Critical Error-1. Please contact SourcePro.",
+  "PasswordKey": "Password",
+  "UserDateExpiredKey": "Date of this user is expired. Please contact Admin.",
+  "UserLoginExpiredKey": "Login of this user is expired. Please contact Admin.",
+  "UserNameKey": "User Name",
+  "UserPasswordLimitExceededKey": "Wrong password limit of this user is exceeded. Please contact Admin.",
+  "UserPasswrodExpiredKey": "Your password is expired. You must change your password.",
+  "NullPremierAPIURL": "Premier authentication error occurred! Please contact SourcePro support!",
+  "OTPVerifiedSuccessfully": "OTP varified successfully",
+  "InvalidOTP": "Invalid OTP",
+  "System_Outof_Date": "Critical Error-2. Please contact SourcePro.",
+  "CheckSum_MisMatched": "Critical Error-3. Please contact SourcePro.",
+  "license_missing_or_Invalid_key_MisMatch": "Critical Error-4. Please contact SourcePro.",
+  "license_missing_or_Invalid_key_MisMatch_Key": "Critical Error-5. Please contact SourcePro.",
+  "AuthMsg1":"Authentication error occurred! Check server ports©",
+  "AuthMsg2":"Insufficient Users base payload! Check server threads©",
+  "AuthMsg3":"Web socket compromised! Check server sockets©",
+  "AuthMsg4":"Transfer protocol failed! Check server core©",
+  "AuthMsg5":"Recursion threshold activation fault! Check server temp environment©",
+  "AuthMsg6":"Cryptography fabric overload! Check server security©",
+  "SwitchCompanySiteValidation1": "You are currently logged in to the chosen company and site.",
+  "SwitchCompanySiteValidation2": "Successfully switched company and site",
+  "ErrorUnknownCode1":"Unknown Error 1",
+  "ErrorUnknownCode2":"Unknown Error 2",
+  "ErrorUnknownCode3":"Unknown Error 3",
+  "ErrorUnknownCode4":"Unknown Error 4",
+  "ErrorUnknownCode5":"Unknown Error 5",
+  "ErrorUnknownCode6":"Unknown Error 6",
+  "UnAuthorizeAccess":"Access Denided.You are not an Authorised User."
+}
+---------------------------------------------------------------------------------------------------------------------------------
+
+2. POST
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/tngNotification/GetUnReadUserNotification
+
+PAYLOAD:-
+{userId: 2, markasread: 0}
+markasread
+: 
+0
+userId
+: 
+2
+
+RESPONSE:-
+
+{
+    "data": [
+        {
+            "xntautoid": 99033,
+            "xnummenuname": null,
+            "xntmsgdesC1": "PO Entry",
+            "xntmsgdesC2": "Before CheckPo No : 23-24/PO/MAG/000009 is created for Vendor : Y001-YAN INTERNATIONAL PVT LTD.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 12:48:18",
+            "xnumformid": "01139",
+            "xntdocid": "9",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 12:48",
+            "time": "12:48PM",
+            "docno": "000009",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 99208,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Generate CBOM Entry",
+            "xntmsgdesC2": "SJO No : 23-24/SJ/NF1/000126  CBOM is Generated.C-bom Done",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 21:39:51",
+            "xnumformid": "CBOMF",
+            "xntdocid": "242",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 09:39",
+            "time": "9:39PM",
+            "docno": "000126",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 98899,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Sales Quotation Entry",
+            "xntmsgdesC2": "Sales Quotation No : 23-24/SQ/NF1/000031 is created for Customer:C006-CXYZ TESTSales Quotation Generated.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 08:08:55",
+            "xnumformid": "06103",
+            "xntdocid": "60",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 08:08",
+            "time": "8:08AM",
+            "docno": "000031",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 98904,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Sales Quotation Entry",
+            "xntmsgdesC2": "testSales Quotation No : 23-24/SQ/NF1/000031 is created for Customer:C006-CXYZ TEST",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 08:08:55",
+            "xnumformid": "06103",
+            "xntdocid": "60",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 08:08",
+            "time": "8:08AM",
+            "docno": "000031",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 98859,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Sales Quotation Entry",
+            "xntmsgdesC2": "Sales Quotation No : 23-24/SQ/NF1/000030 is created for Customer:A043-ANUV ROYAL PLASTIC PVT.LTD.Sales Quotation Generated.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 02:12:22",
+            "xnumformid": "06103",
+            "xntdocid": "59",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 02:12",
+            "time": "2:12AM",
+            "docno": "000030",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 98864,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Sales Quotation Entry",
+            "xntmsgdesC2": "testSales Quotation No : 23-24/SQ/NF1/000030 is created for Customer:A043-ANUV ROYAL PLASTIC PVT.LTD.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 02:12:22",
+            "xnumformid": "06103",
+            "xntdocid": "59",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 02:12",
+            "time": "2:12AM",
+            "docno": "000030",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 99082,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Sales Quotation Entry",
+            "xntmsgdesC2": "Sales Quotation No : 23-24/SQ/NF1/000032 is created for Customer:A043-ANUV ROYAL PLASTIC PVT.LTD.Sales Quotation Generated.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 13:54:17",
+            "xnumformid": "06103",
+            "xntdocid": "61",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 01:54",
+            "time": "1:54PM",
+            "docno": "000032",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 99087,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Sales Quotation Entry",
+            "xntmsgdesC2": "testSales Quotation No : 23-24/SQ/NF1/000032 is created for Customer:A043-ANUV ROYAL PLASTIC PVT.LTD.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/05/2024 13:54:17",
+            "xnumformid": "06103",
+            "xntdocid": "61",
+            "totalRows": 6588,
+            "fullDate": "31 May 2024 01:54",
+            "time": "1:54PM",
+            "docno": "000032",
+            "markasread": true,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 333213,
+            "xnummenuname": null,
+            "xntmsgdesC1": "SJO Entry",
+            "xntmsgdesC2": "SJO Entry : 24-25/SJ/NF1/000066 is created.SJO_JWP",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/03/2025 12:39:43",
+            "xnumformid": "04002",
+            "xntdocid": "10203",
+            "totalRows": 6588,
+            "fullDate": "31 Mar 2025 12:39",
+            "time": "12:39PM",
+            "docno": "000066",
+            "markasread": false,
+            "unReadCount": "99+"
+        },
+        {
+            "xntautoid": 333172,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Forecast Order Entry",
+            "xntmsgdesC2": "Forecast Order Entry : 24-25/FO/NF1/000040 is created.FO_JWP",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "31/03/2025 12:36:18",
+            "xnumformid": "04000",
+            "xntdocid": "10079",
+            "totalRows": 6588,
+            "fullDate": "31 Mar 2025 12:36",
+            "time": "12:36PM",
+            "docno": "000040",
+            "markasread": false,
+            "unReadCount": "99+"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+------------------------------------------------------------------------------------------------------------------
+
+3.GET
+
+API:-
+http://192.168.0.147:8014/assets/languages/eng/sales/salesdispatch/salesallocation.json
+
+PREVIEW:-
+{sales_saledispatch_saleallocde_alcqty: "Alc. Qty IUOM",…}
+sales_saledispatch_customersrno
+: 
+"Customer PO. Item Sr. No"
+sales_saledispatch_packingslip_packqtyvalidation
+: 
+"Packing Quantity can't be greater then Remaining Quantity"
+sales_saledispatch_packingslip_pckqty
+: 
+"Packing Qty"
+sales_saledispatch_packingslip_remqty
+: 
+"Remaining Qty"
+sales_saledispatch_saleallocde_alcqty
+: 
+"Alc. Qty IUOM"
+sales_saledispatch_saleallocde_allocate
+: 
+"Allocate"
+sales_saledispatch_saleallocde_allocation
+: 
+"Allocation"
+sales_saledispatch_saleallocde_allocdetails
+: 
+"Allocation Details"
+sales_saledispatch_saleallocde_allocqty
+: 
+"Allocation Qty."
+sales_saledispatch_saleallocde_cancel
+: 
+"Cancel"
+sales_saledispatch_saleallocde_custodrdet
+: 
+"Customer Order Details"
+sales_saledispatch_saleallocde_customer
+: 
+"Customer"
+sales_saledispatch_saleallocde_date
+: 
+"Date"
+sales_saledispatch_saleallocde_dcancel
+: 
+"Cancel"
+sales_saledispatch_saleallocde_dcustodrdet
+: 
+"Customer Order Details"
+sales_saledispatch_saleallocde_dcustomer
+: 
+"Customer"
+sales_saledispatch_saleallocde_ddate
+: 
+"Date"
+sales_saledispatch_saleallocde_ddealcqty
+: 
+"DeAlc. Qty IUOM"
+sales_saledispatch_saleallocde_ddesc
+: 
+"Description"
+sales_saledispatch_saleallocde_deallocate
+: 
+"DeAllocate"
+sales_saledispatch_saleallocde_deallocation
+: 
+"Deallocation"
+sales_saledispatch_saleallocde_deallocdetails
+: 
+"DeAllocation Details"
+sales_saledispatch_saleallocde_deallocqty
+: 
+"DeAllocation Qty."
+sales_saledispatch_saleallocde_desc
+: 
+"Description"
+sales_saledispatch_saleallocde_dfillqty
+: 
+"Fill Quantity"
+sales_saledispatch_saleallocde_dgrp
+: 
+"Group"
+sales_saledispatch_saleallocde_dinternalitem
+: 
+"Internal Item"
+sales_saledispatch_saleallocde_dinternalitemdesc
+: 
+"Internal Item Description"
+sales_saledispatch_saleallocde_ditemsrno
+: 
+"Item Sr. No. Allocation Details"
+sales_saledispatch_saleallocde_dmaxalc
+: 
+"Max. DeAlc. Qty (IUOM) Including Tolerance"
+sales_saledispatch_saleallocde_dnumber
+: 
+"Number"
+sales_saledispatch_saleallocde_dnumber1
+: 
+"Number"
+sales_saledispatch_saleallocde_doafdetails
+: 
+"OAF Details"
+sales_saledispatch_saleallocde_doafqty
+: 
+"OAF Qty (IUOM)"
+sales_saledispatch_saleallocde_donhand
+: 
+"On-Hand Qty."
+sales_saledispatch_saleallocde_dsalesitem
+: 
+"Sales Item"
+sales_saledispatch_saleallocde_dsalesitmdesc
+: 
+"Sales Item Description"
+sales_saledispatch_saleallocde_dshipcode
+: 
+"Ship Code"
+sales_saledispatch_saleallocde_dsite
+: 
+"Site"
+sales_saledispatch_saleallocde_dtolerance
+: 
+"Tolerance % for Sales Allocation and Dispatch"
+sales_saledispatch_saleallocde_dunfillqty
+: 
+"UnFill Quantity"
+sales_saledispatch_saleallocde_dware
+: 
+"Warehouse Code"
+sales_saledispatch_saleallocde_dyear
+: 
+"Year"
+sales_saledispatch_saleallocde_fillqty
+: 
+"Fill Quantity"
+sales_saledispatch_saleallocde_freehand
+: 
+"Free OnHand Qty."
+sales_saledispatch_saleallocde_grp
+: 
+"Group"
+sales_saledispatch_saleallocde_heat
+: 
+"Heat No."
+sales_saledispatch_saleallocde_internalitem
+: 
+"Internal Item"
+sales_saledispatch_saleallocde_internalitemdesc
+: 
+"Internal Item Description"
+sales_saledispatch_saleallocde_inward
+: 
+"Inward No."
+sales_saledispatch_saleallocde_itemsrno
+: 
+"Item Sr. No. Allocation Details"
+sales_saledispatch_saleallocde_manbatch
+: 
+"Manufacturing Batch No"
+sales_saledispatch_saleallocde_maxalc
+: 
+"Max. Alc. Qty (IUOM) Including Tolerance"
+sales_saledispatch_saleallocde_maxalcqty
+: 
+"Max Alc. Qty."
+sales_saledispatch_saleallocde_maxalcsuom
+: 
+"Max.Alc.Qty(SUOM)"
+sales_saledispatch_saleallocde_maxdealcqty
+: 
+"Max DeAlc. Qty."
+sales_saledispatch_saleallocde_maxdealcsuom
+: 
+"Max.DeAlc.Qty(SUOM)"
+sales_saledispatch_saleallocde_number
+: 
+"Number"
+sales_saledispatch_saleallocde_number1
+: 
+"Number"
+sales_saledispatch_saleallocde_oafdetails
+: 
+"OAF Details"
+sales_saledispatch_saleallocde_oafqty
+: 
+"OAF Qty (IUOM)"
+sales_saledispatch_saleallocde_onhand
+: 
+"On-Hand Qty."
+sales_saledispatch_saleallocde_qtydealloc
+: 
+"Qty. for Deallocation"
+sales_saledispatch_saleallocde_qtydelloc
+: 
+"Qty for Deallocation"
+sales_saledispatch_saleallocde_qtyhand
+: 
+"Qty should be less then on hand QTY"
+sales_saledispatch_saleallocde_salealloctedealloc
+: 
+"Sales Allocation /De-Allocation"
+sales_saledispatch_saleallocde_salesitem
+: 
+"Sales Item"
+sales_saledispatch_saleallocde_salesitmdesc
+: 
+"Sales Item Description"
+sales_saledispatch_saleallocde_serial
+: 
+"Serial No."
+sales_saledispatch_saleallocde_shipcode
+: 
+"Ship Code"
+sales_saledispatch_saleallocde_site
+: 
+"Site"
+sales_saledispatch_saleallocde_tolerance
+: 
+"Tolerance % for Sales Allocation and Dispatch"
+sales_saledispatch_saleallocde_totalalcqty
+: 
+"Total Alc. Qty."
+sales_saledispatch_saleallocde_totaldealcqty
+: 
+"Total DeAlc. Qty."
+sales_saledispatch_saleallocde_unfillqty
+: 
+"UnFill Quantity"
+sales_saledispatch_saleallocde_ware
+: 
+"Warehouse Code"
+sales_saledispatch_saleallocde_year
+: 
+"Year"
+sales_saledispatch_salinq_dim_size
+: 
+"Size"
+sales_saledispatch_salinq_no_of_piece
+: 
+"No Of Piece"
+sales_saledispatch_salinq_weight
+: 
+"Weight"
+
+RESPONSE:-
+{
+    "sales_saledispatch_saleallocde_alcqty": "Alc. Qty IUOM",
+    "sales_saledispatch_saleallocde_allocate": "Allocate",
+    "sales_saledispatch_saleallocde_allocation": "Allocation",
+    "sales_saledispatch_saleallocde_allocdetails": "Allocation Details",
+    "sales_saledispatch_saleallocde_allocqty": "Allocation Qty.",
+    "sales_saledispatch_saleallocde_cancel": "Cancel",
+    "sales_saledispatch_saleallocde_custodrdet": "Customer Order Details",
+    "sales_saledispatch_saleallocde_customer": "Customer",
+    "sales_saledispatch_saleallocde_date": "Date",
+    "sales_saledispatch_saleallocde_dcancel": "Cancel",
+    "sales_saledispatch_saleallocde_dcustodrdet": "Customer Order Details",
+    "sales_saledispatch_saleallocde_dcustomer": "Customer",
+    "sales_saledispatch_saleallocde_ddate": "Date",
+    "sales_saledispatch_saleallocde_ddealcqty": "DeAlc. Qty IUOM",
+    "sales_saledispatch_saleallocde_ddesc": "Description",
+    "sales_saledispatch_saleallocde_deallocate": "DeAllocate",
+    "sales_saledispatch_saleallocde_deallocation": "Deallocation",
+    "sales_saledispatch_saleallocde_deallocdetails": "DeAllocation Details",
+    "sales_saledispatch_saleallocde_deallocqty": "DeAllocation Qty.",
+    "sales_saledispatch_saleallocde_desc": "Description",
+    "sales_saledispatch_saleallocde_dfillqty": "Fill Quantity",
+    "sales_saledispatch_saleallocde_dgrp": "Group",
+    "sales_saledispatch_saleallocde_dinternalitem": "Internal Item",
+    "sales_saledispatch_saleallocde_dinternalitemdesc": "Internal Item Description",
+    "sales_saledispatch_saleallocde_ditemsrno": "Item Sr. No. Allocation Details",
+    "sales_saledispatch_saleallocde_dmaxalc": "Max. DeAlc. Qty (IUOM) Including Tolerance",
+    "sales_saledispatch_saleallocde_dnumber": "Number",
+    "sales_saledispatch_saleallocde_dnumber1": "Number",
+    "sales_saledispatch_saleallocde_doafdetails": "OAF Details",
+    "sales_saledispatch_saleallocde_doafqty": "OAF Qty (IUOM)",
+    "sales_saledispatch_saleallocde_donhand": "On-Hand Qty.",
+    "sales_saledispatch_saleallocde_dsalesitem": "Sales Item",
+    "sales_saledispatch_saleallocde_dsalesitmdesc": "Sales Item Description",
+    "sales_saledispatch_saleallocde_dshipcode": "Ship Code",
+    "sales_saledispatch_saleallocde_dsite": "Site",
+    "sales_saledispatch_saleallocde_dtolerance": "Tolerance % for Sales Allocation and Dispatch",
+    "sales_saledispatch_saleallocde_dunfillqty": "UnFill Quantity",
+    "sales_saledispatch_saleallocde_dware": "Warehouse Code",
+    "sales_saledispatch_saleallocde_dyear": "Year",
+    "sales_saledispatch_saleallocde_fillqty": "Fill Quantity",
+    "sales_saledispatch_saleallocde_freehand": "Free OnHand Qty.",
+    "sales_saledispatch_saleallocde_grp": "Group",
+    "sales_saledispatch_saleallocde_heat": "Heat No.",
+    "sales_saledispatch_saleallocde_internalitem": "Internal Item",
+    "sales_saledispatch_saleallocde_internalitemdesc": "Internal Item Description",
+    "sales_saledispatch_saleallocde_inward": "Inward No.",
+    "sales_saledispatch_saleallocde_itemsrno": "Item Sr. No. Allocation Details",
+    "sales_saledispatch_saleallocde_manbatch": "Manufacturing Batch No",
+    "sales_saledispatch_saleallocde_maxalc": "Max. Alc. Qty (IUOM) Including Tolerance",
+    "sales_saledispatch_saleallocde_maxalcqty": "Max Alc. Qty.",
+    "sales_saledispatch_saleallocde_maxdealcqty": "Max DeAlc. Qty.",
+    "sales_saledispatch_saleallocde_number": "Number",
+    "sales_saledispatch_saleallocde_number1": "Number",
+    "sales_saledispatch_saleallocde_oafdetails": "OAF Details",
+    "sales_saledispatch_saleallocde_oafqty": "OAF Qty (IUOM)",
+    "sales_saledispatch_saleallocde_onhand": "On-Hand Qty.",
+    "sales_saledispatch_salinq_dim_size": "Size",
+    "sales_saledispatch_salinq_no_of_piece": "No Of Piece",
+    "sales_saledispatch_salinq_weight": "Weight",
+    "sales_saledispatch_saleallocde_qtydealloc": "Qty. for Deallocation",
+    "sales_saledispatch_saleallocde_qtydelloc": "Qty for Deallocation",
+    "sales_saledispatch_saleallocde_qtyhand": "Qty should be less then on hand QTY",
+    "sales_saledispatch_saleallocde_salealloctedealloc": "Sales Allocation /De-Allocation",
+    "sales_saledispatch_saleallocde_salesitem": "Sales Item",
+    "sales_saledispatch_saleallocde_salesitmdesc": "Sales Item Description",
+    "sales_saledispatch_saleallocde_serial": "Serial No.",
+    "sales_saledispatch_saleallocde_shipcode": "Ship Code",
+    "sales_saledispatch_saleallocde_site": "Site",
+    "sales_saledispatch_saleallocde_tolerance": "Tolerance % for Sales Allocation and Dispatch",
+    "sales_saledispatch_saleallocde_totalalcqty": "Total Alc. Qty.",
+    "sales_saledispatch_saleallocde_totaldealcqty": "Total DeAlc. Qty.",
+    "sales_saledispatch_saleallocde_unfillqty": "UnFill Quantity",
+    "sales_saledispatch_saleallocde_ware": "Warehouse Code",
+    "sales_saledispatch_saleallocde_year": "Year",
+    "sales_saledispatch_packingslip_pckqty": "Packing Qty",
+    "sales_saledispatch_packingslip_remqty": "Remaining Qty",
+    "sales_saledispatch_packingslip_packqtyvalidation": "Packing Quantity can't be greater then Remaining Quantity",
+    "sales_saledispatch_customersrno": "Customer PO. Item Sr. No",
+    "sales_saledispatch_saleallocde_maxalcsuom": "Max.Alc.Qty(SUOM)",
+    "sales_saledispatch_saleallocde_maxdealcsuom": "Max.DeAlc.Qty(SUOM)"
+}
+----------------------------------------------------------------------------------------------------------------------------
+
+4.GET
+
+API:-
+http://192.168.0.147:8014/assets/languages/eng/common/common/common.json
+
+PREVIEW:-
+{action_key: "Action", addnewKey: "Add New", addtofav: "Add To Favourites",…}
+Activity_Code
+: 
+"Activity Code"
+Activity_Name
+: 
+"Activity Name"
+Assign_To
+: 
+"Assign To"
+AuthMsg1
+: 
+"Authentication error occurred! Check server ports©"
+AuthMsg2
+: 
+"Insufficient Users base payload! Check server threads©"
+AuthMsg3
+: 
+"Web socket compromised! Check server sockets©"
+AuthMsg4
+: 
+"Transfer protocol failed! Check server core©"
+AuthMsg5
+: 
+"Recursion threshold activation fault! Check server temp environment©"
+AuthMsg6
+: 
+"Cryptography fabric overload! Check server security©"
+Authorized
+: 
+"Authorized"
+CheckSum_MisMatched
+: 
+"Critical Error-3. Please contact SourcePro."
+CodeIsUsedKey
+: 
+"Entered code is used in transaction(s) and hence can not be deleted! Please de-activate it to prevent usage."
+CompanyCodeFirstLatterKey
+: 
+"Company code not allowed start with numeric."
+CreatedKey
+: 
+"{0} Created Successfully."
+DBExistKey
+: 
+"Database name alreay exist."
+DCAlreadyGeneratedKey
+: 
+"DC is been generated against this shipment code. So, the information associated with this shipment code wouldn't be editable."
+DatabaseConnectionInvalidKey
+: 
+"Invalid database connection."
+DatabaseCredential_invalid_key
+: 
+"SQL Server's Username or Password is Wrong."
+DatabaseNameFirstLatterKey
+: 
+"Databse name not allowed start with numeric."
+DatabaseNameInvalidKey
+: 
+"Invalid Database name."
+DatabaseServername_invalid_key
+: 
+"SQL Server name is Wrong."
+Deleted
+: 
+"Deleted"
+DeletedKey
+: 
+"{0} deleted successfully."
+ErrorInDBCreateKey
+: 
+"Error in Database creating."
+ErrorUnknownCode1
+: 
+"Unknown Error 1"
+ErrorUnknownCode2
+: 
+"Unknown Error 2"
+ErrorUnknownCode3
+: 
+"Unknown Error 3"
+ErrorUnknownCode4
+: 
+"Unknown Error 4"
+ErrorUnknownCode5
+: 
+"Unknown Error 5"
+ErrorUnknownCode6
+: 
+"Unknown Error 6"
+ExistKey
+: 
+"{0} already exists."
+FieldValidationErrorKey
+: 
+"One or more fields have an error. Please check and try again."
+FromDate
+: 
+"From Date"
+Generate_po_key
+: 
+"Generate PO"
+HSNFinalCodeNotProperKey
+: 
+"Final HSN code must be same as Section code"
+Import
+: 
+"Import Excel File"
+Inserted_key
+: 
+"Inserted Successfully"
+Invalid
+: 
+"is Invalid"
+MinLen10
+: 
+"must be ten characters"
+No_data_available_for_edit
+: 
+"No data available for edit.. !"
+None
+: 
+"None"
+NotExistKey
+: 
+"{0} is not exists."
+NotToPayToOriginalSupplier
+: 
+"Not allowed to enter tax value due to this tax is paying to transporter."
+NoteLandScanpPaper
+: 
+"Please use A3-Landscape Paper"
+OAF
+: 
+"OAF"
+Other
+: 
+"Other"
+Owner/User
+: 
+"Owner/User"
+ProdAdd
+: 
+"Add Prod."
+SJO
+: 
+"SJO"
+SalesOrderAlreadyGeneratedKey
+: 
+"Sales Order has been generated against this shipment code. So, the information associated with this shipment code wouldn't be deletable."
+SavedKey
+: 
+"{0} saved successfully."
+Selected
+: 
+"Selected"
+SwitchCompanySiteValidation1
+: 
+"You are currently logged in to the chosen company and site."
+SwitchCompanySiteValidation2
+: 
+"Successfully switched company and site"
+System_Outof_Date
+: 
+"Critical Error-2. Please contact SourcePro."
+ToDate
+: 
+"To Date"
+TransferToTally
+: 
+"Transfer Remittance to Tally"
+UnAuthorizeAccess
+: 
+"Access Denided.You are not an Authorised User."
+UnhandledErrorKey
+: 
+"Oops! Something went wrong, please try again!"
+UpdatedKey
+: 
+"{0} Updated Successfully."
+UserMaxPasswordLenKey
+: 
+"The length of Password must be less than or equal to {0} characters."
+UserMinPasswordLenKey
+: 
+"The length of Password must be at least {0} characters."
+UserUsedPasswordKey
+: 
+"You can not enter this password as used previously."
+XLocationId
+: 
+"XLocationId"
+action_key
+: 
+"Action"
+addnewKey
+: 
+"Add New"
+addtofav
+: 
+"Add To Favourites"
+admn_admmaster_employeemaster_emailInvalid
+: 
+"Invalid email"
+admn_admmaster_transemail_emailtemplatekey
+: 
+"Email Body"
+admn_admmaster_transemail_transactionsubkey
+: 
+"Subject Name"
+admn_admmaster_transemail_transactiontypekey
+: 
+"Transaction Type"
+admn_syspolicies_invpolheader_deliveryRangecomm
+: 
+"Enter the range between 0 - 99.99"
+admn_syspolicies_invpolheader_deliverypro
+: 
+"Enter the range between 0 - 999999999.99999"
+admn_usermng_createcompanylimit
+: 
+"Please check license.Can't create company due to maximum limit reached for license companies."
+admn_usermng_createuserlimit
+: 
+"Please check license.Can't create user due to maximum limit reached for license users."
+advancesearch
+: 
+"Advance Search"
+all
+: 
+"All"
+andKey
+: 
+"and"
+attachmentId
+: 
+"attachmentId"
+attachmentdetailskey
+: 
+"Attachment Details"
+auhtorized
+: 
+"Authorized"
+authnotrequiredforthedocumnet
+: 
+"Authorization not required for the document!"
+authorizedbykey
+: 
+"Authorized By:"
+authorizekey
+: 
+"Authorize"
+autogeneratekey
+: 
+"Auto Generate"
+back
+: 
+"Back"
+backwardkry
+: 
+"Backward"
+by
+: 
+"By"
+calculationKey
+: 
+"calculation"
+cancelKey
+: 
+"Cancel"
+cancelationKey
+: 
+"Cancelation"
+cannotbesame_ckey
+: 
+"can not be same"
+cantbelessthankey
+: 
+"can't be less than"
+chngpwd_ckey
+: 
+"Change Password"
+clear
+: 
+"Clear"
+closeKey
+: 
+"Close"
+closeexcelfileifitisopen
+: 
+"Close Excel File if it is Open!!!"
+collapseKey
+: 
+"Collapse All"
+comm_refresh
+: 
+"Refresh"
+comm_reset
+: 
+"Reset"
+common_12
+: 
+"should not be greater than 12"
+common_15
+: 
+"Should not be greater than 15"
+common_20
+: 
+"should not be greater than 20"
+common_25
+: 
+"should not be greater than 25"
+common_40
+: 
+"should not be greater than 40"
+common_60
+: 
+"should not be greater than 60"
+common_120
+: 
+"should not be greater than 120"
+common_255
+: 
+"should not be greater than 255"
+common_AuthorizeMsgkey
+: 
+"{0} authorized successfully."
+common_Deletedby
+: 
+"Deleted By:"
+common_actionDate
+: 
+"Date"
+common_actiontype
+: 
+"Action"
+common_addcust
+: 
+"Add Customer"
+common_additem
+: 
+"Add Item"
+common_addvend
+: 
+"Add Vendor"
+common_allocate
+: 
+"Allocate"
+common_allocateqty
+: 
+"Allocation QTY"
+common_alrdyexist
+: 
+"already exists"
+common_applicableon
+: 
+"Applicable On"
+common_applied
+: 
+"Applied"
+common_applytoselected
+: 
+"Apply to Selected"
+common_attachmentkey
+: 
+"Attachment"
+common_authLevel
+: 
+"Level"
+common_authby
+: 
+"Authorize By:"
+common_authbyn
+: 
+"Authorization By:"
+common_authdate
+: 
+"Authorization Date:"
+common_authstatus
+: 
+"Authorization Status:"
+common_browse
+: 
+"Browse"
+common_browsefiles
+: 
+"or Browse Files"
+common_cancelledby
+: 
+"Cancelled By:"
+common_cancelremark
+: 
+"Cancelled Remark:"
+common_cantbezero
+: 
+"{0} can not be 0"
+common_ccn
+: 
+"CCN Applied By"
+common_common_addfav_key
+: 
+"Page has been successfully added to favourites."
+common_common_deletefav_key
+: 
+"Page has been removed from favourites."
+common_common_maxlimit_key
+: 
+"Max limit reached, please delete one from favourite."
+common_common_notificationdeletedsuccesfully
+: 
+"Notification deleted successfully"
+common_common_refresh_ckey
+: 
+"Refresh"
+common_currencycode
+: 
+"Currency Code"
+common_custdetail
+: 
+"Customer Detail"
+common_date
+: 
+"Date"
+common_dateis
+: 
+"Date Is :"
+common_deallocate
+: 
+"DeAllocate"
+common_deallocateqty
+: 
+"Deallocation Qty"
+common_deletecnfrm
+: 
+"Do you really want to delete this record?"
+common_docsetting_not_done_key
+: 
+"Document settings not done!"
+common_docstatus
+: 
+"Document Status:"
+common_drag
+: 
+"Drag & Drop Files"
+common_fill
+: 
+"Auto Fill"
+common_fillqty
+: 
+"Fill Quantity"
+common_fillunfillqty
+: 
+"Fill-UnFill Quantity"
+common_finalprint
+: 
+"Final Print:"
+common_group
+: 
+"Group"
+common_handqty
+: 
+"Qty should be less then on hand QTY"
+common_ie
+: 
+"I/E"
+common_immsappmsg
+: 
+"IMMS Application Message"
+common_index
+: 
+"Index"
+common_invalidlandline
+: 
+"Invalid landline No."
+common_invalidmob
+: 
+"Invalid mobile No."
+common_itmdetail
+: 
+"Item Detail"
+common_lastpo
+: 
+"Last PO Status:"
+common_maxalcqty
+: 
+"Max Alc. Qty."
+common_maxdealcqty
+: 
+"Max DeAlc. Qty."
+common_mustbe1qty
+: 
+"Sales quantity must be 1 for item having dispatch without manufacturing flag set yes"
+common_number
+: 
+"Number"
+common_pendingBy
+: 
+"Pending By"
+common_postnonpost
+: 
+"Post/Non Post"
+common_pv
+: 
+"P/V"
+common_rateamt
+: 
+"Rate Amount"
+common_ratecode
+: 
+"Rate Code"
+common_ratedesc
+: 
+"Rate Description"
+common_schnotgrtr
+: 
+"should not be greater than"
+common_select
+: 
+"--Select--"
+common_selectitem
+: 
+"Select Item"
+common_shtclse
+: 
+"Short Close"
+common_site
+: 
+"Site"
+common_status
+: 
+"Status:"
+common_statustitle
+: 
+"Status"
+common_taxvalue
+: 
+"Tax Value"
+common_totalalcqty
+: 
+"Total Alc. Qty."
+common_totaldealcqty
+: 
+"Total DeAlc. Qty."
+common_unauthorizekey
+: 
+"Unauthorize"
+common_undelete
+: 
+"Un-Delete"
+common_undeletecnfrm
+: 
+"Do you really want to un-delete this record?"
+common_unfill
+: 
+"Un Fill"
+common_unfillqty
+: 
+"UnFill Quantity"
+common_uploadallkey
+: 
+"Upload all"
+common_uploadfilename
+: 
+"File name"
+common_uploadfilepath
+: 
+"File path"
+common_uploadfilesize
+: 
+"File size"
+common_userName
+: 
+"User"
+common_vendetail
+: 
+"Vendor Detail"
+common_year
+: 
+"Year"
+common_zeronotallowed
+: 
+"0 is not allowed"
+common_zeronotallowedNumericKey
+: 
+"0 is not allowed and value must be numeric."
+confirm_ckey
+: 
+"Confirm"
+continueKey
+: 
+"Continue"
+copykey
+: 
+"Copy"
+copyto_ckey
+: 
+"Copy To"
+createdByKey
+: 
+"Created By"
+createdDateKey
+: 
+"Created Date"
+crkey
+: 
+"Cr."
+datekey
+: 
+"Date:"
+decimalvalueKey
+: 
+"Only decimal values are allowed (e.g. 20.22)."
+deleted
+: 
+"Deleted"
+deletekey
+: 
+"Delete"
+delselectkey
+: 
+"Delete Selected"
+descriptionKey
+: 
+"Description"
+detailViewKey
+: 
+"Detail View"
+docNoKey
+: 
+"Document No"
+docRevNoKey
+: 
+"Document Revision No"
+docTypeKey
+: 
+"Document Type"
+down_ckey
+: 
+"Down"
+downloadtemplate
+: 
+"Download Template"
+drkey
+: 
+"Dr."
+editKey
+: 
+"Edit"
+eventdate_ckey
+: 
+"Event Date"
+eventfrom_ckey
+: 
+"Event From"
+expandKey
+: 
+"Expand All"
+export
+: 
+"Export"
+exporttoexcelkey
+: 
+"Export to Excel"
+fileupload
+: 
+"File Upload"
+firstKey
+: 
+"First"
+forwardkey
+: 
+"Forward"
+freezekey
+: 
+"Freeze"
+from_ckey
+: 
+"From"
+getdatakey
+: 
+"Get Data"
+imms_application_message
+: 
+"New Horizon Application Message"
+imms_application_message_total
+: 
+"Total TDS Limit exceed than {0}"
+index
+: 
+"index"
+invaliddatekey
+: 
+"Invalid Date"
+key_add
+: 
+"Add"
+key_notekey
+: 
+"Note"
+key_ok
+: 
+"Ok"
+key_save_msg
+: 
+"Save Successfully"
+key_search
+: 
+"Search"
+key_valuepositive
+: 
+"Value must be positive"
+lastKey
+: 
+"Last"
+license_missing_or_Invalid_key
+: 
+"Critical Error-1. Please contact SourcePro."
+license_missing_or_Invalid_key_MisMatch
+: 
+"Critical Error-4. Please contact SourcePro."
+license_missing_or_Invalid_key_MisMatch_Key
+: 
+"Critical Error-5. Please contact SourcePro."
+listKey
+: 
+"List"
+loadchart_ckey
+: 
+"Load Chart"
+message_status_updated_sucessfully
+: 
+"Notification Marked as Read Successfully."
+modeKey
+: 
+"Mode"
+modelnumber_ckey
+: 
+"Model Number"
+modelselection_ckey
+: 
+"Model Selection"
+myfavourites_ckey
+: 
+"My Favourites"
+myprofile_ckey
+: 
+"My Profile"
+name
+: 
+"Name"
+nameKey
+: 
+"Name"
+name_required
+: 
+"Name is required."
+nextKey
+: 
+"Next"
+noDataAvilableKey
+: 
+"There is no data available."
+no_ckey
+: 
+"No"
+noracordfound
+: 
+"No Record Found."
+notifications_ckey
+: 
+"Notifications"
+numericvalueKey
+: 
+"Only numeric values are allowed."
+pendingAmount
+: 
+"Total Pending Amount:"
+pendingforauthorization
+: 
+"Pending for Authorization"
+pleaseselectatleastonedocforauth
+: 
+"Please select atleast one document for authorization!"
+previousKey
+: 
+"Previous"
+printKey
+: 
+"Print"
+printdatakey
+: 
+"Print Data"
+refreshdatakey
+: 
+"Refresh Data"
+removekey
+: 
+"Remove"
+reportkey
+: 
+"Report"
+reportsKey
+: 
+"Reports"
+requiredKey
+: 
+"is required."
+rowstatus
+: 
+"rowstatus"
+salesitem_ckey
+: 
+"Sales Item"
+salesitemcode_ckey
+: 
+"Sales Item Code"
+salesitemdescription_ckey
+: 
+"Sales Item Description"
+salesitemselection_ckey
+: 
+"Sales Item Selection"
+saveKey
+: 
+"Save"
+selectedbudgetitems_ckey
+: 
+"Selected Budget Items"
+selectsalesbudgetitems_ckey
+: 
+"Select Sales Budget Items"
+shouldnotbelessthanzerokey
+: 
+"should not be less than zero"
+showdetails_ckey
+: 
+"Show Details"
+specialCharatervalueKey
+: 
+"Special charaters are not allowed."
+srNoKey
+: 
+"Sr. No."
+statusdoneby
+: 
+"Status Done By"
+tcs_limit_reached
+: 
+"{0} limit is reached. TCS must be charged!"
+tds_limit_reached
+: 
+"{0} Turn over limit is reached. TDS must be deducted!"
+to_ckey
+: 
+"To"
+transactionmessage_ckey
+: 
+"Transaction Message"
+transactionname_DocNo
+: 
+"Document Number"
+transactionname_ckey
+: 
+"Transaction Name"
+unsavedatalost_ckey
+: 
+"Unsaved data will be lost for {0}. Are you sure wants to leave from {1}?"
+up_ckey
+: 
+"Up"
+updatedBy
+: 
+"updatedBy"
+uploadKey
+: 
+"Upload"
+usernotauthorityfordocauth
+: 
+"User has not Any Authorities For Document Authorization!"
+viewKey
+: 
+"View"
+viewall_ckey
+: 
+"View All"
+welcomehome_ckey
+: 
+"Welcome Home"
+yes_ckey
+: 
+"Yes"
+yesnopopupmessage1
+: 
+"Do you Want copy discount for all items ?"
+yesnopopupmessage2
+: 
+"Note :Discount will be 'None' or 'Unchanged' where discount amount will greater then item amount."
+
+RESPONSE:-
+
+{
+  "action_key": "Action",
+  "addnewKey": "Add New",
+  "addtofav": "Add To Favourites",
+  "admn_admmaster_employeemaster_emailInvalid": "Invalid email",
+  "admn_admmaster_transemail_emailtemplatekey": "Email Body",
+  "admn_admmaster_transemail_transactionsubkey": "Subject Name",
+  "admn_admmaster_transemail_transactiontypekey": "Transaction Type",
+  "admn_syspolicies_invpolheader_deliverypro": "Enter the range between 0 - 999999999.99999",
+  "admn_syspolicies_invpolheader_deliveryRangecomm": "Enter the range between 0 - 99.99",
+  "admn_usermng_createcompanylimit": "Please check license.Can't create company due to maximum limit reached for license companies.",
+  "admn_usermng_createuserlimit": "Please check license.Can't create user due to maximum limit reached for license users.",
+  "advancesearch": "Advance Search",
+  "all": "All",
+  "andKey": "and",
+  "attachmentdetailskey": "Attachment Details",
+  "auhtorized": "Authorized",
+  "authnotrequiredforthedocumnet": "Authorization not required for the document!",
+  "authorizedbykey": "Authorized By:",
+  "authorizekey": "Authorize",
+  "autogeneratekey": "Auto Generate",
+  "back": "Back",
+  "backwardkry": "Backward",
+  "by": "By",
+  "cancelationKey": "Cancelation",
+  "cancelKey": "Cancel",
+  "cannotbesame_ckey": "can not be same",
+  "cantbelessthankey": "can't be less than",
+  "chngpwd_ckey": "Change Password",
+  "clear": "Clear",
+  "closeexcelfileifitisopen": "Close Excel File if it is Open!!!",
+  "closeKey": "Close",
+  "CodeIsUsedKey": "Entered code is used in transaction(s) and hence can not be deleted! Please de-activate it to prevent usage.",
+  "collapseKey": "Collapse All",
+  "comm_reset": "Reset",
+  "common_12": "should not be greater than 12",
+  "common_120": "should not be greater than 120",
+  "common_15": "Should not be greater than 15",
+  "common_20": "should not be greater than 20",
+  "common_25": "should not be greater than 25",
+  "common_255": "should not be greater than 255",
+  "common_40": "should not be greater than 40",
+  "common_60": "should not be greater than 60",
+  "common_addcust": "Add Customer",
+  "common_additem": "Add Item",
+  "common_addvend": "Add Vendor",
+  "common_allocate": "Allocate",
+  "common_allocateqty": "Allocation QTY",
+  "common_alrdyexist": "already exists",
+  "common_applicableon": "Applicable On",
+  "common_applied": "Applied",
+  "common_applytoselected": "Apply to Selected",
+  "common_attachmentkey": "Attachment",
+  "common_authby": "Authorize By:",
+  "common_authbyn": "Authorization By:",
+  "common_authdate": "Authorization Date:",
+  "common_AuthorizeMsgkey": "{0} authorized successfully.",
+  "common_authstatus": "Authorization Status:",
+  "common_browse": "Browse",
+  "common_browsefiles": "or Browse Files",
+  "common_cancelledby": "Cancelled By:",
+  "common_cancelremark": "Cancelled Remark:",
+  "common_cantbezero": "{0} can not be 0",
+  "common_ccn": "CCN Applied By",
+  "common_common_addfav_key": "Page has been successfully added to favourites.",
+  "common_common_deletefav_key": "Page has been removed from favourites.",
+  "common_common_maxlimit_key": "Max limit reached, please delete one from favourite.",
+  "common_common_notificationdeletedsuccesfully": "Notification deleted successfully",
+  "common_common_refresh_ckey": "Refresh",
+  "common_currencycode": "Currency Code",
+  "common_custdetail": "Customer Detail",
+  "common_year": "Year",
+  "common_group": "Group",
+  "common_site": "Site",
+  "common_number": "Number",
+  "common_date": "Date",
+  "common_dateis": "Date Is :",
+  "common_deallocate": "DeAllocate",
+  "common_deallocateqty": "Deallocation Qty",
+  "common_deletecnfrm": "Do you really want to delete this record?",
+  "common_docsetting_not_done_key": "Document settings not done!",
+  "common_docstatus": "Document Status:",
+  "common_drag": "Drag & Drop Files",
+  "common_fill": "Auto Fill",
+  "common_fillqty": "Fill Quantity",
+  "common_finalprint": "Final Print:",
+  "common_handqty": "Qty should be less then on hand QTY",
+  "common_ie": "I/E",
+  "common_immsappmsg": "IMMS Application Message",
+  "common_index": "Index",
+  "common_invalidlandline": "Invalid landline No.",
+  "common_invalidmob": "Invalid mobile No.",
+  "common_itmdetail": "Item Detail",
+  "common_lastpo": "Last PO Status:",
+  "common_maxalcqty": "Max Alc. Qty.",
+  "common_maxdealcqty": "Max DeAlc. Qty.",
+  "common_postnonpost": "Post/Non Post",
+  "common_pv": "P/V",
+  "common_rateamt": "Rate Amount",
+  "common_ratecode": "Rate Code",
+  "common_ratedesc": "Rate Description",
+  "common_schnotgrtr": "should not be greater than",
+  "common_select": "--Select--",
+  "common_selectitem": "Select Item",
+  "common_shtclse": "Short Close",
+  "common_status": "Status:",
+  "common_taxvalue": "Tax Value",
+  "common_totalalcqty": "Total Alc. Qty.",
+  "common_totaldealcqty": "Total DeAlc. Qty.",
+  "common_unauthorizekey": "Unauthorize",
+  "common_undelete": "Un-Delete",
+  "common_undeletecnfrm": "Do you really want to un-delete this record?",
+  "common_unfill": "Un Fill",
+  "common_unfillqty": "UnFill Quantity",
+  "common_fillunfillqty": "Fill-UnFill Quantity",
+  "common_uploadallkey": "Upload all",
+  "common_uploadfilename": "File name",
+  "common_uploadfilepath": "File path",
+  "common_uploadfilesize": "File size",
+  "common_vendetail": "Vendor Detail",
+  "common_zeronotallowed": "0 is not allowed",
+  "common_zeronotallowedNumericKey": "0 is not allowed and value must be numeric.",
+  "CompanyCodeFirstLatterKey": "Company code not allowed start with numeric.",
+  "confirm_ckey": "Confirm",
+  "continueKey": "Continue",
+  "copykey": "Copy",
+  "copyto_ckey": "Copy To",
+  "createdByKey": "Created By",
+  "createdDateKey": "Created Date",
+  "CreatedKey": "{0} Created Successfully.",
+  "crkey": "Cr.",
+  "DatabaseConnectionInvalidKey": "Invalid database connection.",
+  "DatabaseNameFirstLatterKey": "Databse name not allowed start with numeric.",
+  "DatabaseNameInvalidKey": "Invalid Database name.",
+  "DatabaseServername_invalid_key": "SQL Server name is Wrong.",
+  "DatabaseCredential_invalid_key": "SQL Server's Username or Password is Wrong.",
+  "datekey": "Date:",
+  "DBExistKey": "Database name alreay exist.",
+  "DCAlreadyGeneratedKey": "DC is been generated against this shipment code. So, the information associated with this shipment code wouldn't be editable.",
+  "decimalvalueKey": "Only decimal values are allowed (e.g. 20.22).",
+  "deleted": "Deleted",
+  "DeletedKey": "{0} deleted successfully.",
+  "deletekey": "Delete",
+  "delselectkey": "Delete Selected",
+  "descriptionKey": "Description",
+  "docNoKey": "Document No",
+  "docRevNoKey": "Document Revision No",
+  "docTypeKey": "Document Type",
+  "down_ckey": "Down",
+  "downloadtemplate": "Download Template",
+  "drkey": "Dr.",
+  "editKey": "Edit",
+  "ErrorInDBCreateKey": "Error in Database creating.",
+  "eventdate_ckey": "Event Date",
+  "eventfrom_ckey": "Event From",
+  "ExistKey": "{0} already exists.",
+  "expandKey": "Expand All",
+  "export": "Export",
+  "exporttoexcelkey": "Export to Excel",
+  "FieldValidationErrorKey": "One or more fields have an error. Please check and try again.",
+  "fileupload": "File Upload",
+  "firstKey": "First",
+  "forwardkey": "Forward",
+  "freezekey": "Freeze",
+  "from_ckey": "From",
+  "getdatakey": "Get Data",
+  "HSNFinalCodeNotProperKey": "Final HSN code must be same as Section code",
+  "Inserted_key": "Inserted Successfully",
+  "invaliddatekey": "Invalid Date",
+  "key_add": "Add",
+  "key_notekey": "Note",
+  "key_ok": "Ok",
+  "key_save_msg": "Save Successfully",
+  "key_search": "Search",
+  "key_valuepositive": "Value must be positive",
+  "lastKey": "Last",
+  "listKey": "List",
+  "loadchart_ckey": "Load Chart",
+  "MinLen10": "must be ten characters",
+  "modeKey": "Mode",
+  "modelnumber_ckey": "Model Number",
+  "modelselection_ckey": "Model Selection",
+  "myfavourites_ckey": "My Favourites",
+  "myprofile_ckey": "My Profile",
+  "name": "Name",
+  "name_required": "Name is required.",
+  "nameKey": "Name",
+  "nextKey": "Next",
+  "no_ckey": "No",
+  "No_data_available_for_edit": "No data available for edit.. !",
+  "noDataAvilableKey": "There is no data available.",
+  "noracordfound": "No Record Found.",
+  "NoteLandScanpPaper": "Please use A3-Landscape Paper",
+  "NotExistKey": "{0} is not exists.",
+  "notifications_ckey": "Notifications",
+  "numericvalueKey": "Only numeric values are allowed.",
+  "pendingforauthorization": "Pending for Authorization",
+  "pleaseselectatleastonedocforauth": "Please select atleast one document for authorization!",
+  "previousKey": "Previous",
+  "printdatakey": "Print Data",
+  "printKey": "Print",
+  "refreshdatakey": "Refresh Data",
+  "removekey": "Remove",
+  "reportkey": "Report",
+  "reportsKey": "Reports",
+  "requiredKey": "is required.",
+  "salesitem_ckey": "Sales Item",
+  "salesitemcode_ckey": "Sales Item Code",
+  "salesitemdescription_ckey": "Sales Item Description",
+  "salesitemselection_ckey": "Sales Item Selection",
+  "SalesOrderAlreadyGeneratedKey": "Sales Order has been generated against this shipment code. So, the information associated with this shipment code wouldn't be deletable.",
+  "SavedKey": "{0} saved successfully.",
+  "saveKey": "Save",
+  "selectedbudgetitems_ckey": "Selected Budget Items",
+  "selectsalesbudgetitems_ckey": "Select Sales Budget Items",
+  "shouldnotbelessthanzerokey": "should not be less than zero",
+  "showdetails_ckey": "Show Details",
+  "specialCharatervalueKey": "Special charaters are not allowed.",
+  "srNoKey": "Sr. No.",
+  "statusdoneby": "Status Done By",
+  "to_ckey": "To",
+  "transactionmessage_ckey": "Transaction Message",
+  "transactionname_ckey": "Transaction Name",
+  "transactionname_DocNo": "Document Number",
+  "UnhandledErrorKey": "Oops! Something went wrong, please try again!",
+  "unsavedatalost_ckey": "Unsaved data will be lost for {0}. Are you sure wants to leave from {1}?",
+  "up_ckey": "Up",
+  "UpdatedKey": "{0} Updated Successfully.",
+  "uploadKey": "Upload",
+  "UserMaxPasswordLenKey": "The length of Password must be less than or equal to {0} characters.",
+  "UserMinPasswordLenKey": "The length of Password must be at least {0} characters.",
+  "usernotauthorityfordocauth": "User has not Any Authorities For Document Authorization!",
+  "UserUsedPasswordKey": "You can not enter this password as used previously.",
+  "viewall_ckey": "View All",
+  "viewKey": "View",
+  "welcomehome_ckey": "Welcome Home",
+  "yes_ckey": "Yes",
+  "yesnopopupmessage1": "Do you Want copy discount for all items ?",
+  "yesnopopupmessage2": "Note :Discount will be 'None' or 'Unchanged' where discount amount will greater then item amount.",
+  "common_pendingBy": "Pending By",
+  "common_actiontype": "Action",
+  "common_authLevel": "Level",
+  "common_userName": "User",
+  "common_actionDate": "Date",
+  "common_statustitle": "Status",
+  "common_mustbe1qty": "Sales quantity must be 1 for item having dispatch without manufacturing flag set yes",
+  "calculationKey": "calculation",
+  "Invalid": "is Invalid",
+  "comm_refresh": "Refresh",
+  "attachmentId": "attachmentId",
+  "index": "index",
+  "updatedBy": "updatedBy",
+  "XLocationId": "XLocationId",
+  "Activity_Code": "Activity Code",
+  "Activity_Name": "Activity Name",
+  "Assign_To": "Assign To",
+  "rowstatus": "rowstatus",
+  "OAF": "OAF",
+  "Selected": "Selected",
+  "None": "None",
+  "SJO": "SJO",
+  "Other": "Other",
+  "Owner/User": "Owner/User",
+  "Generate_po_key": "Generate PO",
+  "Authorized":"Authorized",
+  "Deleted":"Deleted",
+  "message_status_updated_sucessfully":"Notification Marked as Read Successfully.",
+  "pendingAmount":"Total Pending Amount:",
+  "tds_limit_reached":"{0} Turn over limit is reached. TDS must be deducted!",
+  "imms_application_message": "New Horizon Application Message",
+  "imms_application_message_total": "Total TDS Limit exceed than {0}",
+  "tcs_limit_reached":"{0} limit is reached. TCS must be charged!",
+  "Import":"Import Excel File",
+  "FromDate":"From Date",
+  "ToDate":"To Date",
+  "detailViewKey":"Detail View",
+  "TransferToTally":"Transfer Remittance to Tally",
+  "NotToPayToOriginalSupplier": "Not allowed to enter tax value due to this tax is paying to transporter.",
+  "common_Deletedby": "Deleted By:",
+  "license_missing_or_Invalid_key": "Critical Error-1. Please contact SourcePro.",
+  "System_Outof_Date": "Critical Error-2. Please contact SourcePro.",
+  "CheckSum_MisMatched": "Critical Error-3. Please contact SourcePro.",
+  "license_missing_or_Invalid_key_MisMatch": "Critical Error-4. Please contact SourcePro.",
+  "license_missing_or_Invalid_key_MisMatch_Key": "Critical Error-5. Please contact SourcePro.",
+  "ProdAdd": "Add Prod.",
+  "AuthMsg1":"Authentication error occurred! Check server ports©",
+  "AuthMsg2":"Insufficient Users base payload! Check server threads©",
+  "AuthMsg3":"Web socket compromised! Check server sockets©",
+  "AuthMsg4":"Transfer protocol failed! Check server core©",
+  "AuthMsg5":"Recursion threshold activation fault! Check server temp environment©",
+  "AuthMsg6":"Cryptography fabric overload! Check server security©",
+  "SwitchCompanySiteValidation1": "You are currently logged in to the chosen company and site.",
+  "SwitchCompanySiteValidation2": "Successfully switched company and site",
+  "ErrorUnknownCode1":"Unknown Error 1",
+  "ErrorUnknownCode2":"Unknown Error 2",
+  "ErrorUnknownCode3":"Unknown Error 3",
+  "ErrorUnknownCode4":"Unknown Error 4",
+  "ErrorUnknownCode5":"Unknown Error 5",
+  "ErrorUnknownCode6":"Unknown Error 6",
+  "UnAuthorizeAccess":"Access Denided.You are not an Authorised User."
+}
+------------------------------------------------------------------------------------------------------------
+
+5.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/mrpPolicy/getDetail/CTL/CT2
+
+PREVIEW:-
+{,…}
+data
+: 
+{companyCode: "CTL", locationCode: "CT1", createdBy: 2, authorizedORUnAuthorizedIndents: "Y",…}
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": {
+        "companyCode": "CTL",
+        "locationCode": "CT1",
+        "createdBy": 2,
+        "authorizedORUnAuthorizedIndents": "Y",
+        "authorizedORUnAuthorizedPurchaseOrders": "Y",
+        "openIndentsforStock": "Y",
+        "openPurchaseOrdersforStock": "Y",
+        "autoShopisExecuted": "C",
+        "useInwardNoWiseAllocation": "N",
+        "generateOpenLaborJobGatePass": "N",
+        "allocateMaterial": "Y",
+        "allowLabourProductionEntry": "N",
+        "releaseWorkOrderAsPending": "Y",
+        "indentCreationDate": "2",
+        "considerPendingPOQuantity": "Y",
+        "inAutoShopSJOLinkRemoved": "Y",
+        "inPOCancelSJOLinkRemoved": "Y",
+        "inPOShortClosedSJOLinkRemoved": "Y",
+        "inPOMaintenanceAmendmentSJOLinkRemoved": "Y",
+        "creationDateforMKType": 0,
+        "creationDateforASType": 0,
+        "interSiteWarehouseTransferNote": 0,
+        "removeLinkDuetoAnyPositiveTransaction": 0,
+        "useSRNoWiseAllocation": "N",
+        "useBatchWiseAllocation": "N",
+        "useInwardNoWiseAllocationAuto": "Y",
+        "useSRNoWiseAllocationAuto": "Y",
+        "useBatchWiseAllocationAuto": "Y",
+        "allowSJOTrackReport": "Y",
+        "createASMKMILFOSJOFromAutoshop": "Y",
+        "autogencbom": false,
+        "autogenerateprodsjo": "N",
+        "fosjoGroupDataList": null
+    },
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+-------------------------------------------------------------------------------------------------------------
+6.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/salespolicy/getDetail/CTL
+
+PREVIEW:-
+{data: {salesPolicyResultModel: [,…],…}, message: null, errors: null, success: true,…}
+data
+: 
+{salesPolicyResultModel: [,…],…}
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": {
+        "salesPolicyResultModel": [
+            {
+                "msccmpcd": "CTL",
+                "instructionNoteBeforeDeliveryChallanPreparation": "F",
+                "oneInvoiceToOneOrderlink": "F",
+                "deliveryChallanCumInvoice": "F",
+                "discountSeparatlyDuringInvoicing": "T",
+                "discountAccountGroupCode": "E101",
+                "discountAccountCode": "0004",
+                "costOFGoodsSoldGroupCode": "E101",
+                "costOfGoodsSoldAccountCode": "0001",
+                "discountAccountName": "",
+                "costAccountName": "",
+                "discountGroupName": "",
+                "costGroupName": "",
+                "salesOAF": "F",
+                "lCandBGSalesOrder": "T",
+                "agentCommissionExpenseAccountGroup": "E102",
+                "agentCommissionExpenseAccount": "0004",
+                "expenseAccountName": "",
+                "expenseGroupName": "",
+                "totalInvoiceValue": "F",
+                "exportCurrency": "F",
+                "serviceItemMaster": "T",
+                "salesOrderQuotationitems": "F",
+                "projectCostControlthroughCCN": "False",
+                "bookSalesOrderforWarrenty": "True",
+                "uniqueSalesOrderReferenceNumberforCustomer": "False",
+                "noOfMonthstoConsiderForMRDN": "12",
+                "mscmulshipbill": "False",
+                "salesItemRatetobepickedupfrom": "C",
+                "invoiceWithoutRoadPermit": "False",
+                "prepareinvoice": "True",
+                "expenseAccountGroupCode": "E5",
+                "expenseAccountCode": "0013",
+                "expacnm": "",
+                "expgrpnm": "",
+                "expectedInstallationDateinSalesOrderEntry": "True",
+                "materialWithoutManufacturing": "True",
+                "mscEquipmentAttribute": "F",
+                "salesRateUpdation": "0.00",
+                "salesOrderAmendment": "0.00",
+                "salesOrderclosedAtthetimeofDCAuthorization": "True",
+                "salesOrderAmendmentinOAF": "True",
+                "mscquotremak": "False",
+                "displayLastOrderAmendmententry": "False",
+                "recordsofLastSalesdisplay": "1",
+                "msccarrydisc": "False",
+                "consultantCodeinQuotationEntry": "False",
+                "fatchProductSizeInQuotationEntryfromItemMaster": "False",
+                "generateWordTemplatebasedQuotationDocument": "False",
+                "networkpathtoreadQuotationWordTemplate": "",
+                "networkpathtowriteQuotationWordTemplate": "",
+                "checkListofDispatchWithoutManufacturingItems": "False",
+                "dispatchMaterialWithoutManufacturing": "False",
+                "mscaxtelchange": "False",
+                "msctechspecifications": "True",
+                "hsnsacCodeRequired": "F",
+                "dontshowcustomer": true,
+                "restcoresalestrans": false,
+                "autodetaildescription": true,
+                "copyinq": false,
+                "pimanualy": true,
+                "isdcbasepack": true,
+                "isAutoCustCode": true,
+                "allowSOItemCUSTMST": false,
+                "lodfactorcal": false,
+                "capEditAftrAuthinSalInv": false,
+                "ratemrpgst": true,
+                "technicalSpeciforprint": true,
+                "isTechnicalDocumentAttachments": false,
+                "isContinueSaleInvoiceNo": true,
+                "cashDiscountAccountGroupCode": "E5",
+                "cashDiscountAccountCode": "0010",
+                "isInvoiceLevelCashDiscount": true,
+                "isAllowSizeItem": true,
+                "isratestrusectbasedonhsn": false,
+                "enablelinelevelratestructure": false,
+                "allowbackdate": true,
+                "custpoitemsrreq": false,
+                "allowmicrotechspec": false,
+                "isDiscountinVariableAmount": false,
+                "allowduplictae": true,
+                "hidecustcodeanditemDesc": false,
+                "autogenerateoafonsalesorder": false,
+                "isDiffCustBillTo": false,
+                "autoallocitmonoafcreate": false,
+                "ispodtgrtsodt": true,
+                "ischngrateatinvanddcinv": false,
+                "istechnicalspecreq": false,
+                "isCustTestCertiautoSrnoONOrder": false,
+                "isSalesRatechangeSOAmendment": true,
+                "autoCustItemPOsrNo": true,
+                "reqSBomAgainstQuotationOrder": true,
+                "sBomAgainstQuotationOrderLevel": "F",
+                "issobudget": true,
+                "istagno": true,
+                "serviceitemkinkwithinternalitem": true,
+                "lotInvoiceMethodType": "VB",
+                "budgetcontrollvl": "O",
+                "budgetconsumption": true,
+                "soamdaftritmqtyautodeallo": true,
+                "difsiteqtnallow": false
+            }
+        ],
+        "userResultModel": [
+            {
+                "userID": 126,
+                "userCode": "SARANGK",
+                "userName": "Sarang S. Kanitkar"
+            }
+        ]
+    },
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+---------------------------------------------------------------------------------------------------------------
+7.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/getCustomerForAllocationDeAllocation/8/A/L?CUSTCD=
+
+PAYLOAD:-
+
+{pageNumber: 1, pageSize: 10, sortField: "", sortDirection: "asc", searchValue: "", userId: 2,…}
+COMPID
+: 
+1
+pageNumber
+: 
+1
+pageSize
+: 
+10
+searchValue
+: 
+""
+sortDirection
+: 
+"asc"
+sortField
+: 
+""
+userId
+: 
+2
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "totalRows": 30,
+            "custCode": "A001",
+            "custName": "Akzo Nobel India Ltd.",
+            "custFullName": "A001-Akzo Nobel India Ltd.",
+            "city": "MNPR - MANALPUR",
+            "state": "MP - Madhya Pradesh",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "A002",
+            "custName": "Al Fakher Tobacco Factory - F.Z.E",
+            "custFullName": "A002-Al Fakher Tobacco Factory - F.Z.E",
+            "city": "UAE - United Arab Emirates",
+            "state": "UAE - United Arab Emirates",
+            "country": "UAE - Uae"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "A003",
+            "custName": "Apex coco and solar energy limited",
+            "custFullName": "A003-Apex coco and solar energy limited",
+            "city": "TP - Tirupur",
+            "state": "TN - Tamil Nadu",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "A004",
+            "custName": "Aagya enterprises",
+            "custFullName": "A004-Aagya enterprises",
+            "city": "NEE - Neemuch",
+            "state": "MP - Madhya Pradesh",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "A005",
+            "custName": "Apinya medical company Ltd",
+            "custFullName": "A005-Apinya medical company Ltd",
+            "city": "THA - Thailand",
+            "state": "THA - Thailand",
+            "country": "THA - Thailand"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "AUTO",
+            "custName": "AUTO MSPR PVT LDV",
+            "custFullName": "AUTO-AUTO MSPR PVT LDV",
+            "city": "AH - Ahmedabad",
+            "state": "GUJ - Gujarat",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "B002",
+            "custName": "Bajaj Auto Ltd",
+            "custFullName": "B002-Bajaj Auto Ltd",
+            "city": "AU - Aurangabad",
+            "state": "MH - Maharashtra",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "B004",
+            "custName": "Balaji Formalin Pvt Ltd (Mumbai Unit 21-22)",
+            "custFullName": "B004-Balaji Formalin Pvt Ltd (Mumbai Unit 21-22)",
+            "city": "RD - Raigad",
+            "state": "MH - Maharashtra",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "C001",
+            "custName": "Cybernetik Technologies Pvt Ltd Unit 1",
+            "custFullName": "C001-Cybernetik Technologies Pvt Ltd Unit 1",
+            "city": "PU - Pune",
+            "state": "MH - Maharashtra",
+            "country": "IND - India"
+        },
+        {
+            "totalRows": 30,
+            "custCode": "C002",
+            "custName": "Cannapure private limited",
+            "custFullName": "C002-Cannapure private limited",
+            "city": "SHR - Sehore",
+            "state": "MP - Madhya Pradesh",
+            "country": "IND - India"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+--------------------------------------------------------------------------------------------
+
+8.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/getCustomerForAllocationDeAllocation/8/A/V?CUSTCD=A001
+
+PAYLOAD:-
+{pageSize: 10, pageNumber: 0, sortField: "", sortDirection: "", searchValue: "A001", userId: 2,…}
+COMPID
+: 
+1
+pageNumber
+: 
+0
+pageSize
+: 
+10
+searchValue
+: 
+"A001"
+sortDirection
+: 
+""
+sortField
+: 
+""
+userId
+: 
+2
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "totalRows": 1,
+            "custCode": "A001",
+            "custName": "Akzo Nobel India Ltd.",
+            "custFullName": "A001-Akzo Nobel India Ltd.",
+            "city": "MNPR - MANALPUR",
+            "state": "MP - Madhya Pradesh",
+            "country": "IND - India"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+---------------------------------------------------------------------------------------------------
+9.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetGroupForAllocationDeAllocation/[object%20Object],[object%20Object],[object%20Object],[object%20Object]/A/A001/8/A/2/1
+
+PREVIEW:-
+{data: [], message: null, errors: null, success: true, errorMessage: null}
+data
+: 
+[]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{"data":[],"message":null,"errors":null,"success":true,"errorMessage":null}
+-------------------------------------------------------------------------------------------------------------
+10.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/getOafYearList/A001/CT2/A
+
+PREVIEW:-
+{data: [{year: "22-23"}, {year: "24-25"}, {year: "25-26"}, {year: "26-27"}], message: null,…}
+data
+: 
+[{year: "22-23"}, {year: "24-25"}, {year: "25-26"}, {year: "26-27"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "year": "22-23"
+        },
+        {
+            "year": "24-25"
+        },
+        {
+            "year": "25-26"
+        },
+        {
+            "year": "26-27"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+----------------------------------------------------------------------------------------------------------
+11.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetGroupForAllocationDeAllocation/26-27/A/A002/8/A/2/1
+
+PREVIEW:-
+{data: [{group: "OA"}], message: null, errors: null, success: true, errorMessage: null}
+data
+: 
+[{group: "OA"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "group": "OA"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+-----------------------------------------------------------------------------------
+12.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetLocationForAllocationDeAllocation/26-27/OA/A002/8/A/2/1
+
+PREVIEW:-
+{data: [{siteCode: "CT2", siteId: 8}], message: null, errors: null, success: true, errorMessage: null}
+data
+: 
+[{siteCode: "CT2", siteId: 8}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "siteCode": "CT2",
+            "siteId": 8
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+------------------------------------------------------------------------------------------------
+13.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetNumberForAllocationDeAllocation/A002/8/26-27/OA/8/A
+
+PREVIEW:-
+{data: [{number: "000165", oafid: 170573, salesOrdType: "REG", customerPONo: "26820261335",…}],…}
+data
+: 
+[{number: "000165", oafid: 170573, salesOrdType: "REG", customerPONo: "26820261335",…}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "number": "000165",
+            "oafid": 170573,
+            "salesOrdType": "REG",
+            "customerPONo": "26820261335",
+            "internalOrdNo": "26-27/SO/CT2/000182",
+            "oafDate": "2026-08-31T00:00:00",
+            "totalRows": 0
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+------------------------------------------------------------------------------------------------------
+13.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetNumberForAllocationDeAllocationLOV/A002/8/26-27/OA/8/A?ORDOAFNO=
+
+PAYLOAD:-
+{pageNumber: 1, pageSize: 10, sortField: "", sortDirection: "asc", searchValue: "", Flag: "L"}
+Flag
+: 
+"L"
+pageNumber
+: 
+1
+pageSize
+: 
+10
+searchValue
+: 
+""
+sortDirection
+: 
+"asc"
+sortField
+: 
+""
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "number": "000165",
+            "oafid": 170573,
+            "salesOrdType": "REG",
+            "customerPONo": "26820261335",
+            "internalOrdNo": "26-27/SO/CT2/000182",
+            "oafDate": "2026-08-31T00:00:00",
+            "totalRows": 1
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+---------------------------------------------------------------------------------------------------------
+14.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetNumberForAllocationDeAllocationLOV/A002/8/26-27/OA/8/A?ORDOAFNO=000165
+
+PAYLOAD:-
+
+{pageNumber: 0, pageSize: 10, sortField: "", sortDirection: "", searchValue: "000165", Flag: "V"}
+Flag
+: 
+"V"
+pageNumber
+: 
+0
+pageSize
+: 
+10
+searchValue
+: 
+"000165"
+sortDirection
+: 
+""
+sortField
+: 
+""
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "number": "000165",
+            "oafid": 170573,
+            "salesOrdType": "REG",
+            "customerPONo": "26820261335",
+            "internalOrdNo": "26-27/SO/CT2/000182",
+            "oafDate": "2026-08-31T00:00:00",
+            "totalRows": 1
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+15.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetItemDetailsForAllocation/8/26-27/OA/000165/2/06201
+
+PREVIEW:-
+{data: [{custOrdNo: "26820261335", custOrdDate: "2026-08-26T00:00:00", itemCode: "AUTO 03 ON",…}],…}
+data
+: 
+[{custOrdNo: "26820261335", custOrdDate: "2026-08-26T00:00:00", itemCode: "AUTO 03 ON",…}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "custOrdNo": "26820261335",
+            "custOrdDate": "2026-08-26T00:00:00",
+            "itemCode": "AUTO  03 ON",
+            "tolerance": "0.00",
+            "itemName": "auto opening falg On WH mapped with  Calss only.",
+            "salesItemCode": "AUTO  03 ON",
+            "salesItemName": "auto opening falg On WH mapped with  Calss only.",
+            "oafQty": 5.0000,
+            "alrdyAlcQty": 5.0000,
+            "maxAllocatedQty": 5.0000,
+            "alcQtyIUOM": 0.0,
+            "sizeRequired": false,
+            "inwardRequired": true,
+            "heatRequired": false,
+            "serialNoRequired": false,
+            "uom": "NOS",
+            "digitsAfterDecimal": 0,
+            "shipCode": "CADD",
+            "oafId": 170573,
+            "mfgBchRequired": false,
+            "freeONHand": 0.0000,
+            "custPoItmSrNo": "1",
+            "itmModelRefNo": 1,
+            "barcodeRequired": false,
+            "isLongOrSizeItem": false,
+            "densityValue": 0.00000000000000000000,
+            "dimension1": 0.0,
+            "dimension2": 0.0,
+            "dimension3": 0.0,
+            "dimensionFormula": "",
+            "dimensionSize": "",
+            "noOfPiece": 0,
+            "totalWeight": 0.0000,
+            "alrdyAlcQtysuom": 5.0000
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+----------------------------------------------------------------------------------------------------------------
+16.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/GetWarehouseDetailListForAllocation
+
+PAYLOAD:-
+{itemcode: "TEST ITEM 02", transid: "06201", siteid: 1, inwardrequired: false, itemsize: ""}
+inwardrequired
+: 
+false
+itemcode
+: 
+"TEST ITEM 02"
+itemsize
+: 
+""
+siteid
+: 
+1
+transid
+: 
+"06201"
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "wareHouseID": 1,
+            "wareHouseCode": "GST1",
+            "wareHouseDesc": "All goods",
+            "warhouseFullName": "GST1 - All goods",
+            "freeOnHand": 983.0000,
+            "onHand": 1000.0000,
+            "allocated": 17.0000,
+            "mfgBatchNo": "",
+            "serialNo": "",
+            "size": "",
+            "onHandWeight": 0.0,
+            "inwdno": "",
+            "heat": ""
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+-----------------------------------------------------------------------------------------------
+18.GET
+
+API:-
+http://192.168.0.147:8014/assets/languages/eng/sales/salesdispatch/salesallocation.json
+
+PREVIEW:-
+{sales_saledispatch_saleallocde_alcqty: "Alc. Qty IUOM",…}
+sales_saledispatch_customersrno
+: 
+"Customer PO. Item Sr. No"
+sales_saledispatch_packingslip_packqtyvalidation
+: 
+"Packing Quantity can't be greater then Remaining Quantity"
+sales_saledispatch_packingslip_pckqty
+: 
+"Packing Qty"
+sales_saledispatch_packingslip_remqty
+: 
+"Remaining Qty"
+sales_saledispatch_saleallocde_alcqty
+: 
+"Alc. Qty IUOM"
+sales_saledispatch_saleallocde_allocate
+: 
+"Allocate"
+sales_saledispatch_saleallocde_allocation
+: 
+"Allocation"
+sales_saledispatch_saleallocde_allocdetails
+: 
+"Allocation Details"
+sales_saledispatch_saleallocde_allocqty
+: 
+"Allocation Qty."
+sales_saledispatch_saleallocde_cancel
+: 
+"Cancel"
+sales_saledispatch_saleallocde_custodrdet
+: 
+"Customer Order Details"
+sales_saledispatch_saleallocde_customer
+: 
+"Customer"
+sales_saledispatch_saleallocde_date
+: 
+"Date"
+sales_saledispatch_saleallocde_dcancel
+: 
+"Cancel"
+sales_saledispatch_saleallocde_dcustodrdet
+: 
+"Customer Order Details"
+sales_saledispatch_saleallocde_dcustomer
+: 
+"Customer"
+sales_saledispatch_saleallocde_ddate
+: 
+"Date"
+sales_saledispatch_saleallocde_ddealcqty
+: 
+"DeAlc. Qty IUOM"
+sales_saledispatch_saleallocde_ddesc
+: 
+"Description"
+sales_saledispatch_saleallocde_deallocate
+: 
+"DeAllocate"
+sales_saledispatch_saleallocde_deallocation
+: 
+"Deallocation"
+sales_saledispatch_saleallocde_deallocdetails
+: 
+"DeAllocation Details"
+sales_saledispatch_saleallocde_deallocqty
+: 
+"DeAllocation Qty."
+sales_saledispatch_saleallocde_desc
+: 
+"Description"
+sales_saledispatch_saleallocde_dfillqty
+: 
+"Fill Quantity"
+sales_saledispatch_saleallocde_dgrp
+: 
+"Group"
+sales_saledispatch_saleallocde_dinternalitem
+: 
+"Internal Item"
+sales_saledispatch_saleallocde_dinternalitemdesc
+: 
+"Internal Item Description"
+sales_saledispatch_saleallocde_ditemsrno
+: 
+"Item Sr. No. Allocation Details"
+sales_saledispatch_saleallocde_dmaxalc
+: 
+"Max. DeAlc. Qty (IUOM) Including Tolerance"
+sales_saledispatch_saleallocde_dnumber
+: 
+"Number"
+sales_saledispatch_saleallocde_dnumber1
+: 
+"Number"
+sales_saledispatch_saleallocde_doafdetails
+: 
+"OAF Details"
+sales_saledispatch_saleallocde_doafqty
+: 
+"OAF Qty (IUOM)"
+sales_saledispatch_saleallocde_donhand
+: 
+"On-Hand Qty."
+sales_saledispatch_saleallocde_dsalesitem
+: 
+"Sales Item"
+sales_saledispatch_saleallocde_dsalesitmdesc
+: 
+"Sales Item Description"
+sales_saledispatch_saleallocde_dshipcode
+: 
+"Ship Code"
+sales_saledispatch_saleallocde_dsite
+: 
+"Site"
+sales_saledispatch_saleallocde_dtolerance
+: 
+"Tolerance % for Sales Allocation and Dispatch"
+sales_saledispatch_saleallocde_dunfillqty
+: 
+"UnFill Quantity"
+sales_saledispatch_saleallocde_dware
+: 
+"Warehouse Code"
+sales_saledispatch_saleallocde_dyear
+: 
+"Year"
+sales_saledispatch_saleallocde_fillqty
+: 
+"Fill Quantity"
+sales_saledispatch_saleallocde_freehand
+: 
+"Free OnHand Qty."
+sales_saledispatch_saleallocde_grp
+: 
+"Group"
+sales_saledispatch_saleallocde_heat
+: 
+"Heat No."
+sales_saledispatch_saleallocde_internalitem
+: 
+"Internal Item"
+sales_saledispatch_saleallocde_internalitemdesc
+: 
+"Internal Item Description"
+sales_saledispatch_saleallocde_inward
+: 
+"Inward No."
+sales_saledispatch_saleallocde_itemsrno
+: 
+"Item Sr. No. Allocation Details"
+sales_saledispatch_saleallocde_manbatch
+: 
+"Manufacturing Batch No"
+sales_saledispatch_saleallocde_maxalc
+: 
+"Max. Alc. Qty (IUOM) Including Tolerance"
+sales_saledispatch_saleallocde_maxalcqty
+: 
+"Max Alc. Qty."
+sales_saledispatch_saleallocde_maxalcsuom
+: 
+"Max.Alc.Qty(SUOM)"
+sales_saledispatch_saleallocde_maxdealcqty
+: 
+"Max DeAlc. Qty."
+sales_saledispatch_saleallocde_maxdealcsuom
+: 
+"Max.DeAlc.Qty(SUOM)"
+sales_saledispatch_saleallocde_number
+: 
+"Number"
+sales_saledispatch_saleallocde_number1
+: 
+"Number"
+sales_saledispatch_saleallocde_oafdetails
+: 
+"OAF Details"
+sales_saledispatch_saleallocde_oafqty
+: 
+"OAF Qty (IUOM)"
+sales_saledispatch_saleallocde_onhand
+: 
+"On-Hand Qty."
+sales_saledispatch_saleallocde_qtydealloc
+: 
+"Qty. for Deallocation"
+sales_saledispatch_saleallocde_qtydelloc
+: 
+"Qty for Deallocation"
+sales_saledispatch_saleallocde_qtyhand
+: 
+"Qty should be less then on hand QTY"
+sales_saledispatch_saleallocde_salealloctedealloc
+: 
+"Sales Allocation /De-Allocation"
+sales_saledispatch_saleallocde_salesitem
+: 
+"Sales Item"
+sales_saledispatch_saleallocde_salesitmdesc
+: 
+"Sales Item Description"
+sales_saledispatch_saleallocde_serial
+: 
+"Serial No."
+sales_saledispatch_saleallocde_shipcode
+: 
+"Ship Code"
+sales_saledispatch_saleallocde_site
+: 
+"Site"
+sales_saledispatch_saleallocde_tolerance
+: 
+"Tolerance % for Sales Allocation and Dispatch"
+sales_saledispatch_saleallocde_totalalcqty
+: 
+"Total Alc. Qty."
+sales_saledispatch_saleallocde_totaldealcqty
+: 
+"Total DeAlc. Qty."
+sales_saledispatch_saleallocde_unfillqty
+: 
+"UnFill Quantity"
+sales_saledispatch_saleallocde_ware
+: 
+"Warehouse Code"
+sales_saledispatch_saleallocde_year
+: 
+"Year"
+sales_saledispatch_salinq_dim_size
+: 
+"Size"
+sales_saledispatch_salinq_no_of_piece
+: 
+"No Of Piece"
+sales_saledispatch_salinq_weight
+: 
+"Weight"
+
+RESPONSE:-
+{
+    "sales_saledispatch_saleallocde_alcqty": "Alc. Qty IUOM",
+    "sales_saledispatch_saleallocde_allocate": "Allocate",
+    "sales_saledispatch_saleallocde_allocation": "Allocation",
+    "sales_saledispatch_saleallocde_allocdetails": "Allocation Details",
+    "sales_saledispatch_saleallocde_allocqty": "Allocation Qty.",
+    "sales_saledispatch_saleallocde_cancel": "Cancel",
+    "sales_saledispatch_saleallocde_custodrdet": "Customer Order Details",
+    "sales_saledispatch_saleallocde_customer": "Customer",
+    "sales_saledispatch_saleallocde_date": "Date",
+    "sales_saledispatch_saleallocde_dcancel": "Cancel",
+    "sales_saledispatch_saleallocde_dcustodrdet": "Customer Order Details",
+    "sales_saledispatch_saleallocde_dcustomer": "Customer",
+    "sales_saledispatch_saleallocde_ddate": "Date",
+    "sales_saledispatch_saleallocde_ddealcqty": "DeAlc. Qty IUOM",
+    "sales_saledispatch_saleallocde_ddesc": "Description",
+    "sales_saledispatch_saleallocde_deallocate": "DeAllocate",
+    "sales_saledispatch_saleallocde_deallocation": "Deallocation",
+    "sales_saledispatch_saleallocde_deallocdetails": "DeAllocation Details",
+    "sales_saledispatch_saleallocde_deallocqty": "DeAllocation Qty.",
+    "sales_saledispatch_saleallocde_desc": "Description",
+    "sales_saledispatch_saleallocde_dfillqty": "Fill Quantity",
+    "sales_saledispatch_saleallocde_dgrp": "Group",
+    "sales_saledispatch_saleallocde_dinternalitem": "Internal Item",
+    "sales_saledispatch_saleallocde_dinternalitemdesc": "Internal Item Description",
+    "sales_saledispatch_saleallocde_ditemsrno": "Item Sr. No. Allocation Details",
+    "sales_saledispatch_saleallocde_dmaxalc": "Max. DeAlc. Qty (IUOM) Including Tolerance",
+    "sales_saledispatch_saleallocde_dnumber": "Number",
+    "sales_saledispatch_saleallocde_dnumber1": "Number",
+    "sales_saledispatch_saleallocde_doafdetails": "OAF Details",
+    "sales_saledispatch_saleallocde_doafqty": "OAF Qty (IUOM)",
+    "sales_saledispatch_saleallocde_donhand": "On-Hand Qty.",
+    "sales_saledispatch_saleallocde_dsalesitem": "Sales Item",
+    "sales_saledispatch_saleallocde_dsalesitmdesc": "Sales Item Description",
+    "sales_saledispatch_saleallocde_dshipcode": "Ship Code",
+    "sales_saledispatch_saleallocde_dsite": "Site",
+    "sales_saledispatch_saleallocde_dtolerance": "Tolerance % for Sales Allocation and Dispatch",
+    "sales_saledispatch_saleallocde_dunfillqty": "UnFill Quantity",
+    "sales_saledispatch_saleallocde_dware": "Warehouse Code",
+    "sales_saledispatch_saleallocde_dyear": "Year",
+    "sales_saledispatch_saleallocde_fillqty": "Fill Quantity",
+    "sales_saledispatch_saleallocde_freehand": "Free OnHand Qty.",
+    "sales_saledispatch_saleallocde_grp": "Group",
+    "sales_saledispatch_saleallocde_heat": "Heat No.",
+    "sales_saledispatch_saleallocde_internalitem": "Internal Item",
+    "sales_saledispatch_saleallocde_internalitemdesc": "Internal Item Description",
+    "sales_saledispatch_saleallocde_inward": "Inward No.",
+    "sales_saledispatch_saleallocde_itemsrno": "Item Sr. No. Allocation Details",
+    "sales_saledispatch_saleallocde_manbatch": "Manufacturing Batch No",
+    "sales_saledispatch_saleallocde_maxalc": "Max. Alc. Qty (IUOM) Including Tolerance",
+    "sales_saledispatch_saleallocde_maxalcqty": "Max Alc. Qty.",
+    "sales_saledispatch_saleallocde_maxdealcqty": "Max DeAlc. Qty.",
+    "sales_saledispatch_saleallocde_number": "Number",
+    "sales_saledispatch_saleallocde_number1": "Number",
+    "sales_saledispatch_saleallocde_oafdetails": "OAF Details",
+    "sales_saledispatch_saleallocde_oafqty": "OAF Qty (IUOM)",
+    "sales_saledispatch_saleallocde_onhand": "On-Hand Qty.",
+    "sales_saledispatch_salinq_dim_size": "Size",
+    "sales_saledispatch_salinq_no_of_piece": "No Of Piece",
+    "sales_saledispatch_salinq_weight": "Weight",
+    "sales_saledispatch_saleallocde_qtydealloc": "Qty. for Deallocation",
+    "sales_saledispatch_saleallocde_qtydelloc": "Qty for Deallocation",
+    "sales_saledispatch_saleallocde_qtyhand": "Qty should be less then on hand QTY",
+    "sales_saledispatch_saleallocde_salealloctedealloc": "Sales Allocation /De-Allocation",
+    "sales_saledispatch_saleallocde_salesitem": "Sales Item",
+    "sales_saledispatch_saleallocde_salesitmdesc": "Sales Item Description",
+    "sales_saledispatch_saleallocde_serial": "Serial No.",
+    "sales_saledispatch_saleallocde_shipcode": "Ship Code",
+    "sales_saledispatch_saleallocde_site": "Site",
+    "sales_saledispatch_saleallocde_tolerance": "Tolerance % for Sales Allocation and Dispatch",
+    "sales_saledispatch_saleallocde_totalalcqty": "Total Alc. Qty.",
+    "sales_saledispatch_saleallocde_totaldealcqty": "Total DeAlc. Qty.",
+    "sales_saledispatch_saleallocde_unfillqty": "UnFill Quantity",
+    "sales_saledispatch_saleallocde_ware": "Warehouse Code",
+    "sales_saledispatch_saleallocde_year": "Year",
+    "sales_saledispatch_packingslip_pckqty": "Packing Qty",
+    "sales_saledispatch_packingslip_remqty": "Remaining Qty",
+    "sales_saledispatch_packingslip_packqtyvalidation": "Packing Quantity can't be greater then Remaining Quantity",
+    "sales_saledispatch_customersrno": "Customer PO. Item Sr. No",
+    "sales_saledispatch_saleallocde_maxalcsuom": "Max.Alc.Qty(SUOM)",
+    "sales_saledispatch_saleallocde_maxdealcsuom": "Max.DeAlc.Qty(SUOM)"
+}
+-----------------------------------------------------------------------------------------------------------------
+19.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/SalesAllocationDeAllocation/createAllocation
+
+PAYLOAD:-
+[{oafId: 80293, itmModelRefNo: 1, itemCode: "TEST ITEM 02", salesItemCode: "TEST ITEM 02",…}]
+0
+: 
+{oafId: 80293, itmModelRefNo: 1, itemCode: "TEST ITEM 02", salesItemCode: "TEST ITEM 02",…}
+
+RESPONSE:-
+{
+    "data": null,
+    "message": "CreatedKey",
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+------------------------------------------------------------------------------------------------------------------

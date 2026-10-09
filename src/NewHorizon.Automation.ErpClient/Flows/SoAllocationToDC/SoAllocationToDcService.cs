@@ -370,7 +370,7 @@ public sealed partial class SoAllocationToDcService : ISoAllocationToDcService
                     var hasShipRecord = shipmentInfoList.Any(s =>
                         string.Equals(s.SalesItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase));
 
-                    var isReady = item.AllocationId > 0 && hasShipRecord && item.MaxDcQtyIuom > 0;
+                    var isReady = hasShipRecord && item.MaxDcQtyIuom > 0;
                     if (isReady)
                     {
                         anyReadyItem = true;

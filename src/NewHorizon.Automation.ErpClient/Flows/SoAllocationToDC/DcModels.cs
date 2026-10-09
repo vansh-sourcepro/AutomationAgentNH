@@ -84,6 +84,7 @@ public sealed record BatchDcCreationRequest(
     string? OafYear = null,
     IReadOnlyList<int>? AllocationIds = null,
     IReadOnlyList<int>? OafIds = null,
+    IReadOnlyList<string>? OafNumbers = null,
     bool DryRun = false);
 
 /// <summary>
