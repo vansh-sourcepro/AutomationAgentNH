@@ -35,8 +35,26 @@ internal static class ProcessJobMapper
             run.CompletedAtUtc,
             run.DurationMs);
 
-    public static ProcessRunResponse ToResponse(PoGrnRun run) =>
-        new(
+    public static ProcessRunResponse ToResponse(PoGrnRun run, IReadOnlyList<PoGrnReceipt>? receipts = null)
+    {
+        var validReceipts = receipts ?? [];
+        var createdGrns = validReceipts
+            .Where(r => !string.IsNullOrWhiteSpace(r.GrnNumber))
+            .Select(r => r.GrnNumber!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var poNumbers = validReceipts
+            .Where(r => !string.IsNullOrWhiteSpace(r.PoNumber))
+            .Select(r => r.PoNumber.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        string? grnNumber = createdGrns.Count > 0 ? string.Join(", ", createdGrns) : null;
+        IReadOnlyList<string>? grnNumbers = createdGrns.Count > 0 ? createdGrns : null;
+        string? poNumberStr = poNumbers.Count > 0 ? string.Join(", ", poNumbers) : null;
+
+        return new(
             run.Id,
             CorrelationId: run.TriggerReference ?? string.Empty,
             Workflow: "PoToGrn",
@@ -54,7 +72,13 @@ internal static class ProcessJobMapper
             run.FailureReason,
             run.StartedAtUtc,
             run.CompletedAtUtc,
-            run.CompletedAtUtc.HasValue ? (long?)(run.CompletedAtUtc.Value - run.StartedAtUtc).TotalMilliseconds : null);
+            run.CompletedAtUtc.HasValue ? (long?)(run.CompletedAtUtc.Value - run.StartedAtUtc).TotalMilliseconds : null,
+            PosExamined: run.PosExamined,
+            GrnsCreated: run.GrnsCreated,
+            GrnNumber: grnNumber,
+            GrnNumbers: grnNumbers,
+            PoNumbers: poNumberStr);
+    }
 
     /// <summary>
     /// One grid line. The company is passed in rather than read from the row: it is configuration,

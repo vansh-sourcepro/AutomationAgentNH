@@ -35,6 +35,15 @@ public static class PoToGrnModule
         return services;
     }
 
+    public static IServiceCollection AddPoToGrnServices(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IPoGrnDashboardService, PoGrnDashboardService>();
+
+        return services;
+    }
+
     /// <summary>
     /// Mapped whether or not there is a database: without one both APIs answer 503 and say why,
     /// which beats a 404 that leaves the caller wondering if the path is wrong. Both take the API

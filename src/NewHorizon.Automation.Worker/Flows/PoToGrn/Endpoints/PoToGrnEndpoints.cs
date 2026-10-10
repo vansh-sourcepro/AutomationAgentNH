@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.Application.Flows.IndentToPo;
@@ -5,9 +6,11 @@ using NewHorizon.Automation.Application.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.ErpClient.Flows.PoToGrn;
+using NewHorizon.Automation.Infrastructure.Persistence;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IndentToPo.Endpoints;
 using NewHorizon.Automation.Worker.Flows.PoToGrn.Contracts;
+using NewHorizon.Automation.Worker.Flows.PoToGrn.Services;
 
 namespace NewHorizon.Automation.Worker.Flows.PoToGrn.Endpoints;
 
@@ -51,6 +54,10 @@ public static class PoToGrnEndpoints
             .WithName("GetPoToGrnRun")
             .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
+        endpoints.MapGet("/api/automation/po-to-grn/receipts", ListReceiptsAsync)
+            .WithName("ListPoToGrnReceipts")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
         endpoints.MapGet("/api/automation/po-to-grn/summary", (
             IProcessJobService processJobs,
             IServiceProvider sp,
@@ -68,6 +75,28 @@ public static class PoToGrnEndpoints
             int days = 30) => ProcessJobEndpoints.GetDailyStatsAsync(
                 processJobs, sp, ct, module: "po-to-grn", workflow: null, days: days))
             .WithName("GetPoToGrnDailySummary")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/po-to-grn/dashboard", (
+            IServiceProvider sp,
+            CancellationToken ct,
+            DateTimeOffset? from,
+            DateTimeOffset? to,
+            DateTimeOffset? date,
+            int days = 30,
+            string? order = null) => GetDashboardAsync(sp, ct, from, to, date, days, order))
+            .WithName("GetPoToGrnDashboard")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints.MapGet("/api/automation/po-to-grn/dashbord", (
+            IServiceProvider sp,
+            CancellationToken ct,
+            DateTimeOffset? from,
+            DateTimeOffset? to,
+            DateTimeOffset? date,
+            int days = 30,
+            string? order = null) => GetDashboardAsync(sp, ct, from, to, date, days, order))
+            .WithName("GetPoToGrnDashboardTypo")
             .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints.MapGet("/api/automation/runs", (
@@ -348,4 +377,72 @@ public static class PoToGrnEndpoints
                 result.LinesReceived,
                 result.LinesSkipped,
                 result.Notes))]);
+
+    private static async Task<IResult> ListReceiptsAsync(
+        IServiceProvider sp,
+        CancellationToken cancellationToken,
+        string? search = null,
+        string? status = null,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        int page = 1,
+        int pageSize = 50)
+    {
+        var dbContext = sp.GetService<AutomationDbContext>();
+        if (dbContext is null)
+        {
+            return Results.Ok(new Application.Jobs.PagedResult<PoGrnReceipt>([], 0, page, pageSize));
+        }
+
+        var query = dbContext.PoGrnReceipts.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(r => r.PoNumber.Contains(term)
+                || (r.GrnNumber != null && r.GrnNumber.Contains(term))
+                || r.VendorCode.Contains(term));
+        }
+
+        if (!string.IsNullOrWhiteSpace(status)
+            && Enum.TryParse<PoGrnReceiptStatus>(status.Trim(), ignoreCase: true, out var receiptStatus))
+        {
+            query = query.Where(r => r.Status == receiptStatus);
+        }
+
+        if (from.HasValue) query = query.Where(r => r.RecordedAtUtc >= from.Value);
+        if (to.HasValue)
+        {
+            var effectiveTo = to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value;
+            query = query.Where(r => r.RecordedAtUtc <= effectiveTo);
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var items = await query.OrderByDescending(r => r.RecordedAtUtc)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(new Application.Jobs.PagedResult<PoGrnReceipt>(items, total, page, pageSize));
+    }
+
+    private static async Task<IResult> GetDashboardAsync(
+        IServiceProvider sp,
+        CancellationToken cancellationToken,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        DateTimeOffset? date = null,
+        int days = 30,
+        string? order = null)
+    {
+        if (date.HasValue)
+        {
+            from ??= date.Value.Date;
+            to ??= date.Value.Date;
+        }
+
+        var dashboardService = sp.GetService<IPoGrnDashboardService>() ?? new PoGrnDashboardService(sp);
+        var response = await dashboardService.GetDashboardAsync(from, to, days, cancellationToken, order);
+        return Results.Ok(response);
+    }
 }

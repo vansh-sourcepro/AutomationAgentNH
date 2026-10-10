@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using NewHorizon.Automation.Worker.Contracts;
 
 namespace NewHorizon.Automation.Worker.Flows.IndentToPo.Contracts;
@@ -167,7 +168,17 @@ public sealed record ProcessRunResponse(
     string? FailureReason,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset? CompletedAtUtc,
-    long? DurationMs);
+    long? DurationMs,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? PosExamined = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? GrnsCreated = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? GrnNumber = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? GrnNumbers = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? PoNumbers = null);
 
 /// <summary>
 /// The conversion grid collapsed to totals — the same filter <see cref="ProcessJobRowResponse"/>'s
@@ -220,7 +231,17 @@ public sealed record ProcessJobSummaryResponse(
     int TotalTriggerAttempts,
     int TriggerAttemptsWithoutEligibleIndent,
     int BusinessRefusalCount,
-    int TechnicalFailureCount);
+    int TechnicalFailureCount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? TotalPosExamined = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? TotalGrnsCreated = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? TotalPosSkipped = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? TotalPosFailed = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? TriggerAttemptsWithoutEligiblePo = null);
 
 /// <summary>
 /// One calendar day's (UTC) conversion activity — the dashboard chart's unit. <paramref name="Date"/>
@@ -233,7 +254,13 @@ public sealed record DailyConversionStatResponse(
     string Date,
     int PurchaseOrdersCreated,
     int IndentsConverted,
-    int IndentsFailed);
+    int IndentsFailed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? GrnsCreated = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? PosExamined = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? PosFailed = null);
 
 /// <summary>A run and the executions it started.</summary>
 public sealed record ProcessRunDetailResponse(

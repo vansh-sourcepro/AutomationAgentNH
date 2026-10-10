@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -51,10 +52,22 @@ public sealed class PoToGrnService : IPoToGrnService
     private readonly IPoGrnHistory _history;
     private readonly ILogger<PoToGrnService> _logger;
 
+    private static readonly ConcurrentDictionary<string, (DateTimeOffset ExpiresAt, IReadOnlyDictionary<int, (DateOnly Start, DateOnly End)> Value)> FinancePeriodsCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (DateTimeOffset ExpiresAt, bool Value)> InventoryPolicyCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, GrnDocumentControl> SharedDocumentControlCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan StaticCacheTtl = TimeSpan.FromMinutes(30);
+
     private readonly Dictionary<string, GrnDocumentControl> _documentControl = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, JsonArray> _rateComponents = new(StringComparer.Ordinal);
 
     private bool _firstLineLogged;
+
+    internal static void ClearStaticCaches()
+    {
+        FinancePeriodsCache.Clear();
+        InventoryPolicyCache.Clear();
+        SharedDocumentControlCache.Clear();
+    }
 
     public PoToGrnService(
         IHttpClientFactory httpClientFactory,
@@ -115,12 +128,16 @@ public sealed class PoToGrnService : IPoToGrnService
             ids is null && numbers is null ? string.Empty : ", limited to named POs",
             request.DryRun ? " (dry run — nothing will be created)" : string.Empty);
 
+        var userId = await _tokenProvider.GetUserIdAsync(cancellationToken);
+        var periods = await GetFinancePeriodsAsync(cancellationToken);
+        var warehousePolicy = await GetItemLevelWarehouseAsync(cancellationToken);
+
         var run = new RunContext(
             request,
             _clock.LocalDate,
-            await _tokenProvider.GetUserIdAsync(cancellationToken),
-            await GetFinancePeriodsAsync(cancellationToken),
-            await GetItemLevelWarehouseAsync(cancellationToken));
+            userId,
+            periods,
+            warehousePolicy);
 
         var candidates = await DiscoverAsync(sites, types, ids, numbers, request.MaxPos, run.UserId, cancellationToken);
 
@@ -198,40 +215,29 @@ public sealed class PoToGrnService : IPoToGrnService
         CancellationToken cancellationToken)
     {
         var found = new List<PoGrnCandidate>();
+        var targetCount = numbers is { Count: > 0 } || ids is { Count: > 0 }
+            ? Math.Min(maxPos, (numbers?.Count ?? 0) + (ids?.Count ?? 0))
+            : maxPos;
 
-        // One named bare number narrows the ERP's own search to a page; otherwise scan newest-first.
-        var searchValue = numbers is { Count: 1 } ? numbers.First().Split('/').Last() : string.Empty;
+        bool AllRequestedFound() =>
+            (ids is null || ids.All(id => found.Any(po => po.PoId == id)))
+            && (numbers is null || numbers.All(num => found.Any(po => Matches(po, num))));
 
+        // Phase 1: Fast scan using empty searchValue (SQL Server clustered index seek on POHAUTOID DESC).
+        // For recently created POs or general sweeps, Page 1 has the newest 200 POs and executes in ~50-100ms.
         foreach (var type in types)
         {
+            if (found.Count >= targetCount || (numbers is not null && AllRequestedFound()))
+            {
+                break;
+            }
+
             var ofType = 0;
             var scanned = 0;
 
-            for (var page = 1; ofType < maxPos; page++)
+            for (var page = 1; ; page++)
             {
-                var body = new JsonObject
-                {
-                    ["pageNumber"] = page,
-                    ["pageSize"] = DiscoveryPageSize,
-                    ["sortField"] = string.Empty,
-                    ["sortDirection"] = string.Empty,
-                    ["searchValue"] = searchValue,
-                    // The PO list screen's own literals: a quoted SQL list of POHTYPE codes.
-                    ["potype"] = $"'{type.Code()}'",
-                    ["usrLvl"] = 0,
-                    ["usrSubLvl"] = 0,
-                    ["mulLvlAuthRed"] = false,
-                    ["valLimit"] = 0,
-                    ["docType"] = "PR",
-                    ["docSubType"] = type.PoSubType(),
-                    ["companyId"] = _options.CompanyId,
-                    ["userId"] = userId,
-                    ["ptype"] = "R",
-                    ["vendorcode"] = string.Empty,
-                    ["fromdate"] = string.Empty,
-                    ["todate"] = string.Empty,
-                };
-
+                var body = BuildPoListBody(page, string.Empty, type, userId);
                 var endpoint = _endpoints.PoList(sites, _options.CompanyId, _options.LocationId);
                 var batch = (await PostArrayAsync(endpoint, body, cancellationToken: cancellationToken)).Rows().ToList();
 
@@ -247,16 +253,23 @@ public sealed class PoToGrnService : IPoToGrnService
                         continue;
                     }
 
-                    if ((ids is not null || numbers is not null)
-                        && !(ids?.Contains(po.PoId) ?? false)
-                        && !(numbers?.Any(number => Matches(po, number)) ?? false))
+                    if (ids is not null && !ids.Contains(po.PoId))
                     {
                         continue;
                     }
 
-                    found.Add(po);
+                    if (numbers is not null && !numbers.Any(number => Matches(po, number)))
+                    {
+                        continue;
+                    }
 
-                    if (++ofType >= maxPos)
+                    if (found.All(candidate => candidate.PoId != po.PoId))
+                    {
+                        found.Add(po);
+                        ofType++;
+                    }
+
+                    if (found.Count >= targetCount || (numbers is not null && AllRequestedFound()))
                     {
                         break;
                     }
@@ -264,11 +277,82 @@ public sealed class PoToGrnService : IPoToGrnService
 
                 scanned += batch.Count;
 
-                if (batch.Count < DiscoveryPageSize
-                    || scanned >= batch[0].Whole("totalRows")
-                    || (_options.MaxScannedPos > 0 && scanned >= _options.MaxScannedPos))
+                if (found.Count >= targetCount || (numbers is not null && AllRequestedFound()))
                 {
                     break;
+                }
+
+                // If specific PO numbers were named, don't keep paginating without search filter;
+                // anything not on page 1 will be fetched directly in Phase 2.
+                if (numbers is not null)
+                {
+                    break;
+                }
+
+                if (batch.Count < DiscoveryPageSize
+                    || scanned >= batch[0].Whole("totalRows")
+                    || (_options.MaxScannedPos > 0 && scanned >= _options.MaxScannedPos)
+                    || ofType >= maxPos)
+                {
+                    break;
+                }
+            }
+        }
+
+        // Phase 2: If named PO numbers were requested and any were not in the newest 200 POs (e.g. an older PO),
+        // query the ERP specifically for the missing ones.
+        if (numbers is not null && !AllRequestedFound() && found.Count < targetCount)
+        {
+            var missingNumbers = numbers.Where(num => !found.Any(po => Matches(po, num))).ToList();
+            var searchValues = missingNumbers
+                .Select(number => number.Split('/').Last().Trim())
+                .Where(search => search.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var searchValue in searchValues)
+            {
+                if (found.Count >= targetCount || AllRequestedFound())
+                {
+                    break;
+                }
+
+                var foundForSearch = false;
+
+                foreach (var type in types)
+                {
+                    if (found.Count >= targetCount || foundForSearch || AllRequestedFound())
+                    {
+                        break;
+                    }
+
+                    var body = BuildPoListBody(1, searchValue, type, userId);
+                    var endpoint = _endpoints.PoList(sites, _options.CompanyId, _options.LocationId);
+                    var batch = (await PostArrayAsync(endpoint, body, cancellationToken: cancellationToken)).Rows().ToList();
+
+                    foreach (var row in batch)
+                    {
+                        if (ReadCandidate(row, type) is not { } po)
+                        {
+                            continue;
+                        }
+
+                        if (ids is not null && !ids.Contains(po.PoId))
+                        {
+                            continue;
+                        }
+
+                        if (!numbers.Any(number => Matches(po, number)))
+                        {
+                            continue;
+                        }
+
+                        if (found.All(candidate => candidate.PoId != po.PoId))
+                        {
+                            found.Add(po);
+                            foundForSearch = true;
+                        }
+                    }
                 }
             }
         }
@@ -280,6 +364,30 @@ public sealed class PoToGrnService : IPoToGrnService
 
         return eligible;
     }
+
+    private JsonObject BuildPoListBody(int page, string searchValue, PoGrnType type, int userId) =>
+        new()
+        {
+            ["pageNumber"] = page,
+            ["pageSize"] = DiscoveryPageSize,
+            ["sortField"] = string.Empty,
+            ["sortDirection"] = string.Empty,
+            ["searchValue"] = searchValue,
+            // The PO list screen's own literals: a quoted SQL list of POHTYPE codes.
+            ["potype"] = $"'{type.Code()}'",
+            ["usrLvl"] = 0,
+            ["usrSubLvl"] = 0,
+            ["mulLvlAuthRed"] = false,
+            ["valLimit"] = 0,
+            ["docType"] = "PR",
+            ["docSubType"] = type.PoSubType(),
+            ["companyId"] = _options.CompanyId,
+            ["userId"] = userId,
+            ["ptype"] = "R",
+            ["vendorcode"] = string.Empty,
+            ["fromdate"] = string.Empty,
+            ["todate"] = string.Empty,
+        };
 
     private PoGrnCandidate? ReadCandidate(JsonObject row, PoGrnType type)
     {
@@ -620,6 +728,12 @@ public sealed class PoToGrnService : IPoToGrnService
 
     private async Task<IReadOnlyDictionary<int, (DateOnly Start, DateOnly End)>> GetFinancePeriodsAsync(CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
+        if (FinancePeriodsCache.TryGetValue(_endpoints.SystemConfig, out var cached) && cached.ExpiresAt > now)
+        {
+            return cached.Value;
+        }
+
         var config = await GetObjectAsync(_endpoints.SystemConfig, cancellationToken);
         var periods = new Dictionary<int, (DateOnly, DateOnly)>();
 
@@ -631,11 +745,22 @@ public sealed class PoToGrnService : IPoToGrnService
             }
         }
 
+        FinancePeriodsCache[_endpoints.SystemConfig] = (now.Add(StaticCacheTtl), periods);
         return periods;
     }
 
-    private async Task<bool> GetItemLevelWarehouseAsync(CancellationToken cancellationToken) =>
-        (await GetObjectAsync(_endpoints.InventoryPolicy, cancellationToken)).Flag("islinelevelwhgrn");
+    private async Task<bool> GetItemLevelWarehouseAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (InventoryPolicyCache.TryGetValue(_endpoints.InventoryPolicy, out var cached) && cached.ExpiresAt > now)
+        {
+            return cached.Value;
+        }
+
+        var flag = (await GetObjectAsync(_endpoints.InventoryPolicy, cancellationToken)).Flag("islinelevelwhgrn");
+        InventoryPolicyCache[_endpoints.InventoryPolicy] = (now.Add(StaticCacheTtl), flag);
+        return flag;
+    }
 
     private async Task<GrnDocumentControl> GetDocumentControlAsync(
         PoGrnCandidate po,
@@ -648,6 +773,12 @@ public sealed class PoToGrnService : IPoToGrnService
         if (_documentControl.TryGetValue(endpoint, out var cached))
         {
             return cached;
+        }
+
+        if (SharedDocumentControlCache.TryGetValue(endpoint, out var sharedCached))
+        {
+            _documentControl[endpoint] = sharedCached;
+            return sharedCached;
         }
 
         var rows = (await GetArrayAsync(endpoint, cancellationToken)).Rows().ToList();
@@ -665,6 +796,7 @@ public sealed class PoToGrnService : IPoToGrnService
             AutoNumberRequired: row.Flag("isAutoNumberGenerated") ? "Y" : "N");
 
         _documentControl[endpoint] = document;
+        SharedDocumentControlCache[endpoint] = document;
 
         return document;
     }

@@ -192,6 +192,73 @@ public sealed class PoToGrnServiceTests
     }
 
     [Fact]
+    public async Task Multiple_named_PO_numbers_are_found_on_first_page_without_unnecessary_queries()
+    {
+        var erp = GrnFixtures.StandardErp(
+                GrnFixtures.PoRow(103, "000014"),
+                GrnFixtures.PoRow(102, "000013"),
+                GrnFixtures.PoRow(101, "000012"))
+            .Route("getposearchdetails", path =>
+            {
+                var poId = path.Contains("101") ? 101 : 103;
+                return GrnFixtures.PoLines(poId, [GrnFixtures.Line(poId, "A")]);
+            });
+
+        var sweep = await GrnServiceUnderTest.Build(erp).ReceiveEligibleAsync(
+            GrnServiceUnderTest.Request() with { PoNumbers = ["000012", "000014"] },
+            CancellationToken.None);
+
+        sweep.Results.Select(result => result.PoId).Should().Equal(103, 101);
+        sweep.NotFound.Should().BeEmpty();
+
+        var poListSearches = erp.Requests
+            .Where(r => r.Path.Contains("POEntry/List", StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.Body?["searchValue"]?.GetValue<string>())
+            .ToList();
+
+        // Page 1 indexed scan found all requested POs immediately — no search fallback needed.
+        poListSearches.Should().Contain(string.Empty);
+        poListSearches.Should().NotContain("000012");
+        poListSearches.Should().NotContain("000014");
+    }
+
+    [Fact]
+    public async Task Named_PO_number_not_on_first_page_falls_back_to_search_value()
+    {
+        var erp = GrnFixtures.StandardErp()
+            .Route("POEntry/List", (_, body) =>
+            {
+                var search = body?["searchValue"]?.GetValue<string>()?.Trim() ?? string.Empty;
+                var rows = search switch
+                {
+                    "000014" => [GrnFixtures.PoRow(103, "000014")],
+                    _ => [GrnFixtures.PoRow(101, "000012")],
+                };
+                return new JsonArray([.. rows.Select(r => (JsonNode)r.DeepClone())]);
+            })
+            .Route("getposearchdetails", path =>
+            {
+                var poId = path.Contains("101") ? 101 : 103;
+                return GrnFixtures.PoLines(poId, [GrnFixtures.Line(poId, "A")]);
+            });
+
+        var sweep = await GrnServiceUnderTest.Build(erp).ReceiveEligibleAsync(
+            GrnServiceUnderTest.Request() with { PoNumbers = ["000012", "000014"] },
+            CancellationToken.None);
+
+        sweep.Results.Select(result => result.PoId).Should().Equal(103, 101);
+        sweep.NotFound.Should().BeEmpty();
+
+        var poListSearches = erp.Requests
+            .Where(r => r.Path.Contains("POEntry/List", StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.Body?["searchValue"]?.GetValue<string>())
+            .ToList();
+
+        poListSearches.Should().Contain(string.Empty);
+        poListSearches.Should().Contain("000014");
+    }
+
+    [Fact]
     public async Task No_lines_for_the_PO_is_reported_as_such_not_as_nothing_pending()
     {
         var erp = GrnFixtures.StandardErp(GrnFixtures.PoRow(101))

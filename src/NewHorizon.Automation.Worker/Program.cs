@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -224,6 +224,7 @@ try
 
     // Each automation flow's host-side composition. A new flow adds its own line here.
     builder.Services.AddIndentToPoOrchestration();
+    builder.Services.AddPoToGrnServices();
 
     // Sign in to the ERP at startup so the token is cached before the first cycle runs.
     builder.Services.AddErpLoginStartup();

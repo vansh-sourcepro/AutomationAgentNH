@@ -1,0 +1,540 @@
+================================================================================
+AUTOMATION AGENT NH - COMPLETE API REFERENCE & OPERATIONAL INSTRUCTIONS
+================================================================================
+
+This document lists all REST endpoints created in AutomationAgentNH with complete 
+instructions, authentication requirements, parameters, payloads, and usage examples.
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. Architecture & Port Details
+2. Authentication & Authorization Mechanisms
+3. Configuration APIs
+   3.1 PO Automation Settings (Indent -> PO)
+   3.2 GRN Automation Settings (PO -> GRN)
+   3.3 System & Module Runtime Config
+4. History, Monitoring & Run Tracking APIs
+   4.1 Process Job History (Indent -> PO)
+   4.2 PO -> GRN History
+   4.3 Summary & KPI Metrics (Unified & Per-Module)
+   4.4 Daily Conversion Trends & Chart Data
+5. Automation Execution & Trigger APIs
+   5.1 Convert Indents to POs (Tracked & Untracked)
+   5.2 Vendor-Specific Purchase Order Creation
+   5.3 PO -> GRN Goods Receiving Sweep
+   5.4 Manual Engine Cycle Trigger
+6. Job Engine & Lifecycle Control APIs
+   6.1 Automation Dashboard
+   6.2 Jobs Listing & Inspection
+   6.3 Error Inspection & Diagnostics
+   6.4 Job Retry, Resume & Cancellation
+7. Health & Diagnostic Endpoints
+8. Practical Calling Instructions (cURL & PowerShell)
+
+================================================================================
+1. ARCHITECTURE & PORT DETAILS
+================================================================================
+- Worker Host Service: NewHorizon.Automation.Worker
+- Default Port: Configured via AutomationAgent:Host:ManagementApiPort (e.g., 5050)
+- Base URL: http://localhost:5050 (or http://127.0.0.1:5050)
+- Endpoints serve both the WebApp2 frontend (ERP browser users) and automated 
+  machine callers (schedulers, timers, CLI scripts).
+
+================================================================================
+2. AUTHENTICATION & AUTHORIZATION MECHANISMS
+================================================================================
+
+A. API KEY AUTHENTICATION (Machine callers / Schedulers)
+   - Header: X-Automation-Api-Key: <InboundApiKey>
+   - Configured in: appsettings.json -> AutomationAgent:Host:InboundApiKey
+   - Grants access to machine management and trigger endpoints.
+   - Bypasses user-level ERP Role Management checks.
+
+B. ERP JWT BEARER TOKEN (Browser users in WebApp2)
+   - Header: Authorization: Bearer <ERP_JWT_TOKEN>
+   - Token generated when ERP user logs into WebApp2.
+   - Configured in: appsettings.json -> AutomationAgent:InboundJwt:SigningKey
+
+C. ERP ROLE MANAGEMENT FORM PERMISSIONS (Checked for Bearer token users)
+   - Form 011171 ("PO Automation Configuration"):
+     * 'I' (Inquiry): View settings, view eligible indents.
+     * 'E' (Edit): Modify settings, enable/disable switches, trigger "Run now".
+   - Form 011172 ("PO Automation Run History"):
+     * 'I' (Inquiry): Access conversion history, summary KPI analytics, job retries.
+
+================================================================================
+3. CONFIGURATION APIS
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1 PO AUTOMATION SETTINGS (INDENT -> PO)
+--------------------------------------------------------------------------------
+Governs automated conversion of Material (Regular, Capital) and Service indents.
+
+[1] GET /api/automation/po-automation/
+    - Auth: Bearer Token (Form 011171 'I')
+    - Description: Lists configuration rows for all 3 indent types: Regular, Capital, Service.
+    - Status: 200 OK
+    - Sample Response:
+      [
+        {
+          "indentType": "Regular",
+          "runMode": "Both",
+          "scheduleTime": "02:00:00",
+          "sites": "1,2",
+          "indentNumbers": null,
+          "isActive": true,
+          "dryRun": false,
+          "maxIndentsPerRun": 50,
+          "lastScheduledRunDate": "2026-10-06",
+          "lastTriggeredAtUtc": "2026-10-06T02:00:05Z",
+          "lastRunStatus": "Completed",
+          "lastRunReference": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "updatedAtUtc": "2026-10-01T10:00:00Z",
+          "updatedBy": "admin"
+        }
+      ]
+
+[2] GET /api/automation/po-automation/{indentType}
+    - Auth: Bearer Token (Form 011171 'I')
+    - Path param: indentType ("Regular" | "Capital" | "Service")
+    - Description: Returns config for a single indent type.
+
+[3] PUT /api/automation/po-automation/enabled
+    - Auth: Bearer Token (Form 011171 'E')
+    - Description: Master on/off toggle for all 3 indent types in one transaction.
+    - Request Body:
+      {
+        "enabled": true
+      }
+    - Status: 200 OK
+
+[4] PUT /api/automation/po-automation/{indentType}
+    - Auth: Bearer Token (Form 011171 'E')
+    - Path param: indentType ("Regular" | "Capital" | "Service")
+    - Description: Updates settings for a specific indent type.
+    - Request Body:
+      {
+        "runMode": "Both",
+        "scheduleTime": "02:30:00",
+        "clearScheduleTime": false,
+        "sites": "1,2",
+        "indentNumbers": "26-27/PI/NF1/000162",
+        "clearIndentNumbers": false,
+        "isActive": true,
+        "dryRun": false,
+        "maxIndentsPerRun": 25,
+        "clearMaxIndentsPerRun": false
+      }
+    - Status: 200 OK
+
+--------------------------------------------------------------------------------
+3.2 GRN AUTOMATION SETTINGS (PO -> GRN)
+--------------------------------------------------------------------------------
+Governs automated Goods Receipt Note generation from authorised POs.
+
+[5] GET /api/automation/grn-automation
+    - Auth: Bearer Token (Form 011171 'I') OR X-Automation-Api-Key
+    - Description: Gets current PO -> GRN settings.
+    - Status: 200 OK
+    - Sample Response:
+      {
+        "isActive": true,
+        "runMode": "Both",
+        "scheduleTime": "04:00:00",
+        "receiptMode": "Complete",
+        "invoiceNumber": "INV-AUTO-01",
+        "sites": "1,2",
+        "poTypes": ["Regular", "Capital"],
+        "poNumbers": null,
+        "dryRun": false,
+        "maxPosPerRun": 25,
+        "lastScheduledRunDate": "2026-10-06",
+        "lastTriggeredAtUtc": "2026-10-06T04:00:02Z",
+        "lastRunStatus": "Completed",
+        "lastRunReference": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        "updatedAtUtc": "2026-10-05T14:30:00Z",
+        "updatedBy": "admin"
+      }
+
+[6] PUT /api/automation/grn-automation
+    - Auth: Bearer Token (Form 011171 'E') OR X-Automation-Api-Key
+    - Description: Updates GRN settings. NOTE: If isActive=true and scheduleTime 
+      is omitted/null, an immediate "Run Now" execution is triggered synchronously!
+    - Request Body:
+      {
+        "isActive": true,
+        "runMode": "Both",
+        "scheduleTime": "04:00",
+        "receiptMode": "Complete",
+        "invoiceNumber": "INV-AUTO-01",
+        "sites": "1,2",
+        "dryRun": false,
+        "maxPosPerRun": 25,
+        "poTypes": ["Regular"],
+        "poNumbers": "26-27/TE/NF1/000190"
+      }
+    - Response: { "config": { ... }, "execution": { ... } or null }
+
+[7] PUT /api/automation/grn-automation/enabled
+    - Auth: Bearer Token (Form 011171 'E') OR X-Automation-Api-Key
+    - Request Body: { "enabled": true }
+
+[8] PUT /api/automation/grn-automation/po-types
+    - Auth: Bearer Token (Form 011171 'E') OR X-Automation-Api-Key
+    - Request Body: { "poTypes": ["Regular", "Capital"] }
+
+[9] PUT /api/automation/grn-automation/po-numbers
+    - Auth: Bearer Token (Form 011171 'E') OR X-Automation-Api-Key
+    - Request Body: { "poNumbers": "26-27/TE/NF1/000190, 000191" }
+
+--------------------------------------------------------------------------------
+3.3 SYSTEM & MODULE RUNTIME CONFIG
+--------------------------------------------------------------------------------
+
+[10] GET /api/automation/config
+     - Auth: X-Automation-Api-Key
+     - Description: Lists runtime config for all modules.
+
+[11] GET /api/automation/config/{module}
+     - Auth: X-Automation-Api-Key
+     - Path param: module (e.g. "AutoShopCycle")
+     - Description: Gets runtime settings for specific module.
+
+[12] POST /api/automation/config/{module}
+     - Auth: X-Automation-Api-Key
+     - Path param: module
+     - Description: Updates runtime config (working hours, retry count, intervals).
+     - Request Body:
+       {
+         "enableAgent": true,
+         "enableModule": true,
+         "mode": "Full",
+         "pollIntervalSeconds": 180,
+         "workingHoursStart": "08:30:00",
+         "workingHoursEnd": "19:30:00",
+         "retryCount": 5,
+         "parallelWorkers": 2,
+         "updatedBy": "admin"
+       }
+
+================================================================================
+4. HISTORY, MONITORING & RUN TRACKING APIS
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1 PROCESS JOB HISTORY (INDENT -> PO)
+--------------------------------------------------------------------------------
+
+[13] GET /api/process-jobs
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Description: Paged grid of conversion job executions with full status.
+     - Query Parameters:
+       * search: string (document/indent reference)
+       * workflow: string (e.g. "IndentToPurchaseOrder")
+       * status: "Pending" | "Running" | "Completed" | "Failed" | "Cancelled" | "Skipped"
+       * company: string
+       * trigger: "Api" | "Manual" | "Timer" | "Chatbot" | "UserPrompt" | "ErpPush"
+       * stage: "Discovery" | "Allocation" | "Drafting" | "Authorisation" | "Finalisation"
+       * indentType: "Regular" | "Capital" | "Service"
+       * from, to: ISO 8601 UTC timestamps
+       * page: integer (default 1)
+       * pageSize: integer (default 50, max 200)
+     - Response: PagedResult with items containing jobId, indentId, document, poNumber, durationMs, status.
+
+[14] GET /api/process-jobs/{jobId:guid}
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Description: Detailed breakdown of one execution, including stage timeline, 
+       vendor group outcomes, and error diagnostics.
+
+[15] GET /api/process-jobs/indent/{indentId:long}
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Query param: ?indentType=regular|capital|service (optional disambiguation)
+     - Description: History of all attempts made for a given indent ID.
+
+[16] POST /api/process-jobs/{jobId:guid}/retry
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Query param: ?triggeredBy=username
+     - Description: Re-attempts the same indent as a brand new execution.
+
+[17] GET /api/process-jobs/runs
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Query params: module, trigger, status, from, to, page, pageSize
+     - Description: Lists conversion trigger runs across Indent -> PO and PO -> GRN.
+
+[18] GET /api/process-jobs/runs/{runId:guid}
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Description: Run details and associated executions or GRN receipts.
+
+--------------------------------------------------------------------------------
+4.2 PO -> GRN HISTORY
+--------------------------------------------------------------------------------
+
+[19] GET /api/automation/po-to-grn/history
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Query params: trigger, status, from, to, page, pageSize
+     - Description: Lists historical PO -> GRN sweep runs. Each item includes:
+       * runId, workflow ("PoToGrn"), status, trigger
+       * posExamined, grnsCreated
+       * grnNumber: string (created GRN number, e.g. "26-27/GR/NF1/000045")
+       * grnNumbers: string[] (array of created GRN numbers)
+       * poNumbers: string (the PO numbers received)
+
+[20] GET /api/automation/po-to-grn/history/{runId:guid}
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Description: Returns details of a PO -> GRN run, including receipt lines.
+
+[21] GET /api/automation/po-to-grn/receipts
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Query params:
+       * search: string (matches PO number, GRN number, or vendor code)
+       * status: "Created" | "Skipped" | "Failed"
+       * from, to: ISO 8601 UTC timestamps
+       * page, pageSize: integers (pagination)
+     - Description: Detailed item-level history of every individual PO received into GRN, 
+       including poNumber, grnNumber, vendorCode, linesReceived, status, reason, recordedAtUtc.
+
+[21.1] GET /api/automation/po-to-grn/dashboard (alias: /api/automation/po-to-grn/dashbord)
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Query params: days (default: 30), from, to
+     - Description: PO -> GRN composite dashboard containing summary KPIs, 30-day zero-filled
+       trend metrics, lastCompletedJob, lastExecution (with stage steps, validation checks, lines),
+       and recentJobs list.
+
+[22] GET /api/automation/runs
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Query params: module ("po-to-grn" | "indent-to-po"), trigger, status, from, to, page, pageSize
+     - Description: Combined unified view of runs across all modules. PO -> GRN runs include
+       grnNumber, grnNumbers, and poNumbers.
+
+--------------------------------------------------------------------------------
+4.3 SUMMARY & KPI METRICS
+--------------------------------------------------------------------------------
+
+[22] GET /api/process-jobs/summary
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Query params: 
+       * module: "indent-to-po" | "po-to-grn" | omitted for unified combined stats
+       * from, to: ISO 8601 UTC timestamps
+     - Description: Aggregated KPI counts: totalJobs, successCount, successRate,
+       averageDurationMs, totalTriggerAttempts, businessRefusals, technicalFailures.
+
+[23] GET /api/automation/po-to-grn/summary
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Description: KPI summary specifically for the PO -> GRN module.
+
+--------------------------------------------------------------------------------
+4.4 DAILY CONVERSION TRENDS & CHART DATA
+--------------------------------------------------------------------------------
+
+[24] GET /api/process-jobs/daily-summary
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Query params:
+       * module: "indent-to-po" | "po-to-grn" | omitted for unified combined trends
+       * days: integer (default 30)
+     - Description: Daily data for charts: date, purchaseOrdersCreated, indentsConverted, indentsFailed.
+
+[25] GET /api/automation/po-to-grn/daily-summary
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Query param: ?days=30
+     - Description: Daily trend metrics specifically for PO -> GRN.
+
+================================================================================
+5. AUTOMATION EXECUTION & TRIGGER APIS
+================================================================================
+
+[26] GET /api/automation/indent-to-po/eligible
+     - Auth: Bearer Token (Form 011171 'I') OR X-Automation-Api-Key
+     - Query params: sites (e.g. "1,2"), indentTypes ("regular,capital"), max (default 100)
+     - Description: Preview pending authorised indents eligible for conversion.
+
+[27] POST /api/automation/indent-to-po (Alias: POST /api/automation/indent-to-po/convert)
+     - Auth: Bearer Token (Form 011171 'E') OR X-Automation-Api-Key
+     - Query param: ?trigger=manual|timer|api
+     - Description: Core conversion engine. Converts eligible indents to real POs.
+     - Request Body:
+       {
+         "indentId": null,
+         "sites": [1, 2],
+         "indentTypes": ["Regular", "Capital"],
+         "indentNumbers": ["26-27/PI/NF1/000162"],
+         "maxIndents": 20,
+         "dryRun": false
+       }
+     - Response: ConvertIndentsResponse with examined, purchaseOrdersCreated, indents, skipped, notFound.
+
+[28] POST /api/process-jobs
+     - Auth: Bearer Token (Form 011172 'I') OR X-Automation-Api-Key
+     - Description: Starts a conversion and explicitly persists complete execution history.
+     - Request Body:
+       {
+         "indentId": 10045,
+         "indentTypes": ["Regular"],
+         "sites": [1],
+         "maxIndents": 1,
+         "trigger": "Manual",
+         "triggeredBy": "admin",
+         "triggerReference": "Manual Trigger"
+       }
+
+[29] POST /api/automation/indent-to-po/vendor
+     - Auth: X-Automation-Api-Key
+     - Description: Orders outstanding material indents for one specific vendor.
+     - Request Body:
+       {
+         "vendorCode": "VEND001",
+         "indentTypes": ["Regular", "Capital"]
+       }
+
+[30] POST /api/automation/po-to-grn
+     - Auth: X-Automation-Api-Key
+     - Query param: ?trigger=manual|timer|api
+     - Description: Receives authorised purchase orders into stock and generates GRNs.
+     - Request Body:
+       {
+         "poIds": null,
+         "poNumbers": ["26-27/TE/NF1/000046"],
+         "sites": [1],
+         "poTypes": ["Regular"],
+         "receiptMode": "Complete",
+         "maxPos": 25,
+         "dryRun": false
+       }
+     - Response: ReceivePosResponse with examined, grnsCreated, results (linesReceived, grnNumber).
+
+[31] POST /api/automation/run-now
+     - Auth: X-Automation-Api-Key
+     - Description: Manually triggers an AutoShop cycle immediately bypassing schedule.
+     - Response: { "started": true, "jobId": "...", "reason": "Enqueued manually" }
+
+================================================================================
+6. JOB ENGINE & LIFECYCLE CONTROL APIS
+================================================================================
+
+[32] GET /api/automation/dashboard
+     - Auth: Bearer Token OR X-Automation-Api-Key
+     - Description: Returns total job counts grouped by status and live cycle details.
+
+[33] GET /api/automation/jobs
+     - Auth: X-Automation-Api-Key
+     - Query params: status, workflowType, documentId, from, to, page, pageSize
+     - Description: Generic job listing.
+
+[34] GET /api/automation/jobs/{jobId:guid}
+     - Auth: X-Automation-Api-Key
+     - Description: Full job detail with stage/step sequence.
+
+[35] GET /api/automation/jobs/{jobId:guid}/errors
+     - Auth: X-Automation-Api-Key
+     - Description: Full error logs (layman and technical) for failed job.
+
+[36] POST /api/automation/jobs/{jobId:guid}/retry
+     - Auth: X-Automation-Api-Key
+     - Description: Re-queues failed job at elevated priority (+100).
+
+[37] POST /api/automation/jobs/{jobId:guid}/resume
+     - Auth: X-Automation-Api-Key
+     - Description: Re-queues job at standard priority from first incomplete step.
+
+[38] POST /api/automation/jobs/{jobId:guid}/cancel
+     - Auth: X-Automation-Api-Key
+     - Description: Cancels a pending or active job.
+     - Request Body:
+       {
+         "cancelledBy": "admin",
+         "reason": "Cancelled by operator request"
+       }
+
+================================================================================
+7. HEALTH & DIAGNOSTIC ENDPOINTS
+================================================================================
+
+[39] GET /health (Alias: GET /api/automation/health)
+     - Auth: None (Loopback / Public Monitoring)
+     - Description: Service liveness & readiness check, uptime, and component statuses.
+     - Status: 200 OK (or 503 if unhealthy)
+     - Response:
+       {
+         "status": "Healthy",
+         "version": "1.0.0",
+         "startedAtUtc": "2026-10-06T06:00:00Z",
+         "uptimeSeconds": 21250.3,
+         "checks": {
+           "service": "Healthy",
+           "database": "Healthy",
+           "erp": "Healthy"
+         }
+       }
+
+================================================================================
+8. PRACTICAL CALLING INSTRUCTIONS (cURL & POWERSHELL)
+================================================================================
+
+--- cURL EXAMPLES ---
+
+# 1. Check Service Health
+curl -X GET http://localhost:5050/health
+
+# 2. Preview Eligible Indents (using API Key)
+curl -X GET "http://localhost:5050/api/automation/indent-to-po/eligible?sites=1&indentTypes=regular" \
+  -H "X-Automation-Api-Key: YOUR_API_KEY"
+
+# 3. Convert Indents to PO (Dry Run)
+curl -X POST "http://localhost:5050/api/automation/indent-to-po?trigger=manual" \
+  -H "X-Automation-Api-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"indentTypes": ["Regular"], "dryRun": true}'
+
+# 4. Convert Indents to PO (Live Run)
+curl -X POST "http://localhost:5050/api/automation/indent-to-po?trigger=manual" \
+  -H "X-Automation-Api-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"indentTypes": ["Regular"], "dryRun": false}'
+
+# 5. Get Run History Summary (using ERP User Bearer Token)
+curl -X GET "http://localhost:5050/api/process-jobs/summary" \
+  -H "Authorization: Bearer YOUR_ERP_JWT_TOKEN"
+
+# 6. Trigger PO -> GRN Receiving
+curl -X POST "http://localhost:5050/api/automation/po-to-grn?trigger=manual" \
+  -H "X-Automation-Api-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"receiptMode": "Complete", "dryRun": false}'
+
+
+--- POWERSHELL EXAMPLES ---
+
+# 1. Fetch Dashboard Stats
+$headers = @{ "X-Automation-Api-Key" = "YOUR_API_KEY" }
+Invoke-RestMethod -Uri "http://localhost:5050/api/automation/dashboard" -Headers $headers -Method GET
+
+# 2. Enable / Disable PO Automation Master Switch
+$headers = @{
+    "Authorization" = "Bearer YOUR_ERP_JWT_TOKEN"
+    "Content-Type"  = "application/json"
+}
+$body = @{ enabled = $true } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:5050/api/automation/po-automation/enabled" -Headers $headers -Method PUT -Body $body
+
+# 3. Query Process Job History Grid
+$headers = @{ "X-Automation-Api-Key" = "YOUR_API_KEY" }
+$grid = Invoke-RestMethod -Uri "http://localhost:5050/api/process-jobs?page=1&pageSize=20" -Headers $headers -Method GET
+$grid.items | Format-Table jobId, document, indentType, status, poNumber
+
+# 4. Trigger PO -> GRN Receipt Run
+$headers = @{
+    "X-Automation-Api-Key" = "YOUR_API_KEY"
+    "Content-Type"         = "application/json"
+}
+$body = @{
+    poNumbers   = @("26-27/TE/NF1/000190")
+    receiptMode = "Complete"
+    dryRun      = $false
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:5050/api/automation/po-to-grn?trigger=manual" -Headers $headers -Method POST -Body $body
+
+================================================================================
+END OF API REFERENCE
+================================================================================

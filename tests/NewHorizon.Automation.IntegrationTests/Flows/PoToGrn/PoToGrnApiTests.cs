@@ -315,6 +315,60 @@ public sealed class PoToGrnApiTests : IClassFixture<PoToGrnApiFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
+
+    [Fact]
+    public async Task The_dashboard_endpoint_requires_auth()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/automation/po-to-grn/dashboard");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData("/api/automation/po-to-grn/dashboard")]
+    [InlineData("/api/automation/po-to-grn/dashbord")]
+    public async Task The_dashboard_endpoint_answers_with_complete_structure(string route)
+    {
+        using var client = _factory.Authenticated();
+
+        var response = await client.GetAsync(route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadFromJsonAsync<JsonObject>();
+        body.Should().NotBeNull();
+        body!.ContainsKey("summary").Should().BeTrue();
+        body.ContainsKey("dailyStats").Should().BeTrue();
+        body.ContainsKey("lastCompletedJob").Should().BeTrue();
+        body.ContainsKey("lastExecution").Should().BeTrue();
+        body.ContainsKey("recentJobs").Should().BeTrue();
+
+        var summary = body["summary"]!.AsObject();
+        summary.ContainsKey("totalJobs").Should().BeTrue();
+        summary.ContainsKey("countsByStatus").Should().BeTrue();
+        summary.ContainsKey("countsBySource").Should().BeTrue();
+        summary.ContainsKey("successCount").Should().BeTrue();
+        summary.ContainsKey("successRate").Should().BeTrue();
+        summary.ContainsKey("averageDurationMs").Should().BeTrue();
+        summary.ContainsKey("totalTriggerAttempts").Should().BeTrue();
+        summary.ContainsKey("triggerAttemptsWithoutEligibleDocument").Should().BeTrue();
+        summary.ContainsKey("businessRefusalCount").Should().BeTrue();
+        summary.ContainsKey("technicalFailureCount").Should().BeTrue();
+        summary.ContainsKey("totalQuantityIssued").Should().BeTrue();
+        summary.ContainsKey("totalLinesIssued").Should().BeTrue();
+
+        var dailyStats = body["dailyStats"]!.AsArray();
+        dailyStats.Count.Should().Be(30);
+        var firstDay = dailyStats[0]!.AsObject();
+        firstDay.ContainsKey("date").Should().BeTrue();
+        firstDay.ContainsKey("issuesCreated").Should().BeTrue();
+        firstDay.ContainsKey("documentsConverted").Should().BeTrue();
+        firstDay.ContainsKey("documentsRefused").Should().BeTrue();
+        firstDay.ContainsKey("documentsFailed").Should().BeTrue();
+        firstDay.ContainsKey("totalQuantity").Should().BeTrue();
+    }
 }
 
 public sealed class PoToGrnApiFactory : WebApplicationFactory<Program>

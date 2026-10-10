@@ -38,6 +38,12 @@ internal sealed class GrnFakeErp : HttpMessageHandler
         return this;
     }
 
+    public GrnFakeErp Route(string pathFragment, Func<string, JsonObject?, JsonNode?> respond)
+    {
+        _routes[pathFragment] = respond;
+        return this;
+    }
+
     public IEnumerable<JsonObject> CreateBodies =>
         Requests.Where(request => request.Path.Contains("grn/create", StringComparison.OrdinalIgnoreCase))
             .Select(request => request.Body)
@@ -113,14 +119,19 @@ internal static class GrnFixtures
 
     public static GrnFakeErp WithPoList(this GrnFakeErp erp, params JsonObject[] rows)
     {
-        var regular = new JsonArray([.. rows.Where(row => row["poType"]!.GetValue<string>() == "R").Select(row => (JsonNode)row.DeepClone())]);
-        var capital = new JsonArray([.. rows.Where(row => row["poType"]!.GetValue<string>() == "C").Select(row => (JsonNode)row.DeepClone())]);
+        return erp.Route("POEntry/List", (_, body) =>
+        {
+            var requestedType = body?["potype"]?.GetValue<string>()?.Trim('\'') ?? "R";
+            var searchValue = body?["searchValue"]?.GetValue<string>()?.Trim() ?? string.Empty;
 
-        // The list is asked once per type; the type travels in the body, which the route cannot
-        // see, so answer by call order: Regular first, then Capital.
-        var calls = 0;
+            var matching = rows
+                .Where(row => row["poType"]!.GetValue<string>() == requestedType)
+                .Where(row => string.IsNullOrEmpty(searchValue)
+                    || row["nmbr"]!.GetValue<string>().EndsWith(searchValue, StringComparison.OrdinalIgnoreCase))
+                .Select(row => (JsonNode)row.DeepClone());
 
-        return erp.Route("POEntry/List", _ => calls++ == 0 ? regular : capital);
+            return new JsonArray([.. matching]);
+        });
     }
 
     public static JsonObject PoRow(long id, string number = "000012", string type = "R", bool isgrn = true) => new()
@@ -314,8 +325,10 @@ internal static class GrnServiceUnderTest
         GrnFakeErp erp,
         IPoGrnAutomationConfigRepository? configs = null,
         IPoGrnHistory? history = null,
-        PoGrnOptions? options = null) =>
-        new(
+        PoGrnOptions? options = null)
+    {
+        PoToGrnService.ClearStaticCaches();
+        return new(
             new GrnSingleClientFactory(erp),
             new GrnStubTokenProvider(),
             Options.Create(new PoGrnEndpointOptions()),
@@ -324,6 +337,7 @@ internal static class GrnServiceUnderTest
             configs ?? new InMemoryGrnConfigs(),
             history ?? new NullPoGrnHistory(),
             NullLogger<PoToGrnService>.Instance);
+    }
 
     public static PoGrnSweepRequest Request(GrnReceiptMode mode = GrnReceiptMode.Complete, bool dryRun = false) => new()
     {

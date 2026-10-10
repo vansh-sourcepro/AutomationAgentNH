@@ -182,12 +182,15 @@ public static class ProcessJobEndpoints
         }
 
         // 3. No parameter (or "all") → Unified combined KPIs across both flows
-        var (defaultQuery, _) = BuildQuery(
+        var (defaultQuery, defaultError) = BuildQuery(
             search, null, status, company, trigger, stage, indentType, from, to, page: 1, pageSize: 1);
 
-        ProcessJobSummaryResponse indentStats = defaultQuery is not null
-            ? ProcessJobMapper.ToResponse(await processJobs.GetSummaryAsync(defaultQuery, cancellationToken))
-            : new ProcessJobSummaryResponse(0, new Dictionary<string, int>(), 0, null, null, 0, 0, 0, 0);
+        if (defaultQuery is null)
+        {
+            return defaultError!;
+        }
+
+        var indentStats = ProcessJobMapper.ToResponse(await processJobs.GetSummaryAsync(defaultQuery, cancellationToken));
 
         var grnStats = await ComputePoGrnSummaryAsync(dbContext, from, to, cancellationToken);
 
@@ -235,9 +238,10 @@ public static class ProcessJobEndpoints
         DateTimeOffset? to,
         CancellationToken cancellationToken)
     {
+        DateTimeOffset? effectiveTo = to.HasValue ? (to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value) : null;
         var runsQuery = dbContext.PoGrnRuns.AsNoTracking();
         if (from.HasValue) runsQuery = runsQuery.Where(r => r.StartedAtUtc >= from.Value);
-        if (to.HasValue) runsQuery = runsQuery.Where(r => r.StartedAtUtc <= to.Value);
+        if (effectiveTo.HasValue) runsQuery = runsQuery.Where(r => r.StartedAtUtc <= effectiveTo.Value);
 
         var runs = await runsQuery.ToListAsync(cancellationToken);
 
@@ -273,7 +277,12 @@ public static class ProcessJobEndpoints
             TotalTriggerAttempts: totalTriggerAttempts,
             TriggerAttemptsWithoutEligibleIndent: emptyTriggers,
             BusinessRefusalCount: totalPosSkipped,
-            TechnicalFailureCount: totalPosFailed);
+            TechnicalFailureCount: totalPosFailed,
+            TotalPosExamined: totalPosExamined,
+            TotalGrnsCreated: totalGrnsCreated,
+            TotalPosSkipped: totalPosSkipped,
+            TotalPosFailed: totalPosFailed,
+            TriggerAttemptsWithoutEligiblePo: emptyTriggers);
     }
 
     /// <summary>The two charts on the dashboard, one row per UTC day over the trailing window.</summary>
@@ -355,7 +364,10 @@ public static class ProcessJobEndpoints
                 g.Key,
                 PurchaseOrdersCreated: g.Sum(r => r.GrnsCreated),
                 IndentsConverted: g.Sum(r => r.PosExamined),
-                IndentsFailed: g.Sum(r => r.PosFailed)))
+                IndentsFailed: g.Sum(r => r.PosFailed),
+                GrnsCreated: g.Sum(r => r.GrnsCreated),
+                PosExamined: g.Sum(r => r.PosExamined),
+                PosFailed: g.Sum(r => r.PosFailed)))
             .ToList();
     }
 
@@ -431,7 +443,7 @@ public static class ProcessJobEndpoints
                     known.Equals(stage.Trim(), StringComparison.OrdinalIgnoreCase)),
             IndentKind = indentKind,
             FromUtc = from,
-            ToUtc = to,
+            ToUtc = to.HasValue ? (to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value) : null,
             Page = page,
             PageSize = pageSize,
         }, null);
@@ -560,7 +572,7 @@ public static class ProcessJobEndpoints
 
                 return Results.Ok(new
                 {
-                    run = ProcessJobMapper.ToResponse(grnRun),
+                    run = ProcessJobMapper.ToResponse(grnRun, receipts),
                     receipts
                 });
             }
@@ -617,32 +629,45 @@ public static class ProcessJobEndpoints
         bool isIndentOnly = selected is "indent-to-po" or "indenttopo" or "indent" or "indenttopurchaseorder" or "indent_to_po";
 
         var dbContext = sp.GetService<AutomationDbContext>();
+        DateTimeOffset? effectiveTo = to.HasValue ? (to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value) : null;
+        int clampedPage = Math.Max(1, page);
+        int clampedPageSize = Math.Clamp(pageSize, 1, 200);
 
         // 1. PO → GRN only
         if (isGrnOnly)
         {
             if (dbContext is null)
             {
-                return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>([], 0, page, pageSize));
+                return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>([], 0, clampedPage, clampedPageSize));
             }
 
             var grnQuery = dbContext.PoGrnRuns.AsNoTracking();
             if (triggerSource.HasValue) grnQuery = grnQuery.Where(r => r.Trigger == triggerSource.Value);
             if (runStatus.HasValue) grnQuery = grnQuery.Where(r => r.Status == runStatus.Value);
             if (from.HasValue) grnQuery = grnQuery.Where(r => r.StartedAtUtc >= from.Value);
-            if (to.HasValue) grnQuery = grnQuery.Where(r => r.StartedAtUtc <= to.Value);
+            if (effectiveTo.HasValue) grnQuery = grnQuery.Where(r => r.StartedAtUtc <= effectiveTo.Value);
 
             var total = await grnQuery.CountAsync(cancellationToken);
             var items = await grnQuery.OrderByDescending(r => r.StartedAtUtc)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
+                .Skip((clampedPage - 1) * clampedPageSize)
+                .Take(clampedPageSize)
                 .ToListAsync(cancellationToken);
 
+            var runIds = items.Select(r => r.Id).ToList();
+            var receipts = runIds.Count > 0
+                ? await dbContext.PoGrnReceipts.AsNoTracking()
+                    .Where(r => runIds.Contains(r.RunId))
+                    .ToListAsync(cancellationToken)
+                : [];
+
+            var receiptsByRun = receipts.GroupBy(r => r.RunId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PoGrnReceipt>)g.ToList());
+
             return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>(
-                [.. items.Select(ProcessJobMapper.ToResponse)],
+                [.. items.Select(run => ProcessJobMapper.ToResponse(run, receiptsByRun.GetValueOrDefault(run.Id)))],
                 total,
-                page,
-                pageSize));
+                clampedPage,
+                clampedPageSize));
         }
 
         // 2. Indent → PO only
@@ -654,9 +679,9 @@ public static class ProcessJobEndpoints
                     TriggerSource = triggerSource,
                     Status = runStatus,
                     FromUtc = from,
-                    ToUtc = to,
-                    Page = page,
-                    PageSize = pageSize,
+                    ToUtc = effectiveTo,
+                    Page = clampedPage,
+                    PageSize = clampedPageSize,
                 },
                 cancellationToken);
 
@@ -674,9 +699,9 @@ public static class ProcessJobEndpoints
                 TriggerSource = triggerSource,
                 Status = runStatus,
                 FromUtc = from,
-                ToUtc = to,
+                ToUtc = effectiveTo,
                 Page = 1,
-                PageSize = Math.Max(pageSize * page, 100),
+                PageSize = Math.Max(clampedPageSize * clampedPage, 100),
             },
             cancellationToken);
 
@@ -684,18 +709,28 @@ public static class ProcessJobEndpoints
         if (triggerSource.HasValue) allGrnQuery = allGrnQuery.Where(r => r.Trigger == triggerSource.Value);
         if (runStatus.HasValue) allGrnQuery = allGrnQuery.Where(r => r.Status == runStatus.Value);
         if (from.HasValue) allGrnQuery = allGrnQuery.Where(r => r.StartedAtUtc >= from.Value);
-        if (to.HasValue) allGrnQuery = allGrnQuery.Where(r => r.StartedAtUtc <= to.Value);
+        if (effectiveTo.HasValue) allGrnQuery = allGrnQuery.Where(r => r.StartedAtUtc <= effectiveTo.Value);
 
         var grnTotal = await allGrnQuery.CountAsync(cancellationToken);
         var grnItems = await allGrnQuery.OrderByDescending(r => r.StartedAtUtc)
-            .Take(Math.Max(pageSize * page, 100))
+            .Take(Math.Max(clampedPageSize * clampedPage, 100))
             .ToListAsync(cancellationToken);
 
+        var grnRunIds = grnItems.Select(r => r.Id).ToList();
+        var grnReceipts = grnRunIds.Count > 0
+            ? await dbContext.PoGrnReceipts.AsNoTracking()
+                .Where(r => grnRunIds.Contains(r.RunId))
+                .ToListAsync(cancellationToken)
+            : [];
+
+        var grnReceiptsByRun = grnReceipts.GroupBy(r => r.RunId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PoGrnReceipt>)g.ToList());
+
         var merged = indentRunsResult.Items.Select(ProcessJobMapper.ToResponse)
-            .Concat(grnItems.Select(ProcessJobMapper.ToResponse))
+            .Concat(grnItems.Select(run => ProcessJobMapper.ToResponse(run, grnReceiptsByRun.GetValueOrDefault(run.Id))))
             .OrderByDescending(r => r.StartedAtUtc)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Skip((clampedPage - 1) * clampedPageSize)
+            .Take(clampedPageSize)
             .ToList();
 
         var totalMergedCount = indentRunsResult.TotalCount + grnTotal;
@@ -703,8 +738,8 @@ public static class ProcessJobEndpoints
         return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>(
             merged,
             totalMergedCount,
-            page,
-            pageSize));
+            clampedPage,
+            clampedPageSize));
     }
 
     /// <summary>
