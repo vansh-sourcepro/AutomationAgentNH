@@ -345,6 +345,99 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IssueToShopFloor.IssueToShopFloorAutomationConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DocumentNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<bool>("DryRun")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastRunReference")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastRunStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateOnly?>("LastScheduledRunDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset?>("LastTriggeredAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("MaxDocumentsPerRun")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RunMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<TimeOnly?>("ScheduleTime")
+                        .HasColumnType("time");
+
+                    b.Property<string>("Sites")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Source")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IssueToShopFloorAutomationConfig_Source");
+
+                    b.ToTable("IssueToShopFloorAutomationConfig", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("7a2e5d30-0000-0000-0000-00000000000a"),
+                            DryRun = false,
+                            IsActive = false,
+                            RunMode = "Api",
+                            Source = "Sjo",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("7a2e5d30-0000-0000-0000-00000000000b"),
+                            DryRun = false,
+                            IsActive = false,
+                            RunMode = "Api",
+                            Source = "WorkOrder",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("7a2e5d30-0000-0000-0000-00000000000c"),
+                            DryRun = false,
+                            IsActive = false,
+                            RunMode = "Api",
+                            Source = "SalesOaf",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
+                });
+
             modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IssueToShopFloor.IssueToShopFloorConversion", b =>
                 {
                     b.Property<Guid>("Id")

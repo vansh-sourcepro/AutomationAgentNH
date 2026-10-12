@@ -430,4 +430,70 @@ public sealed class IssueToShopFloorTrackerService : IIssueToShopFloorTracker, I
     {
         return _tracking.GetSummaryAsync(query, cancellationToken);
     }
+
+    public Task<IssueToShopFloorDashboardSummary> GetDashboardSummaryAsync(
+        IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return _tracking.GetDashboardSummaryAsync(query, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DailyIssueConversionStat>> GetDailyStatsAsync(
+        int days,
+        CancellationToken cancellationToken)
+    {
+        var bounded = Math.Clamp(days, 1, 365);
+
+        var today = DateOnly.FromDateTime(_clock.UtcNow.UtcDateTime);
+        var from = today.AddDays(-(bounded - 1));
+
+        var fromUtc = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var toUtc = new DateTimeOffset(today.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+
+        var raw = await _tracking.GetDailyStatsAsync(fromUtc, toUtc, cancellationToken);
+        var byDate = raw.ToDictionary(stat => stat.Date);
+
+        var filled = new List<DailyIssueConversionStat>(bounded);
+        for (var date = from; date <= today; date = date.AddDays(1))
+        {
+            filled.Add(byDate.TryGetValue(date, out var stat)
+                ? stat
+                : new DailyIssueConversionStat(date, 0, 0, 0, 0, 0m));
+        }
+
+        return filled;
+    }
+
+    public async Task<IssueToShopFloorDashboardComposite> GetDashboardAsync(
+        int days,
+        int recentCount,
+        string? issueSource,
+        CancellationToken cancellationToken)
+    {
+        var boundedDays = Math.Clamp(days, 1, 365);
+        var boundedRecent = Math.Clamp(recentCount, 1, 50);
+
+        var query = new IssueToShopFloorHistoryQuery { IssueSource = issueSource };
+
+        // EF Core DbContext does not support concurrent operations on the same instance.
+        // Await queries sequentially to prevent InvalidOperationException.
+        var summary = await GetDashboardSummaryAsync(query, cancellationToken);
+        var dailyStats = await GetDailyStatsAsync(boundedDays, cancellationToken);
+        var lastCompleted = await _tracking.GetLastCompletedJobAsync(cancellationToken);
+        var recentJobs = await _tracking.GetRecentJobsAsync(boundedRecent, issueSource, cancellationToken);
+
+        IssueToShopFloorHistoryDetail? lastExecution = null;
+        if (recentJobs.Count > 0)
+        {
+            lastExecution = await GetDetailAsync(recentJobs[0].JobId, cancellationToken);
+        }
+
+        return new IssueToShopFloorDashboardComposite(
+            summary,
+            dailyStats,
+            lastCompleted,
+            lastExecution,
+            recentJobs);
+    }
 }

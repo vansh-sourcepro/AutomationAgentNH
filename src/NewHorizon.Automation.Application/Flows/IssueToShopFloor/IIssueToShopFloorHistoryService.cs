@@ -3,7 +3,7 @@ using NewHorizon.Automation.Application.Jobs;
 namespace NewHorizon.Automation.Application.Flows.IssueToShopFloor;
 
 /// <summary>
-/// Read-side query service for Issue to Shop Floor automation history.
+/// Read-side query service for Issue to Shop Floor automation history and dashboard analytics.
 /// </summary>
 public interface IIssueToShopFloorHistoryService
 {
@@ -21,5 +21,19 @@ public interface IIssueToShopFloorHistoryService
 
     Task<IssueToShopFloorHistorySummary> GetSummaryAsync(
         IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken);
+
+    Task<IssueToShopFloorDashboardSummary> GetDashboardSummaryAsync(
+        IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<DailyIssueConversionStat>> GetDailyStatsAsync(
+        int days,
+        CancellationToken cancellationToken);
+
+    Task<IssueToShopFloorDashboardComposite> GetDashboardAsync(
+        int days,
+        int recentCount,
+        string? issueSource,
         CancellationToken cancellationToken);
 }

@@ -96,6 +96,131 @@ public sealed class IssueToShopFloorEndpointTests : IClassFixture<AgentApplicati
         result["reason"]!.GetValue<string>().Should().Contain("IssueTo");
     }
 
+    [Fact]
+    public async Task Invalid_mode_returns_400_with_allowed_options()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "invalidMode" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("timerBased").And.Contain("numberBased").And.Contain("both").And.Contain("none");
+    }
+
+    [Fact]
+    public async Task TimerBased_mode_without_time_returns_400()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "timerBased" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("time");
+    }
+
+    [Fact]
+    public async Task TimerBased_mode_with_invalid_time_format_returns_400()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "timerBased", time = "25:99" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("Expected format:");
+    }
+
+    [Fact]
+    public async Task TimerBased_mode_with_valid_time_schedules_execution_without_document_number()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "timerBased", time = "14:30" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<JsonObject>();
+        result.Should().NotBeNull();
+        result!["mode"]!.GetValue<string>().Should().Be("timerBased");
+        result["status"]!.GetValue<string>().Should().Be("Scheduled");
+        result["configuredTime"]!.GetValue<string>().Should().Be("14:30:00");
+    }
+
+    [Fact]
+    public async Task Both_mode_without_time_returns_400()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "both", documentNumber = "26-27/SJ/NF1/000123" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("time");
+    }
+
+    [Fact]
+    public async Task Both_mode_without_document_number_returns_400()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "both", time = "14:30" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("documentNumber");
+    }
+
+    [Fact]
+    public async Task Both_mode_with_valid_time_and_document_number_schedules_execution()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new
+        {
+            issueType = "sjo",
+            mode = "both",
+            time = "15:45:00",
+            documentNumber = "26-27/SJ/NF1/000123"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<JsonObject>();
+        result.Should().NotBeNull();
+        result!["mode"]!.GetValue<string>().Should().Be("both");
+        result["status"]!.GetValue<string>().Should().Be("Scheduled");
+        result["configuredTime"]!.GetValue<string>().Should().Be("15:45:00");
+        result["documentNumber"]!.GetValue<string>().Should().Be("26-27/SJ/NF1/000123");
+    }
+
+    [Fact]
+    public async Task None_mode_disables_automation()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "none" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<JsonObject>();
+        result.Should().NotBeNull();
+        result!["mode"]!.GetValue<string>().Should().Be("none");
+        result["status"]!.GetValue<string>().Should().Be("Disabled");
+    }
+
+    [Fact]
+    public async Task NumberBased_mode_without_documentNumber_processes_bulk_eligible_documents()
+    {
+        using var client = Authenticated();
+
+        var response = await client.PostAsJsonAsync(Path, new { issueType = "sjo", mode = "numberBased", dryRun = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<JsonObject>();
+        result.Should().NotBeNull();
+        result!["mode"]!.GetValue<string>().Should().Be("numberBased");
+        result["dryRun"]!.GetValue<bool>().Should().BeTrue();
+    }
+
     private HttpClient Authenticated()
     {
         var client = _factory.CreateClient();

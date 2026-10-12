@@ -36,6 +36,13 @@ public interface IIssueToShopFloorService
         string documentNumber,
         bool dryRun,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Discovers candidate eligible document numbers for the given source (e.g. all authorised SJOs across configured sites).
+    /// </summary>
+    Task<IReadOnlyList<string>> DiscoverEligibleDocumentNumbersAsync(
+        IssueSource source,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -393,6 +400,39 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
             }
             throw;
         }
+    }
+
+    public async Task<IReadOnlyList<string>> DiscoverEligibleDocumentNumbersAsync(
+        IssueSource source,
+        CancellationToken cancellationToken)
+    {
+        if (source == IssueSource.Sjo)
+        {
+            if (_options.Sites.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Cannot discover SJOs: No sites configured in {Section}:Sites.",
+                    IssueToShopFloorOptions.SectionName);
+                return Array.Empty<string>();
+            }
+
+            if (string.IsNullOrWhiteSpace(_options.IssueTo) || string.IsNullOrWhiteSpace(_options.IssueBy))
+            {
+                _logger.LogWarning(
+                    "Cannot discover SJOs: IssueTo and IssueBy are not configured in {Section}.",
+                    IssueToShopFloorOptions.SectionName);
+                return Array.Empty<string>();
+            }
+
+            var candidates = await FindSjosAsync(string.Empty, cancellationToken);
+            return candidates
+                .Where(sjo => sjo.Status.Equals(_options.AuthorisedStatus, StringComparison.OrdinalIgnoreCase))
+                .Select(sjo => sjo.FullNumber)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return Array.Empty<string>();
     }
 
     // ---- Finding the document -------------------------------------------------------------------

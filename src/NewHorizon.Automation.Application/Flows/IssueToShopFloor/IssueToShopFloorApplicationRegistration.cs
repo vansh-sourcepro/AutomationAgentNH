@@ -15,6 +15,8 @@ public static class IssueToShopFloorApplicationRegistration
 
         services.TryAddScoped<IIssueToShopFloorTracker>(_ => NullIssueToShopFloorTracker.Instance);
         services.TryAddScoped<IIssueToShopFloorHistoryService>(_ => NullIssueToShopFloorTracker.Instance);
+        services.TryAddScoped<IIssueToShopFloorAutomationConfigRepository, NullIssueToShopFloorAutomationConfigRepository>();
+        services.TryAddScoped<IIssueToShopFloorGate, IssueToShopFloorGate>();
         return services;
     }
 

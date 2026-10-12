@@ -11,6 +11,7 @@ public static class IssueToShopFloorInfrastructureRegistration
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<IIssueToShopFloorTrackingRepository, IssueToShopFloorTrackingRepository>();
+        services.AddScoped<IIssueToShopFloorAutomationConfigRepository, IssueToShopFloorAutomationConfigRepository>();
 
         return services;
     }

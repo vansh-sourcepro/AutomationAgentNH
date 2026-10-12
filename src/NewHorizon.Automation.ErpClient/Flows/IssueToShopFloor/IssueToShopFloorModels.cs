@@ -19,7 +19,7 @@ public enum IssueSource
     SalesOaf,
 }
 
-internal static class IssueSources
+public static class IssueSources
 {
     /// <summary>The ERP's document type for the source, as the Issue screen's lookups take it.</summary>
     public static string DocType(this IssueSource source) => source switch

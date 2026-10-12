@@ -242,12 +242,99 @@ public sealed class IssueToShopFloorTrackingTests
         summary.SuccessRatePercentage.Should().Be(80.0);
     }
 
+    [Fact]
+    public async Task TrackerService_GetDashboardSummary_DelegatesToRepository()
+    {
+        var expectedSummary = new IssueToShopFloorDashboardSummary(
+            TotalJobs: 5,
+            CountsByStatus: new Dictionary<string, int> { ["Completed"] = 4, ["Skipped"] = 1 },
+            CountsBySource: new Dictionary<string, int> { ["Sjo"] = 5 },
+            SuccessCount: 4,
+            SuccessRate: 0.8,
+            AverageDurationMs: 1250.0,
+            TotalTriggerAttempts: 6,
+            TriggerAttemptsWithoutEligibleDocument: 1,
+            BusinessRefusalCount: 1,
+            TechnicalFailureCount: 0,
+            TotalQuantityIssued: 50m,
+            TotalLinesIssued: 10);
+
+        var tracking = new FakeTrackingRepo { DashboardSummaryToReturn = expectedSummary };
+        var jobs = new InMemoryJobRepository();
+        var configs = new StubConfigRepository(WorkflowNames.IssueToShopFloor, 3);
+        var clock = new TestClock(_now);
+
+        var service = new IssueToShopFloorTrackerService(
+            tracking,
+            jobs,
+            configs,
+            clock,
+            NullLogger<IssueToShopFloorTrackerService>.Instance);
+
+        var summary = await service.GetDashboardSummaryAsync(new IssueToShopFloorHistoryQuery(), CancellationToken.None);
+
+        summary.TotalJobs.Should().Be(5);
+        summary.SuccessCount.Should().Be(4);
+        summary.BusinessRefusalCount.Should().Be(1);
+        summary.TotalQuantityIssued.Should().Be(50m);
+    }
+
+    [Fact]
+    public async Task TrackerService_GetDailyStats_ZeroFillsGapsAcrossWindow()
+    {
+        var today = DateOnly.FromDateTime(_now.UtcDateTime);
+        var twoDaysAgo = today.AddDays(-2);
+
+        var tracking = new FakeTrackingRepo
+        {
+            DailyStatsToReturn = [new DailyIssueConversionStat(twoDaysAgo, 2, 2, 0, 0, 10m)]
+        };
+        var jobs = new InMemoryJobRepository();
+        var configs = new StubConfigRepository(WorkflowNames.IssueToShopFloor, 3);
+        var clock = new TestClock(_now);
+
+        var service = new IssueToShopFloorTrackerService(
+            tracking,
+            jobs,
+            configs,
+            clock,
+            NullLogger<IssueToShopFloorTrackerService>.Instance);
+
+        var stats = await service.GetDailyStatsAsync(3, CancellationToken.None);
+
+        stats.Should().HaveCount(3);
+        stats[0].Date.Should().Be(twoDaysAgo);
+        stats[0].IssuesCreated.Should().Be(2);
+
+        stats[1].Date.Should().Be(today.AddDays(-1));
+        stats[1].IssuesCreated.Should().Be(0);
+
+        stats[2].Date.Should().Be(today);
+        stats[2].IssuesCreated.Should().Be(0);
+    }
+
     private sealed class FakeTrackingRepo : IIssueToShopFloorTrackingRepository
     {
         public List<AutomationRun> AddedRuns { get; } = [];
         public List<IssueToShopFloorConversion> AddedConversions { get; } = [];
         public List<IssueToShopFloorOutcome> AddedOutcomes { get; } = [];
         public IssueToShopFloorHistorySummary SummaryToReturn { get; set; } = new(0, 0, 0, 0, 0, 0);
+        public IssueToShopFloorDashboardSummary DashboardSummaryToReturn { get; set; } = new(
+            0,
+            new Dictionary<string, int>(),
+            new Dictionary<string, int>(),
+            0,
+            null,
+            null,
+            0,
+            0,
+            0,
+            0,
+            0m,
+            0);
+        public IReadOnlyList<DailyIssueConversionStat> DailyStatsToReturn { get; set; } = [];
+        public IssueToShopFloorHistoryRow? LastCompletedJobToReturn { get; set; }
+        public IReadOnlyList<IssueToShopFloorHistoryRow> RecentJobsToReturn { get; set; } = [];
 
         public Task AddRunAsync(AutomationRun run, CancellationToken cancellationToken)
         {
@@ -294,5 +381,17 @@ public sealed class IssueToShopFloorTrackingTests
 
         public Task<IssueToShopFloorHistorySummary> GetSummaryAsync(IssueToShopFloorHistoryQuery query, CancellationToken cancellationToken) =>
             Task.FromResult(SummaryToReturn);
+
+        public Task<IssueToShopFloorDashboardSummary> GetDashboardSummaryAsync(IssueToShopFloorHistoryQuery query, CancellationToken cancellationToken) =>
+            Task.FromResult(DashboardSummaryToReturn);
+
+        public Task<IReadOnlyList<DailyIssueConversionStat>> GetDailyStatsAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken) =>
+            Task.FromResult(DailyStatsToReturn);
+
+        public Task<IssueToShopFloorHistoryRow?> GetLastCompletedJobAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(LastCompletedJobToReturn);
+
+        public Task<IReadOnlyList<IssueToShopFloorHistoryRow>> GetRecentJobsAsync(int count, string? issueSource, CancellationToken cancellationToken) =>
+            Task.FromResult(RecentJobsToReturn);
     }
 }

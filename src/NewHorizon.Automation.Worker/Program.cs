@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -195,6 +195,7 @@ try
 
             // Each automation flow's own timers, under the same usable-database gate.
             builder.Services.AddIndentToPoScheduler();
+            builder.Services.AddIssueToShopFloorScheduler();
         }
     }
     else

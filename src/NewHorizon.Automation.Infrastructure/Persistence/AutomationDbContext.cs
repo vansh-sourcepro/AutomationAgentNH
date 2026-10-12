@@ -48,6 +48,9 @@ public sealed class AutomationDbContext : DbContext
     /// <summary>Detailed outcome of an Issue to Shop Floor execution attempt.</summary>
     public DbSet<IssueToShopFloorOutcome> IssueToShopFloorOutcomes => Set<IssueToShopFloorOutcome>();
 
+    /// <summary>One issue source type's automation settings — run mode, daily schedule, target sites. Three rows.</summary>
+    public DbSet<IssueToShopFloorAutomationConfig> IssueToShopFloorAutomationConfigs => Set<IssueToShopFloorAutomationConfig>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

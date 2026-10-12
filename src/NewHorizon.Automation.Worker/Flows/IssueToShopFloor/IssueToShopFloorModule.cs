@@ -1,15 +1,12 @@
 using NewHorizon.Automation.ErpClient.Flows.IssueToShopFloor;
 using NewHorizon.Automation.Worker.Flows.IssueToShopFloor.Endpoints;
+using NewHorizon.Automation.Worker.Flows.IssueToShopFloor.Services;
 
 namespace NewHorizon.Automation.Worker.Flows.IssueToShopFloor;
 
 /// <summary>
-/// The SJO → Issue to Shop Floor flow's share of the host: its options and its endpoint.
+/// The Issue to Shop Floor flow's share of the host: its options, its scheduler, and its endpoints.
 /// </summary>
-/// <remarks>
-/// No database, no scheduler, no tracking yet: the ERP's own issued quantities are what stop an SJO
-/// being issued twice, so the flow works on an installation with no automation database.
-/// </remarks>
 public static class IssueToShopFloorModule
 {
     /// <summary>
@@ -31,12 +28,29 @@ public static class IssueToShopFloorModule
         return services;
     }
 
+    /// <summary>
+    /// Issue to Shop Floor automation: the daily scheduler that executes scheduled conversions.
+    /// Needs the database (config rows + tracked runs), so it is registered under the same
+    /// usable-database gate as the other schedulers.
+    /// </summary>
+    public static IServiceCollection AddIssueToShopFloorScheduler(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddHttpClient(IssueToShopFloorSchedulerService.HttpClientName);
+        services.AddHostedService<IssueToShopFloorSchedulerService>();
+
+        return services;
+    }
+
     public static WebApplication MapIssueToShopFloorEndpoints(this WebApplication app)
     {
         ArgumentNullException.ThrowIfNull(app);
 
         app.MapIssueToShopFloorApi();
         app.MapIssueToShopFloorHistoryEndpoints();
+        app.MapIssueToShopFloorDashboardEndpoints();
+        app.MapIssueToShopFloorConfigEndpoints();
 
         return app;
     }

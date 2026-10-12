@@ -185,6 +185,198 @@ public sealed class IssueToShopFloorTrackingRepository : IIssueToShopFloorTracki
             Math.Round(avgDuration, 1));
     }
 
+    public async Task<IssueToShopFloorDashboardSummary> GetDashboardSummaryAsync(
+        IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var baseQuery = FilteredJobs(query);
+
+        var statusGroups = await baseQuery
+            .GroupBy(j => j.Status)
+            .Select(g => new { Status = g.Key.ToString(), Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var countsByStatus = statusGroups.ToDictionary(g => g.Status, g => g.Count);
+
+        var sourceGroups = await baseQuery
+            .GroupBy(j => j.DocumentType)
+            .Select(g => new { Source = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var countsBySource = sourceGroups.ToDictionary(g => g.Source, g => g.Count);
+
+        var totalJobs = countsByStatus.Values.Sum();
+        var successCount = countsByStatus.GetValueOrDefault(JobStatus.Completed.ToString(), 0);
+        var businessRefusalCount = countsByStatus.GetValueOrDefault(JobStatus.Skipped.ToString(), 0);
+        var technicalFailureCount = countsByStatus.GetValueOrDefault(JobStatus.Failed.ToString(), 0);
+
+        var avgDuration = totalJobs > 0
+            ? await baseQuery.Where(j => j.DurationMs.HasValue).AverageAsync(j => (double?)j.DurationMs, cancellationToken)
+            : null;
+
+        double? successRate = totalJobs > 0 ? (double)successCount / totalJobs : null;
+
+        var successfulJobIds = baseQuery.Where(j => j.Status == JobStatus.Completed).Select(j => j.Id);
+        var successfulOutcomes = _dbContext.IssueToShopFloorOutcomes
+            .AsNoTracking()
+            .Where(o => successfulJobIds.Contains(o.JobId) && o.Outcome == "Created");
+
+        var totalQuantityIssued = await successfulOutcomes.SumAsync(o => (decimal?)o.TotalQuantity, cancellationToken) ?? 0m;
+        var totalLinesIssued = await successfulOutcomes.SumAsync(o => (int?)o.LineCount, cancellationToken) ?? 0;
+
+        var runs = _dbContext.Runs.AsNoTracking().Where(r => r.WorkflowType == WorkflowNames.IssueToShopFloor);
+        if (query.FromUtc.HasValue)
+        {
+            runs = runs.Where(r => r.StartedAtUtc >= query.FromUtc.Value);
+        }
+        if (query.ToUtc.HasValue)
+        {
+            runs = runs.Where(r => r.StartedAtUtc <= query.ToUtc.Value);
+        }
+        if (query.TriggerSource.HasValue)
+        {
+            runs = runs.Where(r => r.TriggerSource == query.TriggerSource.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(query.IssueSource))
+        {
+            var src = query.IssueSource.Trim();
+            runs = runs.Where(r => r.RequestedIndentTypes == src);
+        }
+
+        var totalTriggerAttempts = await runs.CountAsync(cancellationToken);
+        var triggerAttemptsWithoutEligibleDocument = await runs.CountAsync(r => r.JobsCreated == 0, cancellationToken);
+
+        return new IssueToShopFloorDashboardSummary(
+            totalJobs,
+            countsByStatus,
+            countsBySource,
+            successCount,
+            successRate,
+            avgDuration,
+            totalTriggerAttempts,
+            triggerAttemptsWithoutEligibleDocument,
+            businessRefusalCount,
+            technicalFailureCount,
+            totalQuantityIssued,
+            totalLinesIssued);
+    }
+
+    public async Task<IReadOnlyList<DailyIssueConversionStat>> GetDailyStatsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
+    {
+        var finished = _dbContext.Jobs.AsNoTracking().Where(job =>
+            job.WorkflowType == WorkflowNames.IssueToShopFloor
+            && job.CompletedAtUtc != null
+            && job.CompletedAtUtc >= fromUtc
+            && job.CompletedAtUtc <= toUtc);
+
+        var convertedByDay = await finished
+            .Where(job => job.Status == JobStatus.Completed)
+            .GroupBy(job => job.CompletedAtUtc!.Value.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var refusedByDay = await finished
+            .Where(job => job.Status == JobStatus.Skipped)
+            .GroupBy(job => job.CompletedAtUtc!.Value.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var failedByDay = await finished
+            .Where(job => job.Status == JobStatus.Failed)
+            .GroupBy(job => job.CompletedAtUtc!.Value.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var issuesAndQtyByDay = await (
+            from outcome in _dbContext.IssueToShopFloorOutcomes.AsNoTracking()
+            join job in _dbContext.Jobs.AsNoTracking() on outcome.JobId equals job.Id
+            where outcome.Outcome == "Created"
+                && job.WorkflowType == WorkflowNames.IssueToShopFloor
+                && job.CompletedAtUtc != null
+                && job.CompletedAtUtc >= fromUtc
+                && job.CompletedAtUtc <= toUtc
+            group outcome by job.CompletedAtUtc!.Value.Date into g
+            select new { Date = g.Key, IssuesCount = g.Count(), TotalQty = g.Sum(o => o.TotalQuantity) })
+            .ToListAsync(cancellationToken);
+
+        var dates = convertedByDay.Select(e => e.Date)
+            .Concat(refusedByDay.Select(e => e.Date))
+            .Concat(failedByDay.Select(e => e.Date))
+            .Concat(issuesAndQtyByDay.Select(e => e.Date))
+            .Distinct()
+            .OrderBy(date => date);
+
+        return dates.Select(date => new DailyIssueConversionStat(
+            DateOnly.FromDateTime(date),
+            issuesAndQtyByDay.Find(e => e.Date == date)?.IssuesCount ?? 0,
+            convertedByDay.Find(e => e.Date == date)?.Count ?? 0,
+            refusedByDay.Find(e => e.Date == date)?.Count ?? 0,
+            failedByDay.Find(e => e.Date == date)?.Count ?? 0,
+            issuesAndQtyByDay.Find(e => e.Date == date)?.TotalQty ?? 0m))
+            .ToList();
+    }
+
+    public async Task<IssueToShopFloorHistoryRow?> GetLastCompletedJobAsync(
+        CancellationToken cancellationToken)
+    {
+        var job = await _dbContext.Jobs
+            .AsNoTracking()
+            .Where(j => j.WorkflowType == WorkflowNames.IssueToShopFloor && j.Status == JobStatus.Completed)
+            .OrderByDescending(j => j.CompletedAtUtc ?? j.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (job is null)
+        {
+            return null;
+        }
+
+        var outcome = await _dbContext.IssueToShopFloorOutcomes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(o => o.JobId == job.Id, cancellationToken);
+
+        AutomationRun? run = null;
+        if (job.RunId.HasValue)
+        {
+            run = await _dbContext.Runs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == job.RunId.Value, cancellationToken);
+        }
+
+        return new IssueToShopFloorHistoryRow(
+            job.Id,
+            job.RunId,
+            job.DocumentType,
+            job.DocumentId,
+            job.Status.ToString(),
+            job.CurrentStage,
+            outcome?.IssueNumber,
+            outcome?.LineCount ?? 0,
+            outcome?.TotalQuantity ?? 0m,
+            run?.TriggerSource.ToString() ?? "Manual",
+            run?.TriggeredBy,
+            job.StartedAtUtc ?? job.CreatedAtUtc,
+            job.CompletedAtUtc,
+            job.DurationMs,
+            outcome?.RefusalReason);
+    }
+
+    public Task<IReadOnlyList<IssueToShopFloorHistoryRow>> GetRecentJobsAsync(
+        int count,
+        string? issueSource,
+        CancellationToken cancellationToken)
+    {
+        var query = new IssueToShopFloorHistoryQuery
+        {
+            IssueSource = issueSource,
+            Page = 1,
+            PageSize = count,
+        };
+        return ListHistoryRowsAsync(query, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<IssueToShopFloorHistoryRow>> GetDocumentHistoryRowsAsync(
         string documentNumber,
         CancellationToken cancellationToken)

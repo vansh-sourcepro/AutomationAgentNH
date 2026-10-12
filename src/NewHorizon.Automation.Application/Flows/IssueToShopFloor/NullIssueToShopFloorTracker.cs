@@ -67,5 +67,55 @@ public sealed class NullIssueToShopFloorTracker : IIssueToShopFloorTracker, IIss
         IssueToShopFloorHistoryQuery query,
         CancellationToken cancellationToken) =>
         Task.FromResult(new IssueToShopFloorHistorySummary(0, 0, 0, 0, 0, 0));
-}
 
+    public Task<IssueToShopFloorDashboardSummary> GetDashboardSummaryAsync(
+        IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new IssueToShopFloorDashboardSummary(
+            0,
+            new Dictionary<string, int>(),
+            new Dictionary<string, int>(),
+            0,
+            null,
+            null,
+            0,
+            0,
+            0,
+            0,
+            0m,
+            0));
+
+    public Task<IReadOnlyList<DailyIssueConversionStat>> GetDailyStatsAsync(
+        int days,
+        CancellationToken cancellationToken)
+    {
+        var bounded = Math.Clamp(days, 1, 365);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var from = today.AddDays(-(bounded - 1));
+
+        var list = new List<DailyIssueConversionStat>(bounded);
+        for (var date = from; date <= today; date = date.AddDays(1))
+        {
+            list.Add(new DailyIssueConversionStat(date, 0, 0, 0, 0, 0m));
+        }
+
+        return Task.FromResult<IReadOnlyList<DailyIssueConversionStat>>(list);
+    }
+
+    public async Task<IssueToShopFloorDashboardComposite> GetDashboardAsync(
+        int days,
+        int recentCount,
+        string? issueSource,
+        CancellationToken cancellationToken)
+    {
+        var dailyStats = await GetDailyStatsAsync(days, cancellationToken);
+        var summary = await GetDashboardSummaryAsync(new IssueToShopFloorHistoryQuery { IssueSource = issueSource }, cancellationToken);
+
+        return new IssueToShopFloorDashboardComposite(
+            summary,
+            dailyStats,
+            null,
+            null,
+            []);
+    }
+}

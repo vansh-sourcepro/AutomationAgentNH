@@ -4,7 +4,7 @@ using NewHorizon.Automation.Domain.Jobs;
 namespace NewHorizon.Automation.Application.Flows.IssueToShopFloor;
 
 /// <summary>
-/// Persistence interface for Issue to Shop Floor conversions, outcomes, and history queries.
+/// Persistence interface for Issue to Shop Floor conversions, outcomes, history, and dashboard queries.
 /// </summary>
 public interface IIssueToShopFloorTrackingRepository
 {
@@ -34,6 +34,23 @@ public interface IIssueToShopFloorTrackingRepository
 
     Task<IssueToShopFloorHistorySummary> GetSummaryAsync(
         IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken);
+
+    Task<IssueToShopFloorDashboardSummary> GetDashboardSummaryAsync(
+        IssueToShopFloorHistoryQuery query,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<DailyIssueConversionStat>> GetDailyStatsAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken);
+
+    Task<IssueToShopFloorHistoryRow?> GetLastCompletedJobAsync(
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<IssueToShopFloorHistoryRow>> GetRecentJobsAsync(
+        int count,
+        string? issueSource,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<IssueToShopFloorHistoryRow>> GetDocumentHistoryRowsAsync(
