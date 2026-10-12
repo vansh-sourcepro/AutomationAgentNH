@@ -216,20 +216,20 @@ public sealed class PoToGrnServiceTests
             .Select(r => r.Body?["searchValue"]?.GetValue<string>())
             .ToList();
 
-        // Page 1 indexed scan found all requested POs immediately — no search fallback needed.
-        poListSearches.Should().Contain(string.Empty);
-        poListSearches.Should().NotContain("000012");
-        poListSearches.Should().NotContain("000014");
+        // Direct search targeted the requested POs without scanning the whole list
+        poListSearches.Should().Contain("000012");
+        poListSearches.Should().Contain("000014");
+        poListSearches.Should().NotContain(string.Empty);
     }
 
     [Fact]
-    public async Task Named_PO_number_not_on_first_page_falls_back_to_search_value()
+    public async Task Named_PO_number_search_finds_targeted_po()
     {
         var erp = GrnFixtures.StandardErp()
             .Route("POEntry/List", (_, body) =>
             {
                 var search = body?["searchValue"]?.GetValue<string>()?.Trim() ?? string.Empty;
-                var rows = search switch
+                JsonObject[] rows = search switch
                 {
                     "000014" => [GrnFixtures.PoRow(103, "000014")],
                     _ => [GrnFixtures.PoRow(101, "000012")],
@@ -254,7 +254,7 @@ public sealed class PoToGrnServiceTests
             .Select(r => r.Body?["searchValue"]?.GetValue<string>())
             .ToList();
 
-        poListSearches.Should().Contain(string.Empty);
+        poListSearches.Should().Contain("000012");
         poListSearches.Should().Contain("000014");
     }
 

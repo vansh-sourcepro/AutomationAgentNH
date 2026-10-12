@@ -57,8 +57,8 @@ public sealed class PoToGrnService : IPoToGrnService
     private static readonly ConcurrentDictionary<string, GrnDocumentControl> SharedDocumentControlCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan StaticCacheTtl = TimeSpan.FromMinutes(30);
 
-    private readonly Dictionary<string, GrnDocumentControl> _documentControl = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, JsonArray> _rateComponents = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, GrnDocumentControl> _documentControl = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, JsonArray> _rateComponents = new(StringComparer.Ordinal);
 
     private bool _firstLineLogged;
 
@@ -128,16 +128,18 @@ public sealed class PoToGrnService : IPoToGrnService
             ids is null && numbers is null ? string.Empty : ", limited to named POs",
             request.DryRun ? " (dry run — nothing will be created)" : string.Empty);
 
-        var userId = await _tokenProvider.GetUserIdAsync(cancellationToken);
-        var periods = await GetFinancePeriodsAsync(cancellationToken);
-        var warehousePolicy = await GetItemLevelWarehouseAsync(cancellationToken);
+        var userIdTask = _tokenProvider.GetUserIdAsync(cancellationToken);
+        var periodsTask = GetFinancePeriodsAsync(cancellationToken);
+        var warehousePolicyTask = GetItemLevelWarehouseAsync(cancellationToken);
+
+        await Task.WhenAll(userIdTask, periodsTask, warehousePolicyTask);
 
         var run = new RunContext(
             request,
             _clock.LocalDate,
-            userId,
-            periods,
-            warehousePolicy);
+            await userIdTask,
+            await periodsTask,
+            await warehousePolicyTask);
 
         var candidates = await DiscoverAsync(sites, types, ids, numbers, request.MaxPos, run.UserId, cancellationToken);
 
@@ -223,11 +225,73 @@ public sealed class PoToGrnService : IPoToGrnService
             (ids is null || ids.All(id => found.Any(po => po.PoId == id)))
             && (numbers is null || numbers.All(num => found.Any(po => Matches(po, num))));
 
-        // Phase 1: Fast scan using empty searchValue (SQL Server clustered index seek on POHAUTOID DESC).
-        // For recently created POs or general sweeps, Page 1 has the newest 200 POs and executes in ~50-100ms.
+        // Fast path for named POs: If specific PO numbers were requested, directly query the ERP
+        // using searchValue rather than scanning through hundreds of unrelated POs.
+        if (numbers is { Count: > 0 })
+        {
+            var searchValues = numbers
+                .Select(number => number.Split('/').Last().Trim())
+                .Where(search => search.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var searchValue in searchValues)
+            {
+                if (found.Count >= targetCount || AllRequestedFound())
+                {
+                    break;
+                }
+
+                foreach (var type in types)
+                {
+                    if (found.Count >= targetCount || AllRequestedFound())
+                    {
+                        break;
+                    }
+
+                    var body = BuildPoListBody(1, searchValue, type, userId);
+                    var endpoint = _endpoints.PoList(sites, _options.CompanyId, _options.LocationId);
+                    var batch = (await PostArrayAsync(endpoint, body, cancellationToken: cancellationToken)).Rows().ToList();
+
+                    var foundForSearch = false;
+                    foreach (var row in batch)
+                    {
+                        if (ReadCandidate(row, type) is not { } po)
+                        {
+                            continue;
+                        }
+
+                        if (ids is not null && !ids.Contains(po.PoId))
+                        {
+                            continue;
+                        }
+
+                        if (!numbers.Any(number => Matches(po, number)))
+                        {
+                            continue;
+                        }
+
+                        if (found.All(candidate => candidate.PoId != po.PoId))
+                        {
+                            found.Add(po);
+                            foundForSearch = true;
+                        }
+                    }
+
+                    if (foundForSearch)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            return Eligible(found, maxPos);
+        }
+
+        // General sweeps (no specific PO numbers): Scan recent POs page by page.
         foreach (var type in types)
         {
-            if (found.Count >= targetCount || (numbers is not null && AllRequestedFound()))
+            if (found.Count >= targetCount)
             {
                 break;
             }
@@ -258,18 +322,13 @@ public sealed class PoToGrnService : IPoToGrnService
                         continue;
                     }
 
-                    if (numbers is not null && !numbers.Any(number => Matches(po, number)))
-                    {
-                        continue;
-                    }
-
                     if (found.All(candidate => candidate.PoId != po.PoId))
                     {
                         found.Add(po);
                         ofType++;
                     }
 
-                    if (found.Count >= targetCount || (numbers is not null && AllRequestedFound()))
+                    if (found.Count >= targetCount)
                     {
                         break;
                     }
@@ -277,19 +336,8 @@ public sealed class PoToGrnService : IPoToGrnService
 
                 scanned += batch.Count;
 
-                if (found.Count >= targetCount || (numbers is not null && AllRequestedFound()))
-                {
-                    break;
-                }
-
-                // If specific PO numbers were named, don't keep paginating without search filter;
-                // anything not on page 1 will be fetched directly in Phase 2.
-                if (numbers is not null)
-                {
-                    break;
-                }
-
-                if (batch.Count < DiscoveryPageSize
+                if (found.Count >= targetCount
+                    || batch.Count < DiscoveryPageSize
                     || scanned >= batch[0].Whole("totalRows")
                     || (_options.MaxScannedPos > 0 && scanned >= _options.MaxScannedPos)
                     || ofType >= maxPos)
@@ -299,69 +347,13 @@ public sealed class PoToGrnService : IPoToGrnService
             }
         }
 
-        // Phase 2: If named PO numbers were requested and any were not in the newest 200 POs (e.g. an older PO),
-        // query the ERP specifically for the missing ones.
-        if (numbers is not null && !AllRequestedFound() && found.Count < targetCount)
-        {
-            var missingNumbers = numbers.Where(num => !found.Any(po => Matches(po, num))).ToList();
-            var searchValues = missingNumbers
-                .Select(number => number.Split('/').Last().Trim())
-                .Where(search => search.Length > 0)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+        return Eligible(found, maxPos);
+    }
 
-            foreach (var searchValue in searchValues)
-            {
-                if (found.Count >= targetCount || AllRequestedFound())
-                {
-                    break;
-                }
-
-                var foundForSearch = false;
-
-                foreach (var type in types)
-                {
-                    if (found.Count >= targetCount || foundForSearch || AllRequestedFound())
-                    {
-                        break;
-                    }
-
-                    var body = BuildPoListBody(1, searchValue, type, userId);
-                    var endpoint = _endpoints.PoList(sites, _options.CompanyId, _options.LocationId);
-                    var batch = (await PostArrayAsync(endpoint, body, cancellationToken: cancellationToken)).Rows().ToList();
-
-                    foreach (var row in batch)
-                    {
-                        if (ReadCandidate(row, type) is not { } po)
-                        {
-                            continue;
-                        }
-
-                        if (ids is not null && !ids.Contains(po.PoId))
-                        {
-                            continue;
-                        }
-
-                        if (!numbers.Any(number => Matches(po, number)))
-                        {
-                            continue;
-                        }
-
-                        if (found.All(candidate => candidate.PoId != po.PoId))
-                        {
-                            found.Add(po);
-                            foundForSearch = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Newest first across both types, then capped: the cap is on the run, not on each type.
+    private IReadOnlyList<PoGrnCandidate> Eligible(List<PoGrnCandidate> found, int maxPos)
+    {
         var eligible = found.OrderByDescending(po => po.PoId).Take(maxPos).ToList();
-
         _logger.LogInformation("Found {Count} authorised PO(s) with quantity waiting for a GRN", eligible.Count);
-
         return eligible;
     }
 
@@ -425,7 +417,12 @@ public sealed class PoToGrnService : IPoToGrnService
         CancellationToken cancellationToken)
     {
         var request = run.Request;
-        var header = (await GetArrayAsync(_endpoints.PoToGrnData(po.PoId), cancellationToken)).Rows().ToList();
+
+        // Concurrently fetch PO header data and Document Control numbering
+        var headerTask = GetArrayAsync(_endpoints.PoToGrnData(po.PoId), cancellationToken);
+        var documentTask = GetDocumentControlAsync(po, run.GrnDate, cancellationToken);
+
+        var header = (await headerTask).Rows().ToList();
 
         if (header.Count == 0)
         {
@@ -465,7 +462,7 @@ public sealed class PoToGrnService : IPoToGrnService
                 request.DryRun, cancellationToken)];
         }
 
-        var document = await GetDocumentControlAsync(po, run.GrnDate, cancellationToken);
+        var document = await documentTask;
 
         if (!document.AutoNumberRequired.Equals("Y", StringComparison.OrdinalIgnoreCase))
         {
@@ -588,10 +585,14 @@ public sealed class PoToGrnService : IPoToGrnService
                     $"Item {line.ItemCode} on PO {po.DisplayNumber} has no rate structure, so its tax cannot be worked out.",
                     $"Neither rateStructureCode nor a tax row's taxRateCode was set for item {line.ItemCode}.");
             }
+        }
 
+        // Parallelize rate structure calculations for all lines concurrently
+        await Task.WhenAll(totals.Select(async line =>
+        {
             var components = await GetRateComponentsAsync(line.RateStructureCode, line.DiscountedRate, currency, cancellationToken);
             line.ApplyTaxes(TaxTemplateFor(line.Source), components);
-        }
+        }));
 
         var payload = GrnPayloadBuilder.Build(new GrnContext
         {
