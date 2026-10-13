@@ -51,6 +51,9 @@ internal sealed class GrnLineTotals
     /// </summary>
     public string RateStructureCode { get; private init; } = string.Empty;
 
+    /// <summary>Auto-generated inward number if the item requires inward auto-generation.</summary>
+    public string InwardNumber { get; set; } = string.Empty;
+
     public static GrnLineTotals From(JsonObject line, int rowId, IReadOnlyList<JsonObject> taxTemplate)
     {
         ArgumentNullException.ThrowIfNull(line);

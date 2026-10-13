@@ -31,6 +31,13 @@ internal static class GrnLineClassifier
     public static GrnLineSelection Select(
         IReadOnlyList<JsonObject> lines,
         GrnReceiptMode mode,
+        Func<JsonObject, string?>? otherBlocker) =>
+        Select(lines, mode, isInwardAutoGen: false, otherBlocker);
+
+    public static GrnLineSelection Select(
+        IReadOnlyList<JsonObject> lines,
+        GrnReceiptMode mode,
+        bool isInwardAutoGen = false,
         Func<JsonObject, string?>? otherBlocker = null)
     {
         ArgumentNullException.ThrowIfNull(lines);
@@ -69,7 +76,7 @@ internal static class GrnLineClassifier
 
         foreach (var line in pending)
         {
-            var reason = ParameterReason(line) ?? otherBlocker?.Invoke(line);
+            var reason = ParameterReason(line, isInwardAutoGen) ?? otherBlocker?.Invoke(line);
 
             if (reason is null)
             {
@@ -101,7 +108,7 @@ internal static class GrnLineClassifier
     }
 
     /// <summary>Null when the line needs nothing typed; otherwise what it needs, naming the item.</summary>
-    public static string? ParameterReason(JsonObject line)
+    public static string? ParameterReason(JsonObject line, bool isInwardAutoGen = false)
     {
         ArgumentNullException.ThrowIfNull(line);
 
@@ -114,7 +121,10 @@ internal static class GrnLineClassifier
 
         if (line.Flag("miminwdreq"))
         {
-            needs.Add("an inward number");
+            if (!isInwardAutoGen)
+            {
+                needs.Add("an inward number (autogeneration of inward number is not enabled)");
+            }
         }
 
         if (line.Flag("mimheatreq"))

@@ -96,3 +96,9 @@ public sealed record PoGrnSweepResult(
 
     public int GrnsPlanned => Results.Count(result => result.Planned);
 }
+
+/// <summary>Result of pre-flight check verifying ERP Document Control requires GRN authorization.</summary>
+public sealed record GrnAuthorizationCheckResult(
+    bool Allowed,
+    IReadOnlyList<string> Refusals);
+

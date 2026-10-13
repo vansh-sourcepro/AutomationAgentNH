@@ -281,4 +281,119 @@ public sealed class PoToGrnServiceTests
         erp.CallCount("grn/create").Should().Be(0);
         sweep.Results.Should().ContainSingle().Which.Notes.Single().Should().Contain("no tax rows");
     }
+
+    [Fact]
+    public async Task When_grn_authorization_is_disabled_in_document_control_the_sweep_is_blocked()
+    {
+        var erp = GrnFixtures.StandardErp(GrnFixtures.PoRow(101))
+            .Route("getDefaultDocumentDetail", new JsonArray(
+                new JsonObject
+                {
+                    ["groupCode"] = "GR",
+                    ["locationCode"] = "NF1",
+                    ["isLocationRequired"] = true,
+                    ["isAutoNumberGenerated"] = true,
+                    ["isDefault"] = "Y",
+                    ["isAutorisationRequired"] = false,
+                }));
+
+        var service = GrnServiceUnderTest.Build(erp);
+        var sweep = await service.ReceiveEligibleAsync(GrnServiceUnderTest.Request(), CancellationToken.None);
+
+        sweep.GrnsCreated.Should().Be(0);
+        sweep.StoppedReason.Should().NotBeNull();
+        sweep.StoppedReason.Should().Contain("GRN Authorization is turned OFF in ERP");
+        erp.CallCount("grn/create").Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CheckAuthorizationRequiredAsync_reports_refusals_when_flag_is_off()
+    {
+        var erp = GrnFixtures.StandardErp()
+            .Route("getDefaultDocumentDetail", new JsonArray(
+                new JsonObject
+                {
+                    ["groupCode"] = "GR",
+                    ["locationCode"] = "NF1",
+                    ["isLocationRequired"] = true,
+                    ["isAutoNumberGenerated"] = true,
+                    ["isDefault"] = "Y",
+                    ["isAutorisationRequired"] = false,
+                }));
+
+        var service = GrnServiceUnderTest.Build(erp);
+        var result = await service.CheckAuthorizationRequiredAsync([1], [PoGrnType.Regular], CancellationToken.None);
+
+        result.Allowed.Should().BeFalse();
+        result.Refusals.Should().ContainSingle().Which.Should().Contain("Site NF1 (Regular)").And.Contain("turned OFF");
+    }
+
+    [Fact]
+    public void ResolveNextInwardNumber_increments_consecutive_lines_within_same_grn()
+    {
+        var line1 = GrnLineTotals.From(GrnFixtures.Line(1, "ITEM1"), 1, [.. GrnFixtures.TaxRows(1, "ITEM1").OfType<JsonObject>()]);
+        var line2 = GrnLineTotals.From(GrnFixtures.Line(1, "ITEM2"), 2, [.. GrnFixtures.TaxRows(1, "ITEM2").OfType<JsonObject>()]);
+
+        var inwd1 = PoToGrnService.ResolveNextInwardNumber("2627-0000001", "2627-", "ITEM1", [line1, line2], isItemWise: false);
+        inwd1.Should().Be("2627-0000001");
+        line1.InwardNumber = inwd1;
+
+        var inwd2 = PoToGrnService.ResolveNextInwardNumber("2627-0000001", "2627-", "ITEM2", [line1, line2], isItemWise: false);
+        inwd2.Should().Be("2627-0000002");
+    }
+
+    [Fact]
+    public void ResolveNextInwardNumber_falls_back_to_0000001_when_empty()
+    {
+        var line = GrnLineTotals.From(GrnFixtures.Line(1, "ITEM1"), 1, [.. GrnFixtures.TaxRows(1, "ITEM1").OfType<JsonObject>()]);
+        var inwd = PoToGrnService.ResolveNextInwardNumber(null, "2627-", "ITEM1", [line], isItemWise: false);
+        inwd.Should().Be("2627-0000001");
+    }
+
+    [Fact]
+    public async Task Po_with_inward_item_is_received_and_stamped_when_inward_auto_gen_is_enabled()
+    {
+        var erp = GrnFixtures.StandardErp(GrnFixtures.PoRow(100))
+            .Route("inventoryPolicy/getDetail", new JsonObject
+            {
+                ["islinelevelwhgrn"] = false,
+                ["isinwardAutoGen"] = true,
+                ["isinwardAutoGenItemWise"] = false,
+            })
+            .Route("getposearchdetails", GrnFixtures.PoLines(100,
+                [GrnFixtures.Line(100, "INWD-ITEM", tweak: row => row["miminwdreq"] = true)]))
+            .Route("getmaxParamValue", new JsonArray(
+                new JsonObject { ["maxinwd"] = "2627-0000005" }));
+
+        var service = GrnServiceUnderTest.Build(erp);
+        var sweep = await service.ReceiveEligibleAsync(GrnServiceUnderTest.Request(), CancellationToken.None);
+
+        sweep.GrnsCreated.Should().Be(1);
+        erp.CallCount("getmaxParamValue").Should().Be(1);
+
+        var payload = erp.CreateBodies.Should().ContainSingle().Subject;
+        var item = payload["grnitemDetails"]!.AsArray().Should().ContainSingle().Subject;
+        item["xgrndinwd"]!.GetValue<string>().Should().Be("2627-0000005");
+    }
+
+    [Fact]
+    public async Task Po_with_inward_item_is_skipped_when_inward_auto_gen_is_disabled()
+    {
+        var erp = GrnFixtures.StandardErp(GrnFixtures.PoRow(100))
+            .Route("inventoryPolicy/getDetail", new JsonObject
+            {
+                ["islinelevelwhgrn"] = false,
+                ["isinwardAutoGen"] = false,
+                ["isinwardAutoGenItemWise"] = false,
+            })
+            .Route("getposearchdetails", GrnFixtures.PoLines(100,
+                [GrnFixtures.Line(100, "INWD-ITEM", tweak: row => row["miminwdreq"] = true)]));
+
+        var service = GrnServiceUnderTest.Build(erp);
+        var sweep = await service.ReceiveEligibleAsync(GrnServiceUnderTest.Request(GrnReceiptMode.Complete), CancellationToken.None);
+
+        sweep.GrnsCreated.Should().Be(0);
+        erp.CallCount("grn/create").Should().Be(0);
+        sweep.Results.Should().ContainSingle().Which.Notes.Should().ContainMatch("*autogeneration of inward number is not enabled*");
+    }
 }

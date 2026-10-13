@@ -107,14 +107,16 @@ internal static class GrnFixtures
                 ["financePeriodSetting"] = new JsonArray(
                     new JsonObject { ["siteId"] = 1, ["periodSDt"] = "2026-04-01T00:00:00", ["periodEDt"] = "2027-03-31T00:00:00" }),
             })
-            .Route("inventoryPolicy/getDetail", new JsonObject { ["islinelevelwhgrn"] = false })
+            .Route("inventoryPolicy/getDetail", new JsonObject { ["islinelevelwhgrn"] = false, ["isinwardAutoGen"] = false, ["isinwardAutoGenItemWise"] = false })
             .Route("getpotogrnredirectdata", new JsonArray(
                 new JsonObject { ["povndcd"] = "V0001", ["powhid"] = 3, ["powhcd"] = "RM", ["povndname"] = "Acme Steel", ["vndcurcd"] = "INR", ["potype"] = "R" }))
             .Route("getDefaultDocumentDetail", new JsonArray(
-                new JsonObject { ["groupCode"] = "GR", ["locationCode"] = "NF1", ["isLocationRequired"] = true, ["isAutoNumberGenerated"] = true, ["isDefault"] = "Y" }))
+                new JsonObject { ["groupCode"] = "GR", ["locationCode"] = "NF1", ["isLocationRequired"] = true, ["isAutoNumberGenerated"] = true, ["isDefault"] = "Y", ["isAutorisationRequired"] = true }))
             .Route("getAllRateStructureDetails", new JsonArray(
                 new JsonObject { ["msprtcd"] = "CGST", ["rtamt"] = 9m },
                 new JsonObject { ["msprtcd"] = "SGST", ["rtamt"] = 9m }))
+            .Route("getmaxParamValue", new JsonArray(
+                new JsonObject { ["maxinwd"] = "2627-0000001" }))
             .WithPoList(poListRows);
 
     public static GrnFakeErp WithPoList(this GrnFakeErp erp, params JsonObject[] rows)

@@ -20,6 +20,15 @@ public interface IPoToGrnService
     /// receivable lines, at the pending quantity.
     /// </summary>
     Task<PoGrnSweepResult> ReceiveEligibleAsync(PoGrnSweepRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Checks whether ERP Document Control requires GRN authorization for the given sites and PO types.
+    /// If authorization is turned off for any site/type, returns disallowed with the reasons.
+    /// </summary>
+    Task<GrnAuthorizationCheckResult> CheckAuthorizationRequiredAsync(
+        IReadOnlyList<int>? sites,
+        IReadOnlyList<PoGrnType>? poTypes,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -53,7 +62,7 @@ public sealed class PoToGrnService : IPoToGrnService
     private readonly ILogger<PoToGrnService> _logger;
 
     private static readonly ConcurrentDictionary<string, (DateTimeOffset ExpiresAt, IReadOnlyDictionary<int, (DateOnly Start, DateOnly End)> Value)> FinancePeriodsCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, (DateTimeOffset ExpiresAt, bool Value)> InventoryPolicyCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (DateTimeOffset ExpiresAt, InventoryPolicyDetails Value)> InventoryPolicyCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, GrnDocumentControl> SharedDocumentControlCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan StaticCacheTtl = TimeSpan.FromMinutes(30);
 
@@ -68,6 +77,11 @@ public sealed class PoToGrnService : IPoToGrnService
         InventoryPolicyCache.Clear();
         SharedDocumentControlCache.Clear();
     }
+
+    internal sealed record InventoryPolicyDetails(
+        bool ItemLevelWarehouse,
+        bool IsInwardAutoGen,
+        bool IsInwardAutoGenItemWise);
 
     public PoToGrnService(
         IHttpClientFactory httpClientFactory,
@@ -99,7 +113,9 @@ public sealed class PoToGrnService : IPoToGrnService
         DateOnly GrnDate,
         int UserId,
         IReadOnlyDictionary<int, (DateOnly Start, DateOnly End)> Periods,
-        bool ItemLevelWarehouse);
+        bool ItemLevelWarehouse,
+        bool IsInwardAutoGen,
+        bool IsInwardAutoGenItemWise);
 
     /// <inheritdoc />
     public async Task<PoGrnSweepResult> ReceiveEligibleAsync(
@@ -120,6 +136,14 @@ public sealed class PoToGrnService : IPoToGrnService
         var ids = request.PoIds is { Count: > 0 } ? request.PoIds.ToHashSet() : null;
         var numbers = NormaliseNumbers(request.PoNumbers);
 
+        var authCheck = await CheckAuthorizationRequiredAsync(request.Sites, request.PoTypes, cancellationToken);
+        if (!authCheck.Allowed)
+        {
+            var stoppedReason = $"GRN Authorization is turned OFF in ERP: {string.Join("; ", authCheck.Refusals)}";
+            _logger.LogWarning("PO → GRN sweep stopped: {Reason}", stoppedReason);
+            return new PoGrnSweepResult(0, request.DryRun, [], [], stoppedReason);
+        }
+
         _logger.LogInformation(
             "PO → GRN sweep starting: {Types} PO(s) at site(s) {Sites}, receipt mode {Mode}{Named}{DryRun}",
             string.Join(", ", types),
@@ -130,16 +154,19 @@ public sealed class PoToGrnService : IPoToGrnService
 
         var userIdTask = _tokenProvider.GetUserIdAsync(cancellationToken);
         var periodsTask = GetFinancePeriodsAsync(cancellationToken);
-        var warehousePolicyTask = GetItemLevelWarehouseAsync(cancellationToken);
+        var inventoryPolicyTask = GetInventoryPolicyAsync(cancellationToken);
 
-        await Task.WhenAll(userIdTask, periodsTask, warehousePolicyTask);
+        await Task.WhenAll(userIdTask, periodsTask, inventoryPolicyTask);
 
+        var policy = await inventoryPolicyTask;
         var run = new RunContext(
             request,
             _clock.LocalDate,
             await userIdTask,
             await periodsTask,
-            await warehousePolicyTask);
+            policy.ItemLevelWarehouse,
+            policy.IsInwardAutoGen,
+            policy.IsInwardAutoGenItemWise);
 
         var candidates = await DiscoverAsync(sites, types, ids, numbers, request.MaxPos, run.UserId, cancellationToken);
 
@@ -464,6 +491,13 @@ public sealed class PoToGrnService : IPoToGrnService
 
         var document = await documentTask;
 
+        if (!document.IsAuthorizationRequired)
+        {
+            return [await SkipAsync(po, vendorCode, 0, 0,
+                $"Refused: GRN Authorization is turned OFF in ERP Document Control for site {document.SiteCode} and PO type {po.PoType}.",
+                request.DryRun, cancellationToken)];
+        }
+
         if (!document.AutoNumberRequired.Equals("Y", StringComparison.OrdinalIgnoreCase))
         {
             return [await SkipAsync(po, vendorCode, 0, 0,
@@ -540,7 +574,7 @@ public sealed class PoToGrnService : IPoToGrnService
                 (row.Text("xdtdtmcd").Trim().Length == 0 ? row.Text("itemCode") : row.Text("xdtdtmcd")).Trim()
                     .Equals(line.Text("itmcode").Trim(), StringComparison.OrdinalIgnoreCase))];
 
-        var selection = GrnLineClassifier.Select(lines, request.ReceiptMode, line =>
+        var selection = GrnLineClassifier.Select(lines, request.ReceiptMode, run.IsInwardAutoGen, line =>
         {
             if (run.ItemLevelWarehouse && line.Whole("xgrndwhid") <= 0)
             {
@@ -575,6 +609,11 @@ public sealed class PoToGrnService : IPoToGrnService
                 planned: true,
                 linesReceived: totals.Count,
                 linesSkipped: selection.SkippedLines.Count);
+        }
+
+        if (run.IsInwardAutoGen)
+        {
+            await AssignInwardNumbersAsync(totals, run, cancellationToken);
         }
 
         foreach (var line in totals)
@@ -750,7 +789,7 @@ public sealed class PoToGrnService : IPoToGrnService
         return periods;
     }
 
-    private async Task<bool> GetItemLevelWarehouseAsync(CancellationToken cancellationToken)
+    private async Task<InventoryPolicyDetails> GetInventoryPolicyAsync(CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         if (InventoryPolicyCache.TryGetValue(_endpoints.InventoryPolicy, out var cached) && cached.ExpiresAt > now)
@@ -758,18 +797,149 @@ public sealed class PoToGrnService : IPoToGrnService
             return cached.Value;
         }
 
-        var flag = (await GetObjectAsync(_endpoints.InventoryPolicy, cancellationToken)).Flag("islinelevelwhgrn");
-        InventoryPolicyCache[_endpoints.InventoryPolicy] = (now.Add(StaticCacheTtl), flag);
-        return flag;
+        var obj = await GetObjectAsync(_endpoints.InventoryPolicy, cancellationToken);
+        var details = new InventoryPolicyDetails(
+            ItemLevelWarehouse: obj.Flag("islinelevelwhgrn"),
+            IsInwardAutoGen: obj.Flag("isinwardAutoGen"),
+            IsInwardAutoGenItemWise: obj.Flag("isinwardAutoGenItemWise"));
+
+        InventoryPolicyCache[_endpoints.InventoryPolicy] = (now.Add(StaticCacheTtl), details);
+        return details;
+    }
+
+    private async Task AssignInwardNumbersAsync(
+        IReadOnlyList<GrnLineTotals> lines,
+        RunContext run,
+        CancellationToken cancellationToken)
+    {
+        var finYear = GrnFinancialYear.For(run.GrnDate);
+        var prefix = finYear.Replace("-", string.Empty, StringComparison.Ordinal) + "-";
+
+        foreach (var line in lines)
+        {
+            if (!line.Source.Flag("miminwdreq") || line.Source.Flag("mimheatreq"))
+            {
+                continue;
+            }
+
+            var baseInward = await GetMaxInwardNumberAsync(prefix, line.ItemCode, cancellationToken);
+            line.InwardNumber = ResolveNextInwardNumber(
+                baseInward,
+                prefix,
+                line.ItemCode,
+                lines,
+                run.IsInwardAutoGenItemWise);
+        }
+    }
+
+    private async Task<string?> GetMaxInwardNumberAsync(string prefix, string itemCode, CancellationToken cancellationToken)
+    {
+        var body = new JsonObject
+        {
+            ["prefix"] = prefix,
+            ["itmcode"] = itemCode,
+        };
+
+        var array = await PostArrayAsync(_endpoints.MaxParamValue, body, cancellationToken);
+        var firstRow = array.Rows().FirstOrDefault();
+        return firstRow?.Text("maxinwd")?.Trim();
+    }
+
+    internal static string ResolveNextInwardNumber(
+        string? maxInwardFromErp,
+        string prefix,
+        string itemCode,
+        IEnumerable<GrnLineTotals> allLines,
+        bool isItemWise)
+    {
+        var baseInward = string.IsNullOrWhiteSpace(maxInwardFromErp)
+            ? $"{prefix}0000001"
+            : maxInwardFromErp.Trim();
+
+        var format = baseInward.Length >= 5 ? baseInward[..5] : prefix;
+
+        var existingInwardNumbers = allLines
+            .Where(other => !string.IsNullOrEmpty(other.InwardNumber)
+                && (!isItemWise || other.ItemCode.Equals(itemCode, StringComparison.OrdinalIgnoreCase))
+                && other.InwardNumber.StartsWith(format, StringComparison.OrdinalIgnoreCase)
+                && other.InwardNumber.Length == format.Length + 7
+                && int.TryParse(other.InwardNumber[format.Length..], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            .Select(other => int.Parse(other.InwardNumber[format.Length..], NumberStyles.Integer, CultureInfo.InvariantCulture))
+            .ToList();
+
+        if (existingInwardNumbers.Count > 0)
+        {
+            var maxUsed = existingInwardNumbers.Max();
+            var baseNum = int.TryParse(baseInward.Length > format.Length ? baseInward[format.Length..] : string.Empty, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : 1;
+
+            if (maxUsed >= baseNum)
+            {
+                var nextNum = maxUsed + 1;
+                return $"{format}{nextNum.ToString("D7", CultureInfo.InvariantCulture)}";
+            }
+        }
+
+        return baseInward;
+    }
+
+    public async Task<GrnAuthorizationCheckResult> CheckAuthorizationRequiredAsync(
+        IReadOnlyList<int>? sites,
+        IReadOnlyList<PoGrnType>? poTypes,
+        CancellationToken cancellationToken)
+    {
+        var targetSites = ResolveSites(sites);
+        var targetTypes = poTypes is { Count: > 0 } ? poTypes : PoGrnTypes.All;
+
+        var refusals = new List<string>();
+
+        foreach (var site in targetSites)
+        {
+            foreach (var type in targetTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var doc = await GetDocumentControlForSiteAsync(site, site.ToString(CultureInfo.InvariantCulture), type, _clock.LocalDate, cancellationToken);
+                    if (!doc.IsAuthorizationRequired)
+                    {
+                        refusals.Add($"Site {doc.SiteCode} ({type}): GRN Authorization is turned OFF in ERP Document Control.");
+                    }
+                }
+                catch (ErpException ex)
+                {
+                    _logger.LogWarning("Could not check Document Control for site {Site} ({Type}): {Message}", site, type, ex.LaymanMessage);
+                    refusals.Add($"Site {site} ({type}): {ex.LaymanMessage}");
+                }
+            }
+        }
+
+        if (refusals.Count > 0)
+        {
+            _logger.LogWarning("PO → GRN authorization pre-flight failed: {Reasons}", string.Join("; ", refusals));
+            return new GrnAuthorizationCheckResult(Allowed: false, Refusals: refusals);
+        }
+
+        return new GrnAuthorizationCheckResult(Allowed: true, Refusals: []);
     }
 
     private async Task<GrnDocumentControl> GetDocumentControlAsync(
         PoGrnCandidate po,
         DateOnly grnDate,
+        CancellationToken cancellationToken) =>
+        await GetDocumentControlForSiteAsync(po.SiteId, po.SiteCode, po.PoType, grnDate, cancellationToken);
+
+    private async Task<GrnDocumentControl> GetDocumentControlForSiteAsync(
+        int siteId,
+        string fallbackSiteCode,
+        PoGrnType poType,
+        DateOnly grnDate,
         CancellationToken cancellationToken)
     {
         var financialYear = GrnFinancialYear.For(grnDate);
-        var endpoint = _endpoints.DocumentControlDefault(financialYear, GrnPayloadBuilder.DocType, po.PoType.GrnSubType(), po.SiteId);
+        var endpoint = _endpoints.DocumentControlDefault(financialYear, GrnPayloadBuilder.DocType, poType.GrnSubType(), siteId);
 
         if (_documentControl.TryGetValue(endpoint, out var cached))
         {
@@ -785,16 +955,19 @@ public sealed class PoToGrnService : IPoToGrnService
         var rows = (await GetArrayAsync(endpoint, cancellationToken)).Rows().ToList();
         var row = rows.FirstOrDefault(r => r.Flag("isDefault")) ?? rows.FirstOrDefault()
             ?? throw new ErpBusinessException(
-                $"The ERP has no GRN numbering set up for {po.PoType.GrnSubType()} at site {po.SiteCode} in {financialYear}.",
+                $"The ERP has no GRN numbering set up for {poType.GrnSubType()} at site {fallbackSiteCode} in {financialYear}.",
                 $"'{endpoint}' returned no Document Control rows.",
                 endpoint);
+
+        var isAuthRequired = row.Flag("isAutorisationRequired") || row.Flag("isAuthorizationRequired");
 
         var document = new GrnDocumentControl(
             FinancialYear: financialYear,
             GroupCode: row.Text("groupCode").Trim(),
-            SiteCode: row.Text("locationCode", po.SiteCode).Trim(),
+            SiteCode: row.Text("locationCode", fallbackSiteCode).Trim(),
             SiteRequired: row.Flag("isLocationRequired") ? "Y" : "N",
-            AutoNumberRequired: row.Flag("isAutoNumberGenerated") ? "Y" : "N");
+            AutoNumberRequired: row.Flag("isAutoNumberGenerated") ? "Y" : "N",
+            IsAuthorizationRequired: isAuthRequired);
 
         _documentControl[endpoint] = document;
         SharedDocumentControlCache[endpoint] = document;

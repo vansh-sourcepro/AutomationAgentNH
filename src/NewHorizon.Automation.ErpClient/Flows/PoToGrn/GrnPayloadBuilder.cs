@@ -10,7 +10,8 @@ internal sealed record GrnDocumentControl(
     string GroupCode,
     string SiteCode,
     string SiteRequired,
-    string AutoNumberRequired);
+    string AutoNumberRequired,
+    bool IsAuthorizationRequired = true);
 
 /// <summary>Everything one <c>inventory/grn/create</c> body is built from.</summary>
 internal sealed record GrnContext
@@ -184,7 +185,7 @@ internal static class GrnPayloadBuilder
             ["warehousename"] = source.Text("warename"),
             ["rowid"] = line.RowId,
             ["xgrndsize"] = string.Empty,
-            ["xgrndinwd"] = string.Empty,
+            ["xgrndinwd"] = line.InwardNumber ?? string.Empty,
             ["xgrndheat"] = string.Empty,
             ["xgrnditmsrno"] = string.Empty,
             ["xgrndmbatch"] = string.Empty,

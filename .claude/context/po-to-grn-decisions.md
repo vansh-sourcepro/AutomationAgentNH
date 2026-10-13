@@ -12,8 +12,8 @@ ERP APIs only, runs outside the job engine, ERP bookkeeping is what prevents dup
 | Invoice Date | **The day before** the GRN date |
 | GRN date | Today; must be ≥ PO date and within the site's finance period |
 | Warehouse | The PO line's own warehouse |
-| GRN authorisation | **Left to a person.** The agent never calls `inventory/grn/authorizegrn` |
-| "Parameter" items | An item needing batch, heat, inward, serial, mfg-batch **or a shelf-life expiry date**, or an **LBT (sized) line**, is never received by the agent |
+| GRN authorisation | **Left to a person.** The agent never calls `inventory/grn/authorizegrn`. **Guardrail (confirmed 2026-10-13):** Automation refuses to run/toggle ON if ERP Document Control has GRN Authorization turned OFF (`isAutorisationRequired == false`). |
+| "Parameter" items | Items needing batch, heat, serial, mfg-batch **or a shelf-life expiry date**, or an **LBT (sized) line**, are never received by the agent. **Inward numbers (confirmed 2026-10-13):** If Inventory Policy `isinwardAutoGen` is ON, inward numbers are auto-generated via `inventory/grn/getmaxParamValue` and received; if OFF, inward items are skipped with an explicit notification. |
 | Blanket POs | Skipped — no fixed quantity to receive (confirmed 2026-09-24) |
 | History | Saved to the automation database: `PoGrnRun` + `PoGrnReceipt` (confirmed 2026-09-24) |
 | Receipt mode (a setting on the screen) | **Complete** — receive a PO only if *every* pending line is parameter-free, else skip the whole PO. **Partial** — receive every PO with at least one parameter-free line, GRN only those lines, leave the rest pending for a person (confirmed 2026-09-24) |

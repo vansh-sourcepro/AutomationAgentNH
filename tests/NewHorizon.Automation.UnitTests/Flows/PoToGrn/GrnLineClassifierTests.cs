@@ -121,4 +121,54 @@ public sealed class GrnLineClassifierTests
         complete.SkipReason.Should().Contain("UNTAXED");
         partial.Receivable.Should().ContainSingle();
     }
+
+    [Fact]
+    public void Inward_number_item_is_skipped_when_inward_auto_gen_is_disabled()
+    {
+        var line = GrnFixtures.Line(1, "INWARD-ITEM", tweak: row => row["miminwdreq"] = true);
+
+        var reason = GrnLineClassifier.ParameterReason(line, isInwardAutoGen: false);
+        reason.Should().Contain("INWARD-ITEM")
+            .And.Contain("an inward number (autogeneration of inward number is not enabled)");
+
+        var selection = GrnLineClassifier.Select([line], GrnReceiptMode.Complete, isInwardAutoGen: false);
+        selection.Receivable.Should().BeEmpty();
+        selection.SkipReason.Should().Contain("autogeneration of inward number is not enabled");
+    }
+
+    [Fact]
+    public void Inward_number_item_is_receivable_when_inward_auto_gen_is_enabled()
+    {
+        var line = GrnFixtures.Line(1, "INWARD-ITEM", tweak: row => row["miminwdreq"] = true);
+
+        var reason = GrnLineClassifier.ParameterReason(line, isInwardAutoGen: true);
+        reason.Should().BeNull();
+
+        var selection = GrnLineClassifier.Select([line], GrnReceiptMode.Complete, isInwardAutoGen: true);
+        selection.Receivable.Should().HaveCount(1);
+        selection.SkippedLines.Should().BeEmpty();
+        selection.SkipReason.Should().BeNull();
+    }
+
+    [Fact]
+    public void Inward_item_needing_other_parameters_is_still_skipped_even_when_inward_auto_gen_is_enabled()
+    {
+        var line = GrnFixtures.Line(1, "MULTI-PARAM", tweak: row =>
+        {
+            row["miminwdreq"] = true;
+            row["mimbchreqd"] = true;
+            row["mimheatreq"] = true;
+        });
+
+        var reason = GrnLineClassifier.ParameterReason(line, isInwardAutoGen: true);
+        reason.Should().NotBeNull();
+        reason.Should().Contain("MULTI-PARAM")
+            .And.Contain("a batch number")
+            .And.Contain("a heat number")
+            .And.NotContain("inward number");
+
+        var selection = GrnLineClassifier.Select([line], GrnReceiptMode.Complete, isInwardAutoGen: true);
+        selection.Receivable.Should().BeEmpty();
+        selection.SkipReason.Should().Contain("MULTI-PARAM");
+    }
 }

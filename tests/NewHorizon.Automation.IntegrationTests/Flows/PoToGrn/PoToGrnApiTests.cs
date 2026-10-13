@@ -369,6 +369,34 @@ public sealed class PoToGrnApiTests : IClassFixture<PoToGrnApiFactory>
         firstDay.ContainsKey("documentsFailed").Should().BeTrue();
         firstDay.ContainsKey("totalQuantity").Should().BeTrue();
     }
+
+    [Fact]
+    public async Task The_trigger_is_refused_when_grn_authorization_is_turned_off_in_erp()
+    {
+        _factory.Configs.Set(new PoGrnAutomationConfigUpdate { IsActive = true, InvoiceNumber = "INV-1" });
+        _factory.Service.AuthorizationCheck = (_, _) => new GrnAuthorizationCheckResult(false, ["Site NF1 (Regular): GRN Authorization is turned OFF in ERP Document Control."]);
+
+        using var client = _factory.Authenticated();
+        var response = await client.PostAsJsonAsync(TriggerRoute, new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var problem = await response.Content.ReadFromJsonAsync<JsonObject>();
+        problem!["title"]!.GetValue<string>().Should().Contain("GRN Authorization is turned OFF");
+        problem["detail"]!.GetValue<string>().Should().Contain("Site NF1 (Regular)");
+    }
+
+    [Fact]
+    public async Task Turning_on_grn_automation_is_refused_when_grn_authorization_is_turned_off_in_erp()
+    {
+        _factory.Service.AuthorizationCheck = (_, _) => new GrnAuthorizationCheckResult(false, ["Site NF1 (Regular): GRN Authorization is turned OFF in ERP Document Control."]);
+
+        using var client = _factory.Authenticated();
+        var response = await client.PutAsJsonAsync(ConfigRoute + "/enabled", new { enabled = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var problem = await response.Content.ReadFromJsonAsync<JsonObject>();
+        problem!["title"]!.GetValue<string>().Should().Contain("GRN Authorization is turned OFF");
+    }
 }
 
 public sealed class PoToGrnApiFactory : WebApplicationFactory<Program>
@@ -389,7 +417,7 @@ public sealed class PoToGrnApiFactory : WebApplicationFactory<Program>
     public void Reset()
     {
         Configs.Reset();
-        Service.Requests.Clear();
+        Service.Reset();
         Rights.Reset();
     }
 
@@ -516,6 +544,21 @@ public sealed class FakeErpUserRights : IErpUserRightsService
 public sealed class RecordingPoToGrnService : IPoToGrnService
 {
     public List<PoGrnSweepRequest> Requests { get; } = [];
+
+    public Func<IReadOnlyList<int>?, IReadOnlyList<PoGrnType>?, GrnAuthorizationCheckResult> AuthorizationCheck { get; set; } =
+        (_, _) => new GrnAuthorizationCheckResult(true, []);
+
+    public void Reset()
+    {
+        Requests.Clear();
+        AuthorizationCheck = (_, _) => new GrnAuthorizationCheckResult(true, []);
+    }
+
+    public Task<GrnAuthorizationCheckResult> CheckAuthorizationRequiredAsync(
+        IReadOnlyList<int>? sites,
+        IReadOnlyList<PoGrnType>? poTypes,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(AuthorizationCheck(sites, poTypes));
 
     public Task<PoGrnSweepResult> ReceiveEligibleAsync(PoGrnSweepRequest request, CancellationToken cancellationToken)
     {

@@ -59,14 +59,42 @@ public static class GrnAutomationEndpoints
     }
 
     /// <summary>The master switch. Off ⇒ the scheduler runs nothing and every run is refused (409).</summary>
-    private static Task<IResult> SetEnabledAsync(
+    private static async Task<IResult> SetEnabledAsync(
         SetGrnAutomationEnabledRequest? request,
         IPoGrnAutomationConfigRepository configs,
+        IPoToGrnService service,
+        ILoggerFactory loggerFactory,
         ClaimsPrincipal user,
-        CancellationToken cancellationToken) =>
-        request is null
-            ? Task.FromResult(Results.Problem("An { \"enabled\": true|false } body is required.", statusCode: StatusCodes.Status400BadRequest))
-            : SaveAsync(new PoGrnAutomationConfigUpdate { IsActive = request.Enabled }, configs, user, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.Problem("An { \"enabled\": true|false } body is required.", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (request.Enabled)
+        {
+            if (!configs.IsEnabled)
+            {
+                return NoDatabase();
+            }
+
+            var current = await configs.GetAsync(cancellationToken);
+            var authCheck = await service.CheckAuthorizationRequiredAsync(current.SiteIds(), current.PoTypeList(), cancellationToken);
+            if (!authCheck.Allowed)
+            {
+                var detail = string.Join("; ", authCheck.Refusals);
+                var logger = loggerFactory.CreateLogger(nameof(GrnAutomationEndpoints));
+                logger.LogWarning("Cannot turn ON GRN Automation: {Detail}", detail);
+                return Results.Problem(
+                    title: "GRN Authorization is turned OFF in ERP Document Control.",
+                    detail: $"Cannot turn ON GRN Automation: {detail}. Enable GRN authorization in ERP Document Control first.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+        }
+
+        return await SaveAsync(new PoGrnAutomationConfigUpdate { IsActive = request.Enabled }, configs, user, cancellationToken);
+    }
 
     /// <summary>Limits every later run to these PO types; an empty list means both.</summary>
     private static Task<IResult> SetPoTypesAsync(
@@ -208,6 +236,21 @@ public static class GrnAutomationEndpoints
         var effectiveSites = savedConfig.SiteIds();
         var effectivePoTypes = savedConfig.PoTypeList();
         var effectivePoNumbers = savedConfig.PoNumberList() is { Count: > 0 } saved ? saved : null;
+
+        var authCheck = await service.CheckAuthorizationRequiredAsync(
+            effectiveSites.Count > 0 ? effectiveSites : null,
+            effectivePoTypes,
+            cancellationToken);
+        if (!authCheck.Allowed)
+        {
+            var detail = string.Join("; ", authCheck.Refusals);
+            var logger = loggerFactory.CreateLogger(nameof(GrnAutomationEndpoints));
+            logger.LogWarning("Run Now refused: {Detail}", detail);
+            return Results.Problem(
+                title: "GRN Authorization is turned OFF in ERP Document Control.",
+                detail: $"Cannot run PO → GRN automation: {detail}. Enable GRN authorization in ERP Document Control first.",
+                statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
 
         var sweepRequest = new PoGrnSweepRequest
         {

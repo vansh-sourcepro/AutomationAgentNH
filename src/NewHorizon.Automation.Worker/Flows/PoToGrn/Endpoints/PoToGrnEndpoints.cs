@@ -205,6 +205,17 @@ public static class PoToGrnEndpoints
         var namesPos = request.PoIds is { Count: > 0 } || request.PoNumbers is { Count: > 0 };
         var poNumbers = namesPos ? request.PoNumbers : config.PoNumberList() is { Count: > 0 } saved ? saved : null;
 
+        var authCheck = await service.CheckAuthorizationRequiredAsync(sites.Count > 0 ? sites : null, poTypes, cancellationToken);
+        if (!authCheck.Allowed)
+        {
+            var detail = string.Join("; ", authCheck.Refusals);
+            logger.LogWarning("PO → GRN trigger refused: {Detail}", detail);
+            return Results.Problem(
+                title: "GRN Authorization is turned OFF in ERP Document Control.",
+                detail: $"Cannot run PO → GRN automation: {detail}. Please enable GRN authorization in ERP Document Control before running automation.",
+                statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
+
         var sweepRequest = new PoGrnSweepRequest
         {
             Sites = sites.Count > 0 ? sites : null,

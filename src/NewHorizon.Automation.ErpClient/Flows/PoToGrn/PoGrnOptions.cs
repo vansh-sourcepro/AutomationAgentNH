@@ -75,6 +75,9 @@ public sealed class PoGrnEndpointOptions
 
     public string CreateGrn { get; init; } = "/api/v1/inventory/grn/create";
 
+    /// <summary>Auto-generated inward number sequence. POST with prefix and itmcode.</summary>
+    public string MaxParamValue { get; init; } = "/api/v1/inventory/grn/getmaxParamValue";
+
     public string PoList(IReadOnlyList<int> sites, int companyId, int locationId) =>
         string.Format(
             CultureInfo.InvariantCulture,
