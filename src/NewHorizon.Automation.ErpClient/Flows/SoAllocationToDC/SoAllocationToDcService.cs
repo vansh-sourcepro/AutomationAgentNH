@@ -1079,7 +1079,7 @@ public sealed partial class SoAllocationToDcService : ISoAllocationToDcService
             ["userId"] = userId,
             ["autoNumReq"] = "Y",
             ["siteReq"] = "Y",
-            ["authFlag"] = "N",
+            ["authFlag"] = "Y",
             ["docDate"] = $"{dcDate:yyyy-MM-dd}T00:00:00",
             ["marks"] = "",
             ["preCarriageBy"] = "",
@@ -1146,7 +1146,7 @@ public sealed partial class SoAllocationToDcService : ISoAllocationToDcService
                 ["fmLocationId"] = documentControl.LocationId,
                 ["userId"] = userId,
                 ["authDate"] = $"{dcDate:yyyy-MM-dd}T00:00:00",
-                ["finFlag"] = "Y",
+                ["finFlag"] = "N",
                 ["currCode"] = "INR"
             },
             ["dCEntryNotificationModel"] = new JsonObject

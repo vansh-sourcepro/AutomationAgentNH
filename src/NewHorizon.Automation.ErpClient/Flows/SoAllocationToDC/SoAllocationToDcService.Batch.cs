@@ -139,6 +139,12 @@ public sealed partial class SoAllocationToDcService
                     _ => "PreValidation"
                 };
 
+                var (cleanMsg, finalField, finalApi) = NormalizeErpError(fullMessage, failedApi);
+                if (finalField == "ERP" || string.IsNullOrWhiteSpace(finalField))
+                {
+                    finalField = failedField;
+                }
+
                 results.Add(new AllocationDcItemResult(
                     AllocationId: candidate.PrimaryAllocationId,
                     OafId: candidate.Oaf.OafAutoId,
@@ -155,9 +161,9 @@ public sealed partial class SoAllocationToDcService
                         DcNumber: null,
                         AllocatedQuantity: it.MaxDcQtyIuom,
                         DcQuantity: null,
-                        Message: fullMessage,
-                        FailedField: failedField,
-                        FailedApi: failedApi
+                        Message: cleanMsg,
+                        FailedField: finalField,
+                        FailedApi: finalApi
                     )).ToList()));
             }
             catch (ErpTransientException erpEx)
@@ -218,6 +224,90 @@ public sealed partial class SoAllocationToDcService
             }
         }
 
+        // If caller requested specific OAF numbers, verify that each requested OAF has a result
+        if (request?.OafNumbers != null && request.OafNumbers.Count > 0)
+        {
+            var processedOafs = results
+                .Select(r => r.OafNo)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
+
+            foreach (var requestedOaf in request.OafNumbers)
+            {
+                if (string.IsNullOrWhiteSpace(requestedOaf) ||
+                    processedOafs.Any(p => MatchesDocNumber(p, requestedOaf)))
+                {
+                    continue;
+                }
+
+                var existingDcs = await GetExistingDcsAsync(requestedOaf.Trim(), siteId, cancellationToken);
+                if (existingDcs.Count > 0)
+                {
+                    var latestDc = existingDcs.FirstOrDefault();
+                    var dcNum = latestDc?.DcNumber;
+                    var dcId = latestDc?.DcAutoId;
+                    var duplicateMsg = !string.IsNullOrWhiteSpace(dcNum)
+                        ? $"Allocation already has a Delivery Challan ({dcNum}). Duplicate DC prevented."
+                        : "Allocation already has a Delivery Challan. Duplicate DC prevented.";
+
+                    _logger.LogInformation(
+                        "SoAllocationToDC: Requested OAF {OafNo} already has Delivery Challan {DcNo}.",
+                        requestedOaf, dcNum ?? "unknown");
+
+                    results.Add(new AllocationDcItemResult(
+                        AllocationId: 0,
+                        OafId: 0,
+                        OafNo: requestedOaf.Trim(),
+                        IntOrdNo: null,
+                        CustomerCode: null,
+                        ShipmentCode: null,
+                        Status: "FAILED",
+                        Items: new List<DcItemResult>
+                        {
+                            new DcItemResult(
+                                ItemCode: "ALL",
+                                Status: "FAILED",
+                                DcCreated: false,
+                                DcId: dcId,
+                                DcNumber: dcNum,
+                                AllocatedQuantity: null,
+                                DcQuantity: null,
+                                Message: duplicateMsg,
+                                FailedField: "Duplicate",
+                                FailedApi: null
+                            )
+                        }));
+                }
+                else
+                {
+                    results.Add(new AllocationDcItemResult(
+                        AllocationId: 0,
+                        OafId: 0,
+                        OafNo: requestedOaf.Trim(),
+                        IntOrdNo: null,
+                        CustomerCode: null,
+                        ShipmentCode: null,
+                        Status: "FAILED",
+                        Items: new List<DcItemResult>
+                        {
+                            new DcItemResult(
+                                ItemCode: "ALL",
+                                Status: "FAILED",
+                                DcCreated: false,
+                                DcId: null,
+                                DcNumber: null,
+                                AllocatedQuantity: null,
+                                DcQuantity: null,
+                                Message: $"No pending dispatchable allocation found for OAF '{requestedOaf.Trim()}'. Please check OAF allocation status in ERP.",
+                                FailedField: "NotFound",
+                                FailedApi: null
+                            )
+                        }));
+                }
+            }
+        }
+
+        var totalAllocCount = Math.Max(candidates.Count, results.Count);
         var successCount = results.Count(r => r.Status == "SUCCESS");
         var partialCount = results.Count(r => r.Status == "PARTIAL_SUCCESS");
         var failedCount = results.Count(r => r.Status == "FAILED");
@@ -227,23 +317,27 @@ public sealed partial class SoAllocationToDcService
         var failedItems = results.Sum(r => r.Items.Count(i => i.Status == "FAILED"));
 
         var overallSuccess = failedCount == 0 && partialCount == 0;
-        var summaryMessage = candidates.Count == 0
+        var summaryMessage = results.Count == 0
             ? "No eligible Sales Order Allocations found to process."
             : dryRun
-                ? $"DRY RUN: Found {candidates.Count} allocation(s) eligible for DC conversion ({successCount} ready, {failedCount} with issues)."
+                ? $"DRY RUN: Found {results.Count} allocation(s) eligible for DC conversion ({successCount} ready, {failedCount} with issues)."
                 : failedCount == 0 && partialCount == 0
-                    ? "Automatic Delivery Challan process completed successfully."
-                    : $"Automatic Delivery Challan process completed with partial success.";
+                    ? "Delivery Challan created successfully. Authorization is pending."
+                    : (successCount == 0 && failedCount > 0 && results.All(r => r.Items.Any(i => i.FailedField == "Duplicate")))
+                        ? (results.Count == 1
+                            ? (results[0].Items.FirstOrDefault()?.Message ?? "Allocation already has a Delivery Challan. Duplicate DC prevented.")
+                            : "Allocation already has a Delivery Challan. Duplicate DC prevented.")
+                        : $"Automatic Delivery Challan process completed with partial success. Authorization is pending for created Delivery Challans.";
 
         _logger.LogInformation(
             "SoAllocationToDC: Master automation finished. TotalAlloc={TotalAlloc}, Success={Success}, Partial={Partial}, Failed={Failed}, CreatedDCs={DCs}, TotalItems={TotalItems}, SuccessItems={SuccessItems}, FailedItems={FailedItems}",
-            candidates.Count, successCount, partialCount, failedCount, createdDCCount, totalItems, successfulItems, failedItems);
+            totalAllocCount, successCount, partialCount, failedCount, createdDCCount, totalItems, successfulItems, failedItems);
 
         return new BatchDcCreationResult(
             Success: overallSuccess,
             Message: summaryMessage,
             Data: new BatchDcCreationData(
-                TotalAllocations: candidates.Count,
+                TotalAllocations: totalAllocCount,
                 ProcessedAllocations: results.Count,
                 SuccessfulAllocations: successCount,
                 PartialAllocations: partialCount,
@@ -339,6 +433,17 @@ public sealed partial class SoAllocationToDcService
 
                     if (allocatedItems.Count == 0)
                     {
+                        var alreadyDispatched = oafItems.Count > 0 && oafItems.All(i => i.MaxDcQtyIuom <= 0);
+                        if (alreadyDispatched)
+                        {
+                            candidates.Add(new AllocationCandidateUnit(
+                                customerCode,
+                                shipment.ShipmentCode,
+                                shipment,
+                                oaf,
+                                oafItems,
+                                oafItems.FirstOrDefault(i => i.AllocationId > 0)?.AllocationId ?? 0));
+                        }
                         continue;
                     }
 
@@ -511,9 +616,17 @@ public sealed partial class SoAllocationToDcService
         // ── Validation 1: Already Created DC Check (Duplicate DC Protection) ──
         if (oafItems.Count > 0 && oafItems.All(i => i.MaxDcQtyIuom <= 0))
         {
+            var existingDcs = await GetExistingDcsAsync(oaf.OafNumber, siteId, cancellationToken);
+            var latestDc = existingDcs.FirstOrDefault();
+            var dcNum = latestDc?.DcNumber;
+            var dcId = latestDc?.DcAutoId;
+            var duplicateMsg = !string.IsNullOrWhiteSpace(dcNum)
+                ? $"Allocation already has a Delivery Challan ({dcNum}). Duplicate DC prevented."
+                : "Allocation already has a Delivery Challan. Duplicate DC prevented.";
+
             _logger.LogInformation(
-                "SoAllocationToDC: OAF {OafNo} (id {OafId}) already has a Delivery Challan. Skipping duplicate.",
-                oaf.OafNumber, resolvedOafId);
+                "SoAllocationToDC: OAF {OafNo} (id {OafId}) already has a Delivery Challan ({DcNo}). Skipping duplicate.",
+                oaf.OafNumber, resolvedOafId, dcNum ?? "unknown");
 
             return new AllocationDcItemResult(
                 AllocationId: candidate.PrimaryAllocationId,
@@ -527,11 +640,11 @@ public sealed partial class SoAllocationToDcService
                         ItemCode: it.SalesItemCode,
                         Status: "FAILED",
                         DcCreated: false,
-                        DcId: null,
-                        DcNumber: null,
+                        DcId: dcId,
+                        DcNumber: dcNum,
                         AllocatedQuantity: it.MaxDcQtyIuom,
                         DcQuantity: null,
-                        Message: "Allocation already has a Delivery Challan. Duplicate DC prevented.",
+                        Message: duplicateMsg,
                         FailedField: "Duplicate",
                         FailedApi: null
                     )).ToList());
@@ -569,7 +682,9 @@ public sealed partial class SoAllocationToDcService
                 OafId: i.OafId > 0 ? i.OafId : resolvedOafId,
                 ItemCode: i.IntItemCode,
                 SalesItemCode: i.SalesItemCode,
-                AllocatedQty: i.MaxDcQtyIuom,
+                AllocatedQty: i.AlreadyDcQty > 0
+                    ? (i.MaxDcQtyIuom > 0 ? i.MaxDcQtyIuom : Math.Max(0, i.OafQty - i.AlreadyDcQty))
+                    : i.OafQty,
                 OafDetailLineId: i.OafDetailLineId,
                 OafDetailLineNo: i.OafDetailLineNo,
                 SoItemLineNo: i.SoItemLineNo,
@@ -716,7 +831,7 @@ public sealed partial class SoAllocationToDcService
 
             combinationsByItem[dcItem.OafItem.OafDetailLineNo] = assignedCombs;
 
-            var effectiveDcQty = dcItem.DcQty - remainingQty;
+            var effectiveDcQty = combinations.Count > 0 ? (dcItem.DcQty - remainingQty) : dcItem.DcQty;
             updatedDcItems.Add(dcItem with { DcQty = effectiveDcQty });
         }
         dcItems = updatedDcItems;
@@ -832,9 +947,11 @@ public sealed partial class SoAllocationToDcService
                         DcCreated: true,
                         DcId: dcAutoId,
                         DcNumber: dcNumber,
-                        AllocatedQuantity: item.OafItem.OafQty,
+                        AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : item.OafItem.OafQty,
                         DcQuantity: item.DcQty,
-                        Message: "Delivery Challan created successfully."
+                        Message: "Delivery Challan created successfully. Pending manual authorization.",
+                        Authorized: false,
+                        DcStatus: "Open"
                     ));
                 }
             }
@@ -855,7 +972,7 @@ public sealed partial class SoAllocationToDcService
                             DcCreated: false,
                             DcId: null,
                             DcNumber: null,
-                            AllocatedQuantity: singleItem.OafItem.OafQty,
+                            AllocatedQuantity: singleItem.Allocation.AllocatedQty > 0 ? singleItem.Allocation.AllocatedQty : singleItem.OafItem.OafQty,
                             DcQuantity: null,
                             Message: cleanMessage,
                             FailedField: field,
@@ -893,9 +1010,11 @@ public sealed partial class SoAllocationToDcService
                                 DcCreated: true,
                                 DcId: dcAutoId,
                                 DcNumber: dcNumber,
-                                AllocatedQuantity: item.OafItem.OafQty,
+                                AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : item.OafItem.OafQty,
                                 DcQuantity: item.DcQty,
-                                Message: "Delivery Challan created successfully."
+                                Message: "Delivery Challan created successfully. Pending manual authorization.",
+                                Authorized: false,
+                                DcStatus: "Open"
                             ));
                         }
                         catch (Exception itemEx)
@@ -907,7 +1026,7 @@ public sealed partial class SoAllocationToDcService
                                 DcCreated: false,
                                 DcId: null,
                                 DcNumber: null,
-                                AllocatedQuantity: item.OafItem.OafQty,
+                                AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : item.OafItem.OafQty,
                                 DcQuantity: null,
                                 Message: cleanMessage,
                                 FailedField: field,
@@ -932,7 +1051,9 @@ public sealed partial class SoAllocationToDcService
             CustomerCode: customerCode,
             ShipmentCode: candidate.ShipmentCode,
             Status: status,
-            Items: itemResults
+            Items: itemResults,
+            Authorized: false,
+            DcStatus: status == "SUCCESS" ? "Open" : null
         );
     }
 
@@ -1336,6 +1457,7 @@ public sealed partial class SoAllocationToDcService
         if (string.IsNullOrWhiteSpace(rawError))
             return ("An unexpected ERP error occurred.", "ERP", defaultApi);
 
+        var candidateText = rawError;
         var jsonStart = rawError.IndexOf('{');
         var jsonEnd = rawError.LastIndexOf('}');
         if (jsonStart >= 0 && jsonEnd > jsonStart)
@@ -1362,11 +1484,7 @@ public sealed partial class SoAllocationToDcService
 
                 if (!string.IsNullOrWhiteSpace(extracted))
                 {
-                    extracted = extracted.Replace("\r\n", " ").Replace("\n", " ").Trim();
-                    var field = extracted.Contains("XSTKALC", StringComparison.OrdinalIgnoreCase) || extracted.Contains("stock", StringComparison.OrdinalIgnoreCase)
-                        ? "Stock"
-                        : "createDCEntry";
-                    return (extracted, field, defaultApi);
+                    candidateText = extracted.Replace("\r\n", " ").Replace("\n", " ").Trim();
                 }
             }
             catch
@@ -1375,7 +1493,24 @@ public sealed partial class SoAllocationToDcService
             }
         }
 
-        return (rawError.Trim(), "ERP", defaultApi);
+        candidateText = candidateText.Replace("\r\n", " ").Replace("\n", " ").Trim();
+
+        // 1. Stock allocation constraint check: CHK_XSTKALC_XSAQTYALC
+        if (candidateText.Contains("CHK_XSTKALC_XSAQTYALC", StringComparison.OrdinalIgnoreCase) ||
+            (candidateText.Contains("XSTKALC", StringComparison.OrdinalIgnoreCase) && candidateText.Contains("XSAQTYALC", StringComparison.OrdinalIgnoreCase)))
+        {
+            return (
+                "Insufficient allocated stock: The allocated stock quantity in the ERP (table XSTKALC) is zero or less than the required Delivery Challan quantity. Please check or re-allocate stock in the Sales Allocation screen.",
+                "Stock",
+                defaultApi);
+        }
+
+        var field = candidateText.Contains("XSTKALC", StringComparison.OrdinalIgnoreCase) || candidateText.Contains("stock", StringComparison.OrdinalIgnoreCase)
+            ? "Stock"
+            : (candidateText.Contains("Transporter", StringComparison.OrdinalIgnoreCase) ? "Transporter"
+            : (candidateText.Contains("Shipment", StringComparison.OrdinalIgnoreCase) ? "Shipment" : "createDCEntry"));
+
+        return (candidateText, field, defaultApi);
     }
 
     private async Task<IReadOnlyList<ErpExistingDcSummary>> GetExistingDcsAsync(

@@ -746,7 +746,7 @@ public sealed class SoAllocationToDcServiceTests
                     "intItemCode": "ITEM01",
                     "intItemName": "Item 01",
                     "oafQty": 20.0,
-                    "alreadyDCQty": 10.0,
+                    "alreadyDCQty": 0.0,
                     "maxDCQtyIUOM": 10.0,
                     "allocationID": 6001,
                     "oafDetailLineId": 1,
@@ -1004,6 +1004,233 @@ public sealed class SoAllocationToDcServiceTests
         result.Data.SuccessfulAllocations.Should().Be(0);
         result.Data.FailedAllocations.Should().Be(1);
         result.Data.Results[0].Message.Should().Contain("Transporter");
+    }
+
+    [Fact]
+    public async Task Automation_creates_DC_successfully_and_does_not_authorize_it()
+    {
+        // 1. Customer
+        _fakeErp.On("getCustomerForAllocationDeAllocation", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [{ "custCode": "A001", "custName": "Akzo Nobel India Ltd." }]
+        }
+        """)!);
+
+        // 2. Shipment
+        _fakeErp.On("getShipmentForDC/A001/L", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [{ "shipmentCode": "CADD", "shipmentName": "Plant" }]
+        }
+        """)!);
+
+        // 3. OAF
+        _fakeErp.On("getOAFDetailListForDC", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "oafYear": "26-27",
+                    "oafGroup": "OA",
+                    "locationCode": "CT2",
+                    "oafNumber": "000801",
+                    "oafAutoId": 801,
+                    "intOrderNumber": "000801",
+                    "customerOrderNumber": "PO-801"
+                }
+            ]
+        }
+        """)!);
+
+        // 4. OAF Item Details
+        _fakeErp.On("getOAFItemDetailsForDC", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "salesItemCode": "ITEM01",
+                    "salesItemName": "Item 01",
+                    "intItemCode": "ITEM01",
+                    "intItemName": "Item 01",
+                    "oafQty": 10.0,
+                    "alreadyDCQty": 0.0,
+                    "maxDCQtyIUOM": 10.0,
+                    "allocationID": 8001,
+                    "oafDetailLineId": 1,
+                    "oafDetailLineNo": 1,
+                    "soitemlineno": 1,
+                    "wareHouseId": 8,
+                    "warehouseCode": "GST2",
+                    "suom": "NOS",
+                    "oafid": 801
+                }
+            ]
+        }
+        """)!);
+
+        // 5. Shipment Info
+        _fakeErp.On("getShipmentInfo", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "salesItemCode": "ITEM01",
+                    "shipCode": "CADD",
+                    "rateStructureCode": "SR001",
+                    "recordId": 1101,
+                    "oafDetailRefLineId": 1,
+                    "oafQtyOfLineId": 1,
+                    "oafRefId": 801
+                }
+            ]
+        }
+        """)!);
+
+        var service = CreateService();
+        var result = await service.CreateDeliveryChallansFromAllocationsAsync();
+
+        // 1. Success result reflects DC created, authorization pending
+        result.Success.Should().BeTrue();
+        result.Message.Should().Be("Delivery Challan created successfully. Authorization is pending.");
+        result.Data.SuccessfulAllocations.Should().Be(1);
+        result.Data.CreatedDCCount.Should().Be(1);
+
+        var allocationResult = result.Data.Results[0];
+        allocationResult.Success.Should().BeTrue();
+        allocationResult.Authorized.Should().BeFalse();
+        allocationResult.DcStatus.Should().Be("Open");
+        allocationResult.Message.Should().Be("Delivery Challan created successfully. Pending manual authorization.");
+        allocationResult.DcNumber.Should().Be("26-27/DS/CT2/000107");
+        allocationResult.DcId.Should().Be(110530);
+
+        var item = allocationResult.Items[0];
+        item.DcCreated.Should().BeTrue();
+        item.Authorized.Should().BeFalse();
+        item.DcStatus.Should().Be("Open");
+        item.Message.Should().Be("Delivery Challan created successfully. Pending manual authorization.");
+        item.DcNumber.Should().Be("26-27/DS/CT2/000107");
+        item.DcId.Should().Be(110530);
+
+        // 2. Verify createDCEntry payload explicitly does NOT contain authorization instructions
+        var createRequest = _fakeErp.Requests.LastOrDefault(r => r.Path.Contains("createDCEntry"));
+        createRequest.Should().NotBeNull();
+        
+        var payloadNode = createRequest!.Body;
+        payloadNode.Should().NotBeNull();
+
+        // authorizeDCModel must be non-null with finFlag N (so ERP backend does not throw NullReferenceException)
+        payloadNode!["authorizeDCModel"].Should().NotBeNull();
+        payloadNode["authorizeDCModel"]!["finFlag"]?.GetValue<string>().Should().Be("N");
+
+        // dchallanHeaderEntry authFlag must be "Y" (so ERP backend skips auto-authorization)
+        payloadNode["dchallanHeaderEntry"]!["authFlag"]?.GetValue<string>().Should().Be("Y");
+
+        // 3. Confirm NO authorization endpoint was invoked after creation
+        var authCalls = _fakeErp.Requests
+            .Where(r => r.Path.Contains("thorization", StringComparison.OrdinalIgnoreCase) ||
+                        r.Path.Contains("authorize", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        authCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Single_allocation_DC_creation_stops_before_authorization()
+    {
+        // 1. Shipment
+        _fakeErp.On("getShipmentForDC/A001/L", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [{ "shipmentCode": "CADD", "shipmentName": "Plant" }]
+        }
+        """)!);
+
+        // 2. OAF
+        _fakeErp.On("getOAFDetailListForDC/A001", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "oafYear": "26-27",
+                    "oafGroup": "OA",
+                    "locationCode": "CT2",
+                    "oafNumber": "000802",
+                    "oafAutoId": 802,
+                    "intOrderNumber": "000802",
+                    "customerOrderNumber": "PO-802"
+                }
+            ]
+        }
+        """)!);
+
+        // 3. OAF Item Details
+        _fakeErp.On("getOAFItemDetailsForDC", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "salesItemCode": "ITEM01",
+                    "salesItemName": "Item 01",
+                    "intItemCode": "ITEM01",
+                    "intItemName": "Item 01",
+                    "oafQty": 10.0,
+                    "alreadyDCQty": 0.0,
+                    "maxDCQtyIUOM": 10.0,
+                    "allocationID": 8002,
+                    "oafDetailLineId": 1,
+                    "oafDetailLineNo": 1,
+                    "soitemlineno": 1,
+                    "wareHouseId": 8,
+                    "warehouseCode": "GST2",
+                    "suom": "NOS",
+                    "oafid": 802
+                }
+            ]
+        }
+        """)!);
+
+        // 4. Shipment Info
+        _fakeErp.On("getShipmentInfo", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "salesItemCode": "ITEM01",
+                    "shipCode": "CADD",
+                    "rateStructureCode": "SR001",
+                    "recordId": 1102,
+                    "oafDetailRefLineId": 1,
+                    "oafQtyOfLineId": 1,
+                    "oafRefId": 802
+                }
+            ]
+        }
+        """)!);
+
+        var service = CreateService();
+        var result = await service.CreateDeliveryChallanFromAllocationAsync(802, customerCode: "A001");
+
+        result.DcNumber.Should().Be("26-27/DS/CT2/000107");
+        result.DcId.Should().Be(110530);
+        result.Status.Should().Be("Open");
+        result.Authorized.Should().BeFalse();
+
+        // Check create payload
+        var createRequest = _fakeErp.Requests.LastOrDefault(r => r.Path.Contains("createDCEntry"));
+        createRequest.Should().NotBeNull();
+
+        var payloadNode = createRequest!.Body;
+        payloadNode.Should().NotBeNull();
+        payloadNode!["authorizeDCModel"].Should().NotBeNull();
+        payloadNode["authorizeDCModel"]!["finFlag"]?.GetValue<string>().Should().Be("N");
+        payloadNode["dchallanHeaderEntry"]!["authFlag"]?.GetValue<string>().Should().Be("Y");
+
+        // No authorization calls
+        var authCalls = _fakeErp.Requests
+            .Where(r => r.Path.Contains("thorization", StringComparison.OrdinalIgnoreCase) ||
+                        r.Path.Contains("authorize", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        authCalls.Should().BeEmpty();
     }
 }
 

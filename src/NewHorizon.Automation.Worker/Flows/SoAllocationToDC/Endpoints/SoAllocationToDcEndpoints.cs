@@ -112,16 +112,39 @@ public static class SoAllocationToDcEndpoints
         
         bool timeChanged = config.AutomationTime != normalizedTime;
 
+        var mode = dto.AutomationMode?.ToUpperInvariant();
+        if (!dto.AutomationEnabled)
+        {
+            // When Toggle is OFF, safety shutoff resets all parameters to null
+            mode = null;
+            normalizedTime = null;
+            oafList = null;
+        }
+        else
+        {
+            if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
+            {
+                // Default based on whether time is provided if mode is not specified
+                mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+            }
+
+            // Enforce strict mode-based restrictions:
+            if (mode == "TIMER")
+            {
+                // In TIMER mode, user can ONLY configure time. OAF info cannot be set.
+                oafList = null;
+            }
+            else if (mode == "INDIVIDUAL")
+            {
+                // In INDIVIDUAL mode, user can ONLY configure OAFs/allocations. Time cannot be set.
+                normalizedTime = null;
+            }
+            // In BOTH mode, user can configure both time and OAF info.
+        }
+
         config.AutomationEnabled = dto.AutomationEnabled;
         config.AutomationTime = normalizedTime;
         config.OafNumbers = oafList;
-        
-        var mode = dto.AutomationMode?.ToUpperInvariant();
-        if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
-        {
-            // Default based on whether time is provided if mode is not specified
-            mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
-        }
         config.AutomationMode = mode;
         
         config.UpdatedAtUtc = clock.UtcNow;
@@ -252,7 +275,7 @@ public static class SoAllocationToDcEndpoints
 
             return Results.Ok(new CreateDcFromAllocationResponse(
                 Success: true,
-                Message: "Delivery Challan created successfully.",
+                Message: "Delivery Challan created successfully. Authorization is pending.",
                 Data: new CreateDcFromAllocationData(
                     result.DcNumber,
                     result.DcId,
@@ -262,7 +285,9 @@ public static class SoAllocationToDcEndpoints
                     result.AllocatedItemCount,
                     result.DcItemCount,
                     result.TotalAllocatedQty,
-                    result.TotalDcQty),
+                    result.TotalDcQty,
+                    Status: "Open",
+                    Authorized: false),
                 Errors: null,
                 ErrorMessage: null));
         }

@@ -53,7 +53,9 @@ public sealed record CreateDcFromAllocationData(
     int AllocatedItemCount,
     int DcItemCount,
     decimal TotalAllocatedQty,
-    decimal TotalDcQty);
+    decimal TotalDcQty,
+    string Status = "Open",
+    bool Authorized = false);
 public sealed record DcValidationErrorResponse(string Field, string Message);
 
 /// <summary>

@@ -43,7 +43,9 @@ public sealed record DcCreationResult(
     int AllocatedItemCount,
     int DcItemCount,
     decimal TotalAllocatedQty,
-    decimal TotalDcQty);
+    decimal TotalDcQty,
+    string Status = "Open",
+    bool Authorized = false);
 
 /// <summary>
 /// Status summary of an OAF candidate for Delivery Challan conversion.
@@ -115,7 +117,20 @@ public sealed record AllocationDcItemResult(
     string? CustomerCode,
     string? ShipmentCode,
     string Status, // "SUCCESS", "PARTIAL_SUCCESS", "FAILED"
-    IReadOnlyList<DcItemResult> Items);
+    IReadOnlyList<DcItemResult> Items,
+    bool Authorized = false,
+    string? DcStatus = null)
+{
+    public bool Success => Status == "SUCCESS";
+    public string? DcNumber => Items.FirstOrDefault(i => i.DcCreated)?.DcNumber;
+    public long? DcId => Items.FirstOrDefault(i => i.DcCreated)?.DcId;
+    public string? Message => Items.FirstOrDefault()?.Message;
+    public string? FailedField => Items.FirstOrDefault(i => !string.IsNullOrEmpty(i.FailedField))?.FailedField;
+    public string? FailedApi => Items.FirstOrDefault(i => !string.IsNullOrEmpty(i.FailedApi))?.FailedApi;
+    public int ItemCount => Items.Count;
+    public decimal AllocatedQuantity => Items.Sum(i => i.AllocatedQuantity ?? 0m);
+    public decimal DcQuantity => Items.Sum(i => i.DcQuantity ?? 0m);
+}
 
 public sealed record DcItemResult(
     string ItemCode,
@@ -127,7 +142,9 @@ public sealed record DcItemResult(
     decimal? DcQuantity,
     string? Message,
     string? FailedField = null,
-    string? FailedApi = null);
+    string? FailedApi = null,
+    bool Authorized = false,
+    string? DcStatus = null);
 
 // ─────────────────────────────────────────────────────────────────
 //  ERP response shapes  (internal – only the service reads them)
