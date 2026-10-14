@@ -74,7 +74,7 @@ public sealed class GrnPayloadBuilderTests
 
         payload["AuthorizationRequired"]!.GetValue<string>().Should().Be("Y");
         payload["invoicenoControl"]!.GetValue<string>().Should().Be("INV-AUTO");
-        payload["invoicedateControl"]!.GetValue<string>().Should().Be("2026-09-23T00:00:00");
+        payload["invoicedateControl"].Should().BeNull();
         payload["dateControl"]!.GetValue<string>().Should().Be("2026-09-24T00:00:00");
         payload["DocType"]!.GetValue<string>().Should().Be("GR");
         payload["DocSubType"]!.GetValue<string>().Should().Be("OR");

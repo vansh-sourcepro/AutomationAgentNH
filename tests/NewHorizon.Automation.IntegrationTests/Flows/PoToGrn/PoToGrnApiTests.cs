@@ -238,17 +238,13 @@ public sealed class PoToGrnApiTests : IClassFixture<PoToGrnApiFactory>
     }
 
     [Fact]
-    public async Task A_real_run_is_refused_without_an_invoice_number_but_a_dry_run_is_not()
+    public async Task A_real_run_is_allowed_without_an_invoice_number()
     {
         _factory.Configs.Set(new PoGrnAutomationConfigUpdate { IsActive = true, InvoiceNumber = " " });
         using var client = _factory.Authenticated();
 
         var real = await client.PostAsJsonAsync(TriggerRoute, new { });
-        var dry = await client.PostAsJsonAsync(TriggerRoute, new { dryRun = true });
-
-        real.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await real.Content.ReadAsStringAsync()).Should().Contain("invoice number");
-        dry.StatusCode.Should().Be(HttpStatusCode.OK);
+        real.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]

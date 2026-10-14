@@ -183,15 +183,6 @@ public static class PoToGrnEndpoints
                 statusCode: StatusCodes.Status409Conflict);
         }
 
-        if (!request.DryRun && !config.HasInvoiceNumber)
-        {
-            return Results.Problem(
-                title: "No invoice number is set.",
-                detail: "Every GRN carries the invoice number from the settings. Set it with "
-                    + "PUT /api/automation/grn-automation {\"invoiceNumber\": \"...\"}.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
         var receiptMode = modeOverride ?? config.ReceiptMode;
         var sites = request.Sites is { Count: > 0 } ? request.Sites : config.SiteIds();
 

@@ -124,13 +124,6 @@ public sealed class PoToGrnService : IPoToGrnService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!request.DryRun && string.IsNullOrWhiteSpace(request.InvoiceNumber))
-        {
-            throw new ErpBusinessException(
-                "Set the GRN invoice number in the GRN Automation settings before running it.",
-                "PoGrnSweepRequest.InvoiceNumber is blank; every GRN needs XGRNBILLNO.");
-        }
-
         var types = request.PoTypes is { Count: > 0 } wanted ? wanted.Distinct().ToList() : [.. PoGrnTypes.All];
         var sites = ResolveSites(request.Sites);
         var ids = request.PoIds is { Count: > 0 } ? request.PoIds.ToHashSet() : null;
@@ -645,7 +638,7 @@ public sealed class PoToGrnService : IPoToGrnService
             GrnDate = run.GrnDate,
             PeriodStart = period.Start,
             PeriodEnd = period.End,
-            InvoiceNumber = request.InvoiceNumber!.Trim(),
+            InvoiceNumber = string.IsNullOrWhiteSpace(request.InvoiceNumber) ? string.Empty : request.InvoiceNumber.Trim(),
             CompanyId = _options.CompanyId,
             UserId = run.UserId,
             Remark = _options.Remark,

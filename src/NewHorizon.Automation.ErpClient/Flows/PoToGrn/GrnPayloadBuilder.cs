@@ -62,7 +62,6 @@ internal sealed record GrnContext
 /// when tax rows were inserted (<c>GRNRepository.insertRateStructureDetail</c> →
 /// <c>CSP_XGRNDTL_UpdatePOQTY</c>); without them the PO keeps looking unreceived and the next run
 /// would receive it again.</item>
-/// <item>The invoice date is the day before the GRN date — confirmed 2026-09-24.</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -138,7 +137,7 @@ internal static class GrnPayloadBuilder
             ["issucertnoControl"] = string.Empty,
             ["issucertdateControl"] = null,
             ["invoicenoControl"] = context.InvoiceNumber,
-            ["invoicedateControl"] = Date(context.GrnDate.AddDays(-1)),
+            ["invoicedateControl"] = null,
             ["reccertnoControl"] = string.Empty,
             ["reccertdateControl"] = null,
             ["billofentryControl"] = string.Empty,

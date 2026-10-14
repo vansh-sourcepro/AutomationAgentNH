@@ -223,13 +223,6 @@ public static class GrnAutomationEndpoints
         }
 
         // Toggle is ON + no scheduleTime → "Run Now": execute immediately and return results.
-        if (!savedConfig.HasInvoiceNumber)
-        {
-            return Results.Problem(
-                title: "No invoice number is set.",
-                detail: "Set invoiceNumber in the request body before triggering an immediate run.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
 
         // Resolve the effective filters from the freshly saved config.
         var effectiveReceiptMode = savedConfig.ReceiptMode;
