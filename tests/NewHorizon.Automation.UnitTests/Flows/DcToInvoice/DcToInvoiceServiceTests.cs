@@ -1,0 +1,442 @@
+using System;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Json.Nodes;
+using System.Threading.Tasks;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NewHorizon.Automation.ErpClient;
+using NewHorizon.Automation.ErpClient.Authentication;
+using NewHorizon.Automation.ErpClient.Flows.DcToInvoice;
+using Xunit;
+
+namespace NewHorizon.Automation.UnitTests.Flows.DcToInvoice;
+
+public sealed class DcToInvoiceServiceTests
+{
+    private readonly FakeInvoiceErp _fakeErp = new();
+    private readonly FakeHttpClientFactory _clientFactory;
+    private readonly FakeTokenProvider _tokenProvider = new();
+    private readonly DcToInvoiceOptions _options = new()
+    {
+        SiteId = 8,
+        SiteCode = "CT2",
+        CustomerCode = "A001",
+        Currency = "INR",
+        DocType = "SI",
+        DocSubType = "DS"
+    };
+
+    public DcToInvoiceServiceTests()
+    {
+        _clientFactory = new FakeHttpClientFactory(new HttpClient(_fakeErp)
+        {
+            BaseAddress = new Uri("http://erp.local/")
+        });
+        SetupDefaultRoutes();
+    }
+
+    private DcToInvoiceService CreateService(DcToInvoiceOptions? options = null) =>
+        new(
+            _clientFactory,
+            _tokenProvider,
+            options ?? _options,
+            NullLogger<DcToInvoiceService>.Instance);
+
+    private void SetupDefaultRoutes(bool enableLineLevelRateStructure = false)
+    {
+        // 1. Sales policy: MSCENABLELINELEVELRTSTR
+        _fakeErp.On("salespolicy/getDetail", JsonNode.Parse($$"""
+        {
+            "success": true,
+            "data": {
+                "salesPolicyResultModel": [{ "enablelinelevelratestructure": {{(enableLineLevelRateStructure ? "true" : "false")}} }]
+            }
+        }
+        """)!);
+
+        // 2. Document control default
+        _fakeErp.On("getDefaultDocumentDetail", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "groupCode": "SI",
+                    "locationCode": "CT2",
+                    "locationId": 8,
+                    "isAutoNumberGenerated": true,
+                    "isLocationRequired": true,
+                    "isAutorisationRequired": true
+                }
+            ]
+        }
+        """)!);
+
+        // 3. Fetch pending Delivery Challans (CSP_SALINV_DCDTLS)
+        _fakeErp.On("FetchDCDtlsForSalInv", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "dcid": 110530,
+                    "dcNo": "000107",
+                    "dcDate": "2026-10-15T00:00:00",
+                    "dcYear": "26-27",
+                    "dcGroup": "DS",
+                    "dcSite": "CT2",
+                    "oafNo": "000045",
+                    "oafYear": "22-23",
+                    "oafGroup": "OA",
+                    "oafSite": "CT2",
+                    "xoafhautoid": 10169,
+                    "ordid": 10166,
+                    "intOdrNo": "000045",
+                    "intOdrYear": "22-23",
+                    "intOdrGroup": "OA",
+                    "intOdrSite": "CT2",
+                    "custPOno": "PO-9912",
+                    "custPOdate": "2026-09-10T00:00:00",
+                    "shipCode": "CADD",
+                    "billTo": "A001",
+                    "billToName": "Akzo Nobel India Ltd.",
+                    "xobcurrcd": "INR",
+                    "exchangeRate": 1.0,
+                    "xdcrtstrcd": "GST18",
+                    "deliveryName": "Akzo Nobel Plant",
+                    "deliveryCityCode": "AHM",
+                    "creditDays": 30,
+                    "creditLimit": 1500000.0,
+                    "crLimitInvflg": "W",
+                    "creditLimitflag": "A",
+                    "creditLimitdays": 30
+                }
+            ]
+        }
+        """)!);
+
+        // 4. DC shipment logistics
+        _fakeErp.On("DCShopmentDetails", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "xdcmlrno": "LR-110530",
+                    "xdcmvno": "GJ01AB1234",
+                    "xdcmgrsw": 1200.0,
+                    "xdcmnetw": 1150.0,
+                    "xdcmtrnpcd": "0 - By Road",
+                    "xdcmrpno": "RP-9981"
+                }
+            ]
+        }
+        """)!);
+
+        // 5. Shipment details
+        _fakeErp.On("GetShipment", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "shipmentCode": "CADD",
+                    "shipmentName": "Akzo Factory",
+                    "shipmentCityCode": "AHM",
+                    "shipmentCityName": "Ahmedabad",
+                    "shipmentStateCode": "GUJ",
+                    "shipmentStateName": "Gujarat",
+                    "shipmentGstNo": "24AAACA1234F1Z5"
+                }
+            ]
+        }
+        """)!);
+
+        // 6. Rate structures
+        _fakeErp.On("FetchDCRateStructure", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                { "rateStructureCode": "GST18", "rateStructureDescription": "GST 18%", "rateStructureFullName": "GST18 - GST 18%", "isGSTApplicable": true },
+                { "rateStructureCode": "IGST18", "rateStructureDescription": "IGST 18%", "rateStructureFullName": "IGST18 - IGST 18%", "isGSTApplicable": true }
+            ]
+        }
+        """)!);
+
+        // 7. Item details & Taxes
+        _fakeErp.On("FetchItemDtls", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": {
+                "orderdtlListModel": [
+                    {
+                        "salesItemCode": "0RAP01870203005",
+                        "salesItemName": "VALVE 2 INCH",
+                        "intItmCode": "0RAP01870203005",
+                        "dcQty": 10.0,
+                        "invoiceQty": 10.0,
+                        "ordRateDis": 2500.0,
+                        "orderRate": 2500.0,
+                        "assessableRate": 2500.0,
+                        "amount": 25000.0,
+                        "amountWithTax": 29500.0,
+                        "suom": "NOS",
+                        "iuom": "NOS",
+                        "convFact": 1.0,
+                        "oafId": 10169,
+                        "oafDetailLineNo": 1,
+                        "dcoaflineno": 1,
+                        "dcRndNo": "1105301",
+                        "hsnCode": "84818030",
+                        "ratestructurecd": "GST18"
+                    }
+                ],
+                "ratestructureModel": [
+                    { "rateCode": "CGST9", "rateDesc": "CGST 9%", "taxValue": 9.0, "appOnDisplay": "Gross Value", "ie": "I", "pv": "P", "mprtaxtyp": "C", "rateAmount": 2250.0, "postNonPost": 1, "uniqueno": 0, "itemCode": "0RAP01870203005", "seqNo": 1 },
+                    { "rateCode": "SGST9", "rateDesc": "SGST 9%", "taxValue": 9.0, "appOnDisplay": "Gross Value", "ie": "I", "pv": "P", "mprtaxtyp": "S", "rateAmount": 2250.0, "postNonPost": 1, "uniqueno": 0, "itemCode": "0RAP01870203005", "seqNo": 2 }
+                ]
+            }
+        }
+        """)!);
+
+        // 8. Dispatch-from address
+        _fakeErp.On("fetchDispatchFrmAddress", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "Address1": "Naroda GIDC",
+                    "City": "AHM",
+                    "PinCode": "382330",
+                    "GstNo": "24AAACN1234E1Z1"
+                }
+            ]
+        }
+        """)!);
+
+        // 9. Credit days
+        _fakeErp.On("FetchCreditDays", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": 30
+        }
+        """)!);
+
+        // 10. Save invoice create
+        _fakeErp.On("salesinvoice/create", JsonNode.Parse("""
+        {
+            "success": true,
+            "message": "sales_salesdispatch_salesinvoice_siCreated#26-27/DS/CT2/000045#110582",
+            "errors": null,
+            "data": null
+        }
+        """)!);
+    }
+
+    [Fact]
+    public async Task CreateInvoice_WhenLineLevelRateStructureFalse_SelectsFirstHeaderRateStructure()
+    {
+        // Arrange: MSCENABLELINELEVELRTSTR = 0
+        SetupDefaultRoutes(enableLineLevelRateStructure: false);
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.InvoiceNumber.Should().Be("000045");
+        result.InvoiceId.Should().Be(110582);
+        result.DcId.Should().Be(110530);
+        result.ItemCount.Should().Be(1);
+        result.TotalInvoiceAmount.Should().Be(29500.0m);
+        result.LineLevelRateStructureApplied.Should().BeFalse();
+        result.RateStructureCode.Should().Be("GST18"); // First valid option in FetchDCRateStructure
+
+        // Verify save request payload sent to ERP
+        var createRequest = _fakeErp.Requests.FirstOrDefault(r => r.Path.Contains("salesinvoice/create"));
+        createRequest.Should().NotBeNull();
+        var body = createRequest.Body;
+        body.Should().NotBeNull();
+
+        var dtInvHdr = body!["dtInvHdr"] as JsonArray;
+        dtInvHdr.Should().NotBeNull();
+        dtInvHdr![0]!["XIHRTSCD"]!.ToString().Should().Be("GST18");
+
+        var dtDCINVRef = body["dtDCINVRef"] as JsonArray;
+        dtDCINVRef.Should().NotBeNull();
+        dtDCINVRef!.Count.Should().Be(1);
+        dtDCINVRef[0]!["XDCDIDCID"]!.ToString().Should().Be("110530");
+        dtDCINVRef[0]!["XDCDIINVQTY"]!.ToString().Should().Be("10.0000");
+    }
+
+    [Fact]
+    public async Task CreateInvoice_WhenLineLevelRateStructureTrue_AppliesLineLevelRateStructure()
+    {
+        // Arrange: MSCENABLELINELEVELRTSTR = 1
+        SetupDefaultRoutes(enableLineLevelRateStructure: true);
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.InvoiceNumber.Should().Be("000045");
+        result.InvoiceId.Should().Be(110582);
+        result.LineLevelRateStructureApplied.Should().BeTrue();
+
+        var createRequest = _fakeErp.Requests.FirstOrDefault(r => r.Path.Contains("salesinvoice/create"));
+        createRequest.Should().NotBeNull();
+        var body = createRequest.Body;
+        body.Should().NotBeNull();
+
+        var dtInvDtl = body!["dtInvDtl"] as JsonArray;
+        dtInvDtl.Should().NotBeNull();
+        dtInvDtl![0]!["XIDRTSCD"]!.ToString().Should().Be("GST18");
+    }
+
+    [Fact]
+    public async Task CreateInvoice_WhenDcNotFound_ThrowsValidationException()
+    {
+        // Arrange
+        SetupDefaultRoutes();
+        var service = CreateService();
+
+        // Act & Assert: DC 999999 is not in pending DC list
+        Func<Task> act = async () => await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 999999);
+        await act.Should().ThrowAsync<InvoiceValidationException>()
+            .WithMessage("*not found in the list of eligible*");
+    }
+
+    [Fact]
+    public async Task BatchCreateInvoices_ProcessesMultipleDcs_AndReportsSuccessAndFailureSeparately()
+    {
+        // Arrange: Return 2 pending DCs, one will succeed and one will fail in create
+        _fakeErp.On("FetchDCDtlsForSalInv", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "dcid": 110530,
+                    "dcNo": "000107",
+                    "dcDate": "2026-10-15T00:00:00",
+                    "dcYear": "26-27",
+                    "dcGroup": "DS",
+                    "dcSite": "CT2",
+                    "oafNo": "000045",
+                    "ordid": 10166,
+                    "shipCode": "CADD",
+                    "billTo": "A001",
+                    "billToName": "Akzo Nobel India Ltd.",
+                    "xobcurrcd": "INR",
+                    "xdcrtstrcd": "GST18"
+                },
+                {
+                    "dcid": 110531,
+                    "dcNo": "000108",
+                    "dcDate": "2026-10-15T00:00:00",
+                    "dcYear": "26-27",
+                    "dcGroup": "DS",
+                    "dcSite": "CT2",
+                    "oafNo": "000046",
+                    "ordid": 10167,
+                    "shipCode": "CADD",
+                    "billTo": "A001",
+                    "billToName": "Akzo Nobel India Ltd.",
+                    "xobcurrcd": "INR",
+                    "xdcrtstrcd": "GST18"
+                }
+            ]
+        }
+        """)!);
+
+        // Make second DC fail on ERP create
+        _fakeErp.On("salesinvoice/create", (_, body) =>
+        {
+            var dtInvHdr = body?["dtInvHdr"] as JsonArray;
+            var lotDcIds = dtInvHdr?[0]?["LOTQuantyBasedDCIds"]?.ToString();
+            if (lotDcIds == "110531")
+            {
+                return JsonNode.Parse("""
+                {
+                    "success": false,
+                    "message": "Field validation error.",
+                    "errors": "Financial period closed for site CT2.",
+                    "data": null
+                }
+                """);
+            }
+            return JsonNode.Parse("""
+            {
+                "success": true,
+                "message": "sales_salesdispatch_salesinvoice_siCreated#26-27/DS/CT2/000045#110582",
+                "errors": null,
+                "data": null
+            }
+            """);
+        });
+
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateInvoicesFromDeliveryChallansAsync(
+            new BatchInvoiceCreationRequest(CustomerCode: "A001"));
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Data.TotalDeliveryChallans.Should().Be(2);
+        result.Data.SuccessfulDeliveryChallans.Should().Be(1);
+        result.Data.FailedDeliveryChallans.Should().Be(1);
+        result.Data.CreatedInvoiceCount.Should().Be(1);
+
+        // Verify DC 110530 succeeded
+        var successResult = result.Data.Results.FirstOrDefault(r => r.DcId == 110530);
+        successResult.Should().NotBeNull();
+        successResult!.Status.Should().Be("SUCCESS");
+        successResult.InvoiceNumber.Should().Be("000045");
+        successResult.InvoiceId.Should().Be(110582);
+
+        // Verify DC 110531 failed with preserved error message
+        var failResult = result.Data.Results.FirstOrDefault(r => r.DcId == 110531);
+        failResult.Should().NotBeNull();
+        failResult!.Status.Should().Be("FAILED");
+        failResult.Message.Should().Contain("Financial period closed for site CT2");
+    }
+
+    [Fact]
+    public async Task BatchCreateInvoices_DryRun_ReportsWouldCreate()
+    {
+        // Arrange
+        SetupDefaultRoutes();
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateInvoicesFromDeliveryChallansAsync(
+            new BatchInvoiceCreationRequest(CustomerCode: "A001", DryRun: true));
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Data.TotalDeliveryChallans.Should().Be(1);
+        result.Data.Results[0].Status.Should().Be("WOULD_CREATE");
+        result.Data.CreatedInvoiceCount.Should().Be(0);
+
+        // Verify no save call was dispatched
+        _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
+    }
+}
+
+internal sealed class FakeHttpClientFactory(HttpClient client) : IHttpClientFactory
+{
+    public HttpClient CreateClient(string name) => client;
+}
+
+internal sealed class FakeTokenProvider : IErpTokenProvider
+{
+    public Task<string> GetTokenAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult("fake-jwt-token");
+
+    public Task<int> GetUserIdAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(2);
+
+    public void Invalidate()
+    {
+    }
+}

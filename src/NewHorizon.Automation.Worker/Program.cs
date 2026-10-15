@@ -16,6 +16,7 @@ using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IndentToPo;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Endpoints;
+using NewHorizon.Automation.Worker.Flows.DcToInvoice;
 using NewHorizon.Automation.Worker.Logging;
 using NewHorizon.Automation.Worker.Services;
 using Serilog;
@@ -223,6 +224,7 @@ try
     // Each automation flow's host-side composition. A new flow adds its own line here.
     builder.Services.AddIndentToPoOrchestration();
     builder.Services.AddSoAllocationToDcServices(builder.Configuration);
+    builder.Services.AddDcToInvoiceServices(builder.Configuration);
 
     // Sign in to the ERP at startup so the token is cached before the first cycle runs.
     builder.Services.AddErpLoginStartup();
@@ -266,6 +268,7 @@ try
     // Each automation flow maps its own endpoints and applies its own database/JWT gates.
     app.MapIndentToPoEndpoints(databaseConfigured, database.Usable, inboundJwt.IsConfigured);
     app.MapSoAllocationToDcEndpoints();
+    app.MapDcToInvoiceEndpoints();
 
     // The startup verdict on the database, logged after the host is built so it reaches the
     // configured sinks rather than only the bootstrap console.
