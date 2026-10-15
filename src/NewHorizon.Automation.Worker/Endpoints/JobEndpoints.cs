@@ -43,7 +43,34 @@ public static class JobEndpoints
             .WithName("GetDashboard")
             .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
+        endpoints.MapGet("/api/automation/types", GetAutomationTypesAsync)
+            .WithName("GetAutomationTypes")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
         return endpoints;
+    }
+
+    private static IResult GetAutomationTypesAsync()
+    {
+        var types = new[]
+        {
+            new AutomationTypeItem(
+                "IndentToPo",
+                "Indent-to-PO",
+                "Convert authorised material and service indents into purchase orders",
+                "po-automation",
+                "process-jobs/dashboard",
+                "process-jobs/runs"),
+            new AutomationTypeItem(
+                "SjoToIssue",
+                "SJO-to-Issue-to-Shop-Floor",
+                "Reserve stock and create shop floor issues from SJO, Work Order, or Sales OAF",
+                "issue-to-shop-floor/config",
+                "issue-to-shop-floor/dashboard",
+                "issue-to-shop-floor/history")
+        };
+
+        return Results.Ok(types);
     }
 
     private static async Task<IResult> ListJobsAsync(
@@ -299,3 +326,12 @@ public static class JobEndpoints
         job.Steps.Count,
         job.Steps.Count(step => step.Status is StepStatus.Completed or StepStatus.Skipped));
 }
+
+public sealed record AutomationTypeItem(
+    string Id,
+    string Name,
+    string Description,
+    string ConfigEndpoint,
+    string DashboardEndpoint,
+    string HistoryEndpoint);
+
