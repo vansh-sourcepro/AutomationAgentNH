@@ -138,11 +138,13 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         effectiveCustomerCode = matchedDc.BillTo;
         var effectiveDcId = matchedDc.DcId;
         var effectiveDcNo = matchedDc.DcNo;
-        var effectiveSiteCode = !string.IsNullOrWhiteSpace(docControl.LocationCode) ? docControl.LocationCode : matchedDc.DcSite;
+        var effectiveSiteCode = !string.IsNullOrWhiteSpace(matchedDc.DcSite)
+            ? matchedDc.DcSite
+            : (!string.IsNullOrWhiteSpace(docControl.LocationCode) ? docControl.LocationCode : _options.SiteCode);
 
         _logger.LogInformation(
-            "DcToInvoice: Matched DC. DcId={DcId}, DcNo={DcNo}, Customer={Cust}, OrderId={OrdId}, OafId={OafId}",
-            effectiveDcId, effectiveDcNo, effectiveCustomerCode, matchedDc.OrderId, matchedDc.OafId);
+            "DcToInvoice: Matched DC. DcId={DcId}, DcNo={DcNo}, Customer={Cust}, OrderId={OrdId}, OafId={OafId}, SiteCode={SiteCode}, DcRateStr={DcRateStr}",
+            effectiveDcId, effectiveDcNo, effectiveCustomerCode, matchedDc.OrderId, matchedDc.OafId, effectiveSiteCode, matchedDc.DcRateStructureCode);
 
         // ── Step 5: Fetch DC Shipment Logistics Details ──
         var logistics = await GetDcShipmentLogisticsAsync(effectiveDcId, cancellationToken);
@@ -717,30 +719,30 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 DcId: id,
                 DcNo: obj["dcNo"]?.ToString() ?? string.Empty,
                 DcDate: obj["dcDate"] != null ? DateTime.Parse(obj["dcDate"]!.ToString()) : DateTime.Today,
-                DcYear: obj["dcYear"]?.ToString() ?? string.Empty,
-                DcGroup: obj["dcGroup"]?.ToString() ?? string.Empty,
-                DcSite: obj["dcSite"]?.ToString() ?? string.Empty,
-                OafNo: obj["oafNo"]?.ToString() ?? string.Empty,
-                OafYear: obj["oafYear"]?.ToString() ?? string.Empty,
-                OafGroup: obj["oafGroup"]?.ToString() ?? string.Empty,
-                OafSite: obj["oafSite"]?.ToString() ?? string.Empty,
-                OafId: obj["xoafhautoid"] != null ? Convert.ToInt32(obj["xoafhautoid"]!.ToString()) : 0,
-                OrderId: obj["ordid"] != null ? Convert.ToInt64(obj["ordid"]!.ToString()) : 0,
-                IntOdrNo: obj["intOdrNo"]?.ToString() ?? string.Empty,
-                IntOdrYear: obj["intOdrYear"]?.ToString() ?? string.Empty,
-                IntOdrGroup: obj["intOdrGroup"]?.ToString() ?? string.Empty,
-                IntOdrSite: obj["intOdrSite"]?.ToString() ?? string.Empty,
-                CustPoNo: obj["custPOno"]?.ToString() ?? string.Empty,
-                CustPoDate: obj["custPOdate"] != null ? DateTime.Parse(obj["custPOdate"]!.ToString()) : null,
-                ShipCode: obj["shipCode"]?.ToString() ?? string.Empty,
-                BillTo: obj["billTo"]?.ToString() ?? customerCode,
-                BillToName: obj["billToName"]?.ToString() ?? string.Empty,
-                CurrencyCode: obj["xobcurrcd"]?.ToString() ?? currency,
-                ExchangeRate: obj["exchangeRate"] != null ? Convert.ToDecimal(obj["exchangeRate"]!.ToString(), CultureInfo.InvariantCulture) : 1.0m,
-                DcRateStructureCode: obj["xdcrtstrcd"]?.ToString(),
-                DeliveryName: obj["deliveryName"]?.ToString(),
-                DeliveryCityCode: obj["deliveryCityCode"]?.ToString(),
-                DeliveryCityName: obj["deliveryCityName"]?.ToString(),
+                DcYear: (obj["dcYear"] ?? obj["dcyear"] ?? obj["year"])?.ToString() ?? string.Empty,
+                DcGroup: (obj["dcGroup"] ?? obj["dcgroup"] ?? obj["group"])?.ToString() ?? string.Empty,
+                DcSite: (obj["dcSite"] ?? obj["dcsite"] ?? obj["site"] ?? obj["siteCode"] ?? obj["locationCode"])?.ToString() ?? string.Empty,
+                OafNo: (obj["oafNo"] ?? obj["oafno"])?.ToString() ?? string.Empty,
+                OafYear: (obj["oafYear"] ?? obj["oafyear"])?.ToString() ?? string.Empty,
+                OafGroup: (obj["oafGroup"] ?? obj["oafgroup"])?.ToString() ?? string.Empty,
+                OafSite: (obj["oafSite"] ?? obj["oafsite"])?.ToString() ?? string.Empty,
+                OafId: (obj["xoafhautoid"] ?? obj["oafId"] ?? obj["oafid"]) != null ? Convert.ToInt32((obj["xoafhautoid"] ?? obj["oafId"] ?? obj["oafid"])!.ToString()) : 0,
+                OrderId: (obj["ordid"] ?? obj["orderId"] ?? obj["ordId"]) != null ? Convert.ToInt64((obj["ordid"] ?? obj["orderId"] ?? obj["ordId"])!.ToString()) : 0,
+                IntOdrNo: (obj["intOdrNo"] ?? obj["intodrno"])?.ToString() ?? string.Empty,
+                IntOdrYear: (obj["intOdrYear"] ?? obj["intodryear"])?.ToString() ?? string.Empty,
+                IntOdrGroup: (obj["intOdrGroup"] ?? obj["intodrgroup"])?.ToString() ?? string.Empty,
+                IntOdrSite: (obj["intOdrSite"] ?? obj["intodrsite"])?.ToString() ?? string.Empty,
+                CustPoNo: (obj["custPOno"] ?? obj["custPoNo"] ?? obj["custpono"])?.ToString() ?? string.Empty,
+                CustPoDate: (obj["custPOdate"] ?? obj["custPoDate"]) != null ? DateTime.Parse((obj["custPOdate"] ?? obj["custPoDate"])!.ToString()) : null,
+                ShipCode: (obj["shipCode"] ?? obj["shipcode"])?.ToString() ?? string.Empty,
+                BillTo: (obj["billTo"] ?? obj["billto"] ?? obj["customerCode"])?.ToString() ?? customerCode,
+                BillToName: (obj["billToName"] ?? obj["billtoname"] ?? obj["customerName"])?.ToString() ?? string.Empty,
+                CurrencyCode: (obj["xobcurrcd"] ?? obj["currencyCode"] ?? obj["currency"])?.ToString() ?? currency,
+                ExchangeRate: (obj["exchangeRate"] ?? obj["exchangerate"]) != null ? Convert.ToDecimal((obj["exchangeRate"] ?? obj["exchangerate"])!.ToString(), CultureInfo.InvariantCulture) : 1.0m,
+                DcRateStructureCode: (obj["xdcrtstrcd"] ?? obj["ratestructurecd"] ?? obj["rateStructureCode"] ?? obj["dcRateStructureCode"])?.ToString(),
+                DeliveryName: (obj["deliveryName"] ?? obj["deliveryname"])?.ToString(),
+                DeliveryCityCode: (obj["deliveryCityCode"] ?? obj["deliverycitycode"])?.ToString(),
+                DeliveryCityName: (obj["deliveryCityName"] ?? obj["deliverycityname"])?.ToString(),
                 CreditDays: obj["creditDays"] != null ? Convert.ToInt32(obj["creditDays"]!.ToString()) : 30,
                 CreditLimit: obj["creditLimit"] != null ? Convert.ToDecimal(obj["creditLimit"]!.ToString(), CultureInfo.InvariantCulture) : 0m,
                 CrLimitInvFlg: obj["crLimitInvflg"]?.ToString() ?? "W",
@@ -809,32 +811,59 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         long dcId, string siteCode, string custCode, CancellationToken cancellationToken)
     {
         var url = "/api/v1/sales/salesinvoice/FetchDCRateStructure";
-        var payload = new JsonObject
-        {
-            ["strFlag"] = "DC",
-            ["strDCId"] = dcId.ToString(),
-            ["strRtStruCd"] = "",
-            ["strExNonEx"] = "E",
-            ["strInvOf"] = "P",
-            ["IsGSTApplicable"] = true,
-            ["site"] = siteCode,
-            ["custcode"] = custCode,
-            ["isDiffCustBillTo"] = false,
-            ["itemCode"] = ""
-        };
 
-        var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
-        if (response.IsSuccessStatusCode)
+        var sitesToTry = new List<string>();
+        if (!string.IsNullOrWhiteSpace(siteCode)) sitesToTry.Add(siteCode.Trim());
+        if (!string.IsNullOrWhiteSpace(_options.SiteCode) && !sitesToTry.Contains(_options.SiteCode, StringComparer.OrdinalIgnoreCase))
+            sitesToTry.Add(_options.SiteCode.Trim());
+        if (!sitesToTry.Contains("NF1", StringComparer.OrdinalIgnoreCase)) sitesToTry.Add("NF1");
+        if (!sitesToTry.Contains("CT2", StringComparer.OrdinalIgnoreCase)) sitesToTry.Add("CT2");
+        if (!sitesToTry.Contains(string.Empty)) sitesToTry.Add(string.Empty);
+
+        foreach (var trySite in sitesToTry)
         {
-            var envelope = await response.Content.ReadFromJsonAsync<ErpEnvelopeList<JsonObject>>(SerializerOptions, cancellationToken);
-            if (envelope?.Data != null && envelope.Data.Count > 0)
+            var payload = new JsonObject
             {
-                return envelope.Data.Select(d => new ErpRateStructureOption(
-                    RateStructureCode: d["rateStructureCode"]?.ToString() ?? string.Empty,
-                    RateStructureDescription: d["rateStructureDescription"]?.ToString() ?? string.Empty,
-                    RateStructureFullName: d["rateStructureFullName"]?.ToString() ?? string.Empty,
-                    IsGSTApplicable: d["isGSTApplicable"]?.GetValue<bool>() ?? true
-                )).Where(r => !string.IsNullOrWhiteSpace(r.RateStructureCode)).ToList();
+                ["strFlag"] = "DC",
+                ["strDCId"] = dcId.ToString(CultureInfo.InvariantCulture),
+                ["strRtStruCd"] = "",
+                ["strExNonEx"] = "E",
+                ["strInvOf"] = "P",
+                ["IsGSTApplicable"] = true,
+                ["site"] = trySite,
+                ["custcode"] = custCode,
+                ["isDiffCustBillTo"] = false,
+                ["itemCode"] = ""
+            };
+
+            try
+            {
+                var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
+                    _logger.LogInformation("DcToInvoice: FetchDCRateStructure (site='{Site}') response: {Raw}", trySite, rawJson);
+
+                    var envelope = System.Text.Json.JsonSerializer.Deserialize<ErpEnvelopeList<JsonObject>>(rawJson, SerializerOptions);
+                    if (envelope?.Data != null && envelope.Data.Count > 0)
+                    {
+                        var options = envelope.Data.Select(d => new ErpRateStructureOption(
+                            RateStructureCode: (d["rateStructureCode"] ?? d["ratestructurecode"] ?? d["strRtStruCd"] ?? d["rateStructureCd"] ?? d["code"])?.ToString() ?? string.Empty,
+                            RateStructureDescription: (d["rateStructureDescription"] ?? d["ratestructuredescription"] ?? d["rateDesc"])?.ToString() ?? string.Empty,
+                            RateStructureFullName: (d["rateStructureFullName"] ?? d["ratestructurefullname"])?.ToString() ?? string.Empty,
+                            IsGSTApplicable: d["isGSTApplicable"]?.GetValue<bool>() ?? true
+                        )).Where(r => !string.IsNullOrWhiteSpace(r.RateStructureCode)).ToList();
+
+                        if (options.Count > 0)
+                        {
+                            return options;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "DcToInvoice: FetchDCRateStructure failed for site '{Site}'", trySite);
             }
         }
 
