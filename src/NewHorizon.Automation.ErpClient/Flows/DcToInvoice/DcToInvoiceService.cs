@@ -103,10 +103,26 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
 
         if (matchedDc == null)
         {
-            // If customer was empty, try resolving from any pending DC matching dcId or dcNo
-            if (string.IsNullOrWhiteSpace(effectiveCustomerCode))
+            // If customer was empty or matchedDc not found yet, inspect customers with DCs
+            var dcCustomers = await GetCustomersForDcAsync(effectiveSiteId, cancellationToken);
+            foreach (var cust in dcCustomers)
             {
-                matchedDc = pendingDcs.FirstOrDefault();
+                if (string.Equals(cust, effectiveCustomerCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var dcs = await FetchPendingDcsAsync(
+                    cust, _options.Currency, _options.ExNonEx, formattedDate, effectiveSiteId, cancellationToken);
+                matchedDc = dcs.FirstOrDefault(d =>
+                    (dcId.HasValue && d.DcId == dcId.Value) ||
+                    (!string.IsNullOrWhiteSpace(dcNo) && (string.Equals(d.DcNo, dcNo.Trim(), StringComparison.OrdinalIgnoreCase) || string.Equals(d.DcNo.TrimStart('0'), dcNo.Trim().TrimStart('0'), StringComparison.OrdinalIgnoreCase))));
+
+                if (matchedDc != null)
+                {
+                    effectiveCustomerCode = matchedDc.BillTo;
+                    break;
+                }
             }
 
             if (matchedDc == null)
@@ -114,7 +130,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 throw new InvoiceValidationException(
                     "DeliveryChallan",
                     $"Delivery Challan (Id: {dcId}, No: '{dcNo}') was not found in the list of eligible, " +
-                    $"authorized, pending Delivery Challans for customer '{effectiveCustomerCode}' as of {formattedDate}. " +
+                    $"authorized, pending Delivery Challans as of {formattedDate}. " +
                     "It may already be fully invoiced, unauthorized, or belong to a different site/currency.");
             }
         }
@@ -925,6 +941,51 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         }
 
         return (itemsList, taxesList);
+    }
+
+    private async Task<IReadOnlyList<string>> GetCustomersForDcAsync(
+        int siteId,
+        CancellationToken cancellationToken)
+    {
+        const string url = "/api/v1/sales/deliverychallanentry/getCustomerList/L/F";
+
+        try
+        {
+            var filterPayload = new JsonObject
+            {
+                ["pageSize"] = 100,
+                ["pageNumber"] = 1,
+                ["sortField"] = "",
+                ["sortDirection"] = "asc",
+                ["searchValue"] = "",
+                ["siteId"] = siteId
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(url, filterPayload, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return Array.Empty<string>();
+            }
+
+            var envelope = await response.Content.ReadFromJsonAsync<ErpEnvelopeList<JsonObject>>(
+                SerializerOptions, cancellationToken);
+
+            if (envelope?.Data is null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return envelope.Data
+                .Select(node => node["customerCode"]?.ToString() ?? "")
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "DcToInvoice: GetCustomersForDc failed: {Msg}", ex.Message);
+            return Array.Empty<string>();
+        }
     }
 
     private async Task<ErpDispatchFromAddress> FetchDispatchFromAddressAsync(

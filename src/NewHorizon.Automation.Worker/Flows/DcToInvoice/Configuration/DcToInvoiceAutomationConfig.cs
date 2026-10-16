@@ -23,7 +23,7 @@ public class DcToInvoiceAutomationConfig
 
 public class DcToInvoiceAutomationConfigDto
 {
-    public bool AutomationEnabled { get; set; }
+    public bool? AutomationEnabled { get; set; }
     public string? AutomationTime { get; set; }
     
     public string? DcNumber { get; set; }

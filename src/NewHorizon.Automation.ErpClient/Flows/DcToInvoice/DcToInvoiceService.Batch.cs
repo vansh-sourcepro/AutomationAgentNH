@@ -148,15 +148,27 @@ public sealed partial class DcToInvoiceService
                 _logger.LogWarning(ex, "Failed to query customer list for invoice discovery");
             }
 
+            try
+            {
+                var dcCusts = await GetCustomersForDcAsync(siteId, cancellationToken);
+                foreach (var code in dcCusts)
+                {
+                    if (!string.IsNullOrWhiteSpace(code) && !customerCodes.Contains(code, StringComparer.OrdinalIgnoreCase))
+                    {
+                        customerCodes.Add(code);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query DC customer list for invoice discovery");
+            }
+
             if (customerCodes.Count == 0)
             {
                 if (!string.IsNullOrWhiteSpace(_options.CustomerCode))
                 {
                     customerCodes.Add(_options.CustomerCode.Trim());
-                }
-                else
-                {
-                    customerCodes.Add("All");
                 }
             }
         }

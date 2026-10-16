@@ -122,15 +122,21 @@ public static class DcToInvoiceEndpoints
         bool timeChanged = config.AutomationTime != normalizedTime;
 
         var mode = dto.AutomationMode?.ToUpperInvariant();
-        if (!dto.AutomationEnabled)
+        bool explicitlyDisabled = dto.AutomationEnabled.HasValue && !dto.AutomationEnabled.Value;
+        bool hasAnyConfig = !string.IsNullOrWhiteSpace(mode) || !string.IsNullOrWhiteSpace(dto.AutomationTime) || (dcList != null && dcList.Count > 0);
+        bool shouldEnable = dto.AutomationEnabled ?? hasAnyConfig;
+
+        if (explicitlyDisabled || !shouldEnable)
         {
             // When Toggle is OFF, safety shutoff resets all parameters to null
             mode = null;
             normalizedTime = null;
             dcList = null;
+            config.AutomationEnabled = false;
         }
         else
         {
+            config.AutomationEnabled = true;
             if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
             {
                 // Default based on whether time is provided if mode is not specified
@@ -151,7 +157,6 @@ public static class DcToInvoiceEndpoints
             // In BOTH mode, user can configure both time and DC list.
         }
 
-        config.AutomationEnabled = dto.AutomationEnabled;
         config.AutomationTime = normalizedTime;
         config.DcNumbers = dcList;
         config.AutomationMode = mode;
