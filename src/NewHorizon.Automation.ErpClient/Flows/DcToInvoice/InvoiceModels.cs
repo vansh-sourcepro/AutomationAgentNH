@@ -4,6 +4,8 @@ using System.Linq;
 
 namespace NewHorizon.Automation.ErpClient.Flows.DcToInvoice;
 
+public sealed record InvoiceValidationError(string Field, string Message);
+
 /// <summary>
 /// Domain exception when invoice creation fails business validation or ERP pre-requisite checks.
 /// </summary>
@@ -13,15 +15,25 @@ public sealed class InvoiceValidationException : Exception
         : base(message)
     {
         Field = field;
+        Errors = new[] { new InvoiceValidationError(field, message) };
+    }
+
+    public InvoiceValidationException(string field, string message, IReadOnlyList<InvoiceValidationError> errors)
+        : base(message)
+    {
+        Field = field;
+        Errors = errors;
     }
 
     public InvoiceValidationException(string field, string message, Exception innerException)
         : base(message, innerException)
     {
         Field = field;
+        Errors = new[] { new InvoiceValidationError(field, message) };
     }
 
     public string Field { get; }
+    public IReadOnlyList<InvoiceValidationError> Errors { get; }
 }
 
 /// <summary>

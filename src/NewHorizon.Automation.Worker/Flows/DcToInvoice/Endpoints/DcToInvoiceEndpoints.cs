@@ -20,6 +20,7 @@ namespace NewHorizon.Automation.Worker.Flows.DcToInvoice.Endpoints;
 
 /// <summary>
 /// Automation endpoints for Delivery Challan to Sales Invoice conversion.
+/// Follows the established Allocation-to-DC architecture and conventions.
 /// </summary>
 public static class DcToInvoiceEndpoints
 {
@@ -28,7 +29,7 @@ public static class DcToInvoiceEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        // Master batch automation API: processes eligible Delivery Challans sequentially
+        // Master batch automation API: processes ALL eligible Delivery Challans sequentially in one execution
         endpoints
             .MapPost(
                 "/api/v1/sales/salesinvoice/CreateInvoicesFromDeliveryChallans",
@@ -86,12 +87,17 @@ public static class DcToInvoiceEndpoints
     }
 
     private static async Task<IResult> UpdateAutomationConfigAsync(
-        DcToInvoiceAutomationConfigDto dto,
+        DcToInvoiceAutomationConfigDto? dto,
         IDcToInvoiceConfigRepository repo,
         IClock clock,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken)
     {
+        if (dto is null)
+        {
+            return Results.BadRequest("Invalid request body. Configuration payload is required.");
+        }
+
         string? normalizedTime = null;
         if (!string.IsNullOrWhiteSpace(dto.AutomationTime))
         {
@@ -113,36 +119,72 @@ public static class DcToInvoiceEndpoints
         }
 
         var config = await repo.GetConfigAsync(cancellationToken);
+        bool timeChanged = config.AutomationTime != normalizedTime;
+
+        var mode = dto.AutomationMode?.ToUpperInvariant();
+        if (!dto.AutomationEnabled)
+        {
+            // When Toggle is OFF, safety shutoff resets all parameters to null
+            mode = null;
+            normalizedTime = null;
+            dcList = null;
+        }
+        else
+        {
+            if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
+            {
+                // Default based on whether time is provided if mode is not specified
+                mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+            }
+
+            // Enforce strict mode-based restrictions:
+            if (mode == "TIMER")
+            {
+                // In TIMER mode, user can ONLY configure time. Target DC list cannot be set.
+                dcList = null;
+            }
+            else if (mode == "INDIVIDUAL")
+            {
+                // In INDIVIDUAL mode, user can ONLY configure DCs. Time cannot be set.
+                normalizedTime = null;
+            }
+            // In BOTH mode, user can configure both time and DC list.
+        }
+
         config.AutomationEnabled = dto.AutomationEnabled;
         config.AutomationTime = normalizedTime;
         config.DcNumbers = dcList;
-        config.AutomationMode = dto.AutomationMode?.ToUpperInvariant() switch
-        {
-            "INDIVIDUAL" => "INDIVIDUAL",
-            "TIMER" => "TIMER",
-            _ => "BOTH"
-        };
+        config.AutomationMode = mode;
         config.UpdatedAtUtc = clock.UtcNow;
+
+        if (timeChanged)
+        {
+            config.LastScheduledRunDate = null;
+        }
 
         await repo.SaveConfigAsync(config, cancellationToken);
 
-        // Immediate run trigger if mode is INDIVIDUAL (or BOTH with specific DC numbers)
-        if (dto.AutomationEnabled && config.AutomationMode == "INDIVIDUAL")
+        // Immediate run trigger if mode is INDIVIDUAL (or BOTH without a configured time)
+        if (config.AutomationEnabled && (config.AutomationMode == "INDIVIDUAL" || (config.AutomationMode == "BOTH" && string.IsNullOrWhiteSpace(config.AutomationTime))))
         {
+            var factory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
             _ = Task.Run(async () =>
             {
-                using var scope = serviceProvider.CreateScope();
+                using var scope = factory.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<IDcToInvoiceService>();
-                var logger = scope.ServiceProvider.GetRequiredService<ILogger<DcToInvoiceService>>();
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<IDcToInvoiceService>>();
                 try
                 {
-                    logger.LogInformation("DcToInvoice: INDIVIDUAL mode triggered immediately on config update for {Count} DCs", dcList?.Count ?? 0);
+                    var target = config.DcNumbers != null && config.DcNumbers.Count > 0
+                        ? string.Join(", ", config.DcNumbers)
+                        : "ALL";
+                    logger.LogInformation("DcToInvoice: Immediate run triggered (Mode: {Mode}) for DC(s): {Target}", config.AutomationMode, target);
                     await service.CreateInvoicesFromDeliveryChallansAsync(
-                        new BatchInvoiceCreationRequest(DcNumbers: dcList), CancellationToken.None);
+                        new BatchInvoiceCreationRequest(DcNumbers: config.DcNumbers), CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "DcToInvoice: Immediate INDIVIDUAL trigger failed");
+                    logger.LogError(ex, "DcToInvoice: Immediate run failed");
                 }
             }, CancellationToken.None);
         }
@@ -157,6 +199,10 @@ public static class DcToInvoiceEndpoints
         });
     }
 
+    /// <summary>
+    /// Master automation endpoint: finds ALL existing eligible Delivery Challans and processes them
+    /// sequentially in one execution, creating Sales Invoices for each eligible record.
+    /// </summary>
     private static async Task<IResult> CreateInvoicesFromAllDeliveryChallansAsync(
         BatchInvoiceCreationRequestDto? requestDto,
         IDcToInvoiceService service,
@@ -169,21 +215,26 @@ public static class DcToInvoiceEndpoints
 
         if (!config.AutomationEnabled)
         {
-            logger.LogWarning("DcToInvoice: Rejected batch invocation because Automation is DISABLED.");
+            logger.LogInformation("DcToInvoice: Automation is disabled. No Delivery Challans were processed.");
             return Results.Ok(new BatchInvoiceCreationResponse(
-                Success: false,
-                Message: "Invoice Automation is disabled in configuration. Enable automation to process Delivery Challans.",
+                Success: true,
+                Message: "Automation is disabled. No delivery challans were processed.",
                 Data: new BatchInvoiceCreationData(0, 0, 0, 0, 0, 0, 0, 0, Array.Empty<DcInvoiceResult>())));
         }
 
         var req = requestDto?.ToRequest() ?? new BatchInvoiceCreationRequest();
 
-        // Enforce configured mode filters when caller doesn't specify custom targets
+        // Apply selection parameter logic based on mode
         if (req.DcNumbers == null || req.DcNumbers.Count == 0)
         {
             if (config.AutomationMode == "INDIVIDUAL" && config.DcNumbers != null && config.DcNumbers.Count > 0)
             {
                 req = req with { DcNumbers = config.DcNumbers };
+            }
+            else
+            {
+                // In TIMER or BOTH mode without specific DC numbers, process all eligible Delivery Challans dynamically
+                req = req with { DcNumbers = null };
             }
         }
 
@@ -195,21 +246,33 @@ public static class DcToInvoiceEndpoints
                 Message: result.Message,
                 Data: result.Data));
         }
+        catch (InvoiceValidationException ex)
+        {
+            logger.LogWarning(ex, "DcToInvoice: Batch validation error: {Message}", ex.Message);
+            return Results.UnprocessableEntity(new BatchInvoiceCreationResponse(
+                Success: false,
+                Message: ex.Message,
+                Data: null,
+                ErrorMessage: ex.Message));
+        }
+        catch (ErpTransientException ex)
+        {
+            logger.LogError(ex, "DcToInvoice: ERP transient failure during batch invoice creation: {Message}", ex.Message);
+            return Results.Problem(
+                detail: ex.LaymanMessage,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "DcToInvoice: Unexpected error during batch invoice creation");
-            return Results.Json(
-                new BatchInvoiceCreationResponse(
-                    Success: false,
-                    Message: "Batch invoice creation failed unexpectedly.",
-                    Data: null,
-                    ErrorMessage: ex.Message),
+            return Results.Problem(
+                detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 
     private static async Task<IResult> CreateInvoiceFromSingleDcAsync(
-        CreateInvoiceFromDcRequest request,
+        CreateInvoiceFromDcRequest? request,
         IDcToInvoiceService service,
         IDcToInvoiceConfigRepository configRepo,
         ILoggerFactory loggerFactory,
@@ -228,7 +291,7 @@ public static class DcToInvoiceEndpoints
                 ErrorMessage: "Invoice Automation is disabled."));
         }
 
-        if (!request.HasAnyIdentifier)
+        if (request is null || !request.HasAnyIdentifier)
         {
             return Results.BadRequest(new CreateInvoiceFromDcResponse(
                 Success: false,
@@ -265,7 +328,7 @@ public static class DcToInvoiceEndpoints
         catch (InvoiceValidationException ex)
         {
             logger.LogWarning(ex, "DcToInvoice: Validation error for DC {DcNo}: {Message}", request.ResolvedDcNo, ex.Message);
-            return Results.Ok(new CreateInvoiceFromDcResponse(
+            return Results.UnprocessableEntity(new CreateInvoiceFromDcResponse(
                 Success: false,
                 Message: ex.Message,
                 Data: null,
@@ -275,25 +338,15 @@ public static class DcToInvoiceEndpoints
         catch (ErpTransientException ex)
         {
             logger.LogError(ex, "DcToInvoice: ERP transient failure for DC {DcNo}: {Message}", request.ResolvedDcNo, ex.Message);
-            return Results.Json(
-                new CreateInvoiceFromDcResponse(
-                    Success: false,
-                    Message: "ERP did not answer cleanly. Please retry.",
-                    Data: null,
-                    Errors: null,
-                    ErrorMessage: ex.Message),
+            return Results.Problem(
+                detail: ex.LaymanMessage,
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "DcToInvoice: Unexpected failure for DC {DcNo}", request.ResolvedDcNo);
-            return Results.Json(
-                new CreateInvoiceFromDcResponse(
-                    Success: false,
-                    Message: "Internal server error occurred.",
-                    Data: null,
-                    Errors: null,
-                    ErrorMessage: ex.Message),
+            return Results.Problem(
+                detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -312,14 +365,24 @@ public static class DcToInvoiceEndpoints
                 Data: summaries,
                 ErrorMessage: null));
         }
+        catch (InvoiceValidationException ex)
+        {
+            return Results.UnprocessableEntity(new PendingDeliveryChallansResponse(
+                Success: false,
+                Message: null,
+                Data: null,
+                ErrorMessage: ex.Message));
+        }
+        catch (ErpTransientException ex)
+        {
+            return Results.Problem(
+                detail: ex.LaymanMessage,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
         catch (Exception ex)
         {
-            return Results.Json(
-                new PendingDeliveryChallansResponse(
-                    Success: false,
-                    Message: "Failed to query pending Delivery Challans.",
-                    Data: null,
-                    ErrorMessage: ex.Message),
+            return Results.Problem(
+                detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

@@ -241,7 +241,20 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             }
         }
 
-        // ── Step 11: Construct SalesInvoiceInsertModel Payload ──
+        // ── Step 11: Mandatory Required-Field Validation ──
+        ValidateMandatoryInvoiceFields(
+            matchedDc,
+            docControl,
+            fiscalYear,
+            effectiveSiteId,
+            effectiveSiteCode,
+            headerRateStructureCode,
+            isLineLevelRateStructure,
+            shipment,
+            validItems,
+            taxLines);
+
+        // ── Step 12: Construct SalesInvoiceInsertModel Payload ──
         var payload = BuildInvoiceCreatePayload(
             matchedDc,
             docControl,
@@ -256,7 +269,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             validItems,
             taxLines);
 
-        // ── Step 12: Call Existing ERP Save API ──
+        // ── Step 13: Call Existing ERP Save API ──
         var createResponse = await PostInvoiceCreateAsync(payload, cancellationToken);
 
         _logger.LogInformation(
@@ -276,6 +289,109 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             Authorized: string.Equals(docControl.AuthorisationRequired, "N", StringComparison.OrdinalIgnoreCase),
             RateStructureCode: headerRateStructureCode,
             LineLevelRateStructureApplied: isLineLevelRateStructure);
+    }
+
+    /// <summary>
+    /// Strict required-field validation. Every mandatory header and item field must contain valid data
+    /// before an invoice can be created. Throws InvoiceValidationException if any mandatory field is missing.
+    /// </summary>
+    private static void ValidateMandatoryInvoiceFields(
+        ErpSalInvDcRow dc,
+        ErpInvoiceDocControlDefault docControl,
+        string fiscalYear,
+        int siteId,
+        string siteCode,
+        string headerRateStructureCode,
+        bool isLineLevelRateStructure,
+        ErpInvoiceShipment shipment,
+        IReadOnlyList<ErpInvoiceItemDetail> items,
+        IReadOnlyList<ErpInvoiceRateStructureLine> taxLines)
+    {
+        var errors = new List<InvoiceValidationError>();
+
+        // 1. Mandatory Header Fields
+        if (string.IsNullOrWhiteSpace(fiscalYear))
+            errors.Add(new InvoiceValidationError("FinancialYear", "Financial Year is required and cannot be empty."));
+
+        if (string.IsNullOrWhiteSpace(docControl.GroupCode))
+            errors.Add(new InvoiceValidationError("GroupCode", "Document Group Code is required."));
+
+        if (string.IsNullOrWhiteSpace(siteCode))
+            errors.Add(new InvoiceValidationError("SiteCode", "Site Code is required."));
+
+        if (siteId <= 0)
+            errors.Add(new InvoiceValidationError("LocationId", "Site/Location ID must be greater than zero."));
+
+        if (string.IsNullOrWhiteSpace(dc.BillTo))
+            errors.Add(new InvoiceValidationError("CustomerCode", "Customer (BillTo) Code is required."));
+
+        if (string.IsNullOrWhiteSpace(dc.ShipCode))
+            errors.Add(new InvoiceValidationError("ShipmentCode", "Shipment / Delivery Destination Code is required."));
+
+        if (string.IsNullOrWhiteSpace(dc.CurrencyCode))
+            errors.Add(new InvoiceValidationError("Currency", "Currency code is required."));
+
+        // 2. Rate Structure Validation according to MSCENABLELINELEVELRTSTR
+        if (!isLineLevelRateStructure)
+        {
+            if (string.IsNullOrWhiteSpace(headerRateStructureCode))
+            {
+                errors.Add(new InvoiceValidationError("HeaderRateStructure",
+                    $"Delivery Challan {dc.DcNo} (Id: {dc.DcId}) requires a valid Header-level Rate Structure (MSCENABLELINELEVELRTSTR=0)."));
+            }
+        }
+
+        // 3. Mandatory Items Validation
+        if (items.Count == 0)
+        {
+            errors.Add(new InvoiceValidationError("InvoiceItems",
+                $"Delivery Challan {dc.DcNo} (Id: {dc.DcId}) has no items eligible for invoicing."));
+        }
+        else
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                var lineIdentifier = $"Line #{i + 1} ({item.SalesItemCode})";
+
+                if (string.IsNullOrWhiteSpace(item.SalesItemCode))
+                    errors.Add(new InvoiceValidationError("SalesItemCode", $"{lineIdentifier} is missing Sales Item Code."));
+
+                if (string.IsNullOrWhiteSpace(item.IntItmCode))
+                    errors.Add(new InvoiceValidationError("InternalItemCode", $"{lineIdentifier} is missing Internal Item Code."));
+
+                if (string.IsNullOrWhiteSpace(item.DcRndNo))
+                    errors.Add(new InvoiceValidationError("DcDetailLineId", $"{lineIdentifier} is missing Delivery Challan Line Identifier (dcRndNo)."));
+
+                if (item.InvoiceQty <= 0)
+                    errors.Add(new InvoiceValidationError("InvoiceQuantity", $"{lineIdentifier} has invalid Invoice Quantity ({item.InvoiceQty}). Must be greater than zero."));
+
+                if (item.InvoiceQty > item.DcQty && item.DcQty > 0)
+                    errors.Add(new InvoiceValidationError("InvoiceQuantityExceeded", $"{lineIdentifier} Invoice Quantity ({item.InvoiceQty}) exceeds DC dispatched quantity ({item.DcQty})."));
+
+                if (item.ConvFact <= 0)
+                    errors.Add(new InvoiceValidationError("ConversionFactor", $"{lineIdentifier} has invalid Conversion Factor ({item.ConvFact}). Must be greater than zero."));
+
+                if (item.OafId <= 0)
+                    errors.Add(new InvoiceValidationError("OafId", $"{lineIdentifier} is missing valid OAF Reference ID."));
+
+                if (isLineLevelRateStructure && string.IsNullOrWhiteSpace(item.RateStructureCode))
+                    errors.Add(new InvoiceValidationError("LineRateStructure", $"{lineIdentifier} is missing Line-level Rate Structure (MSCENABLELINELEVELRTSTR=1)."));
+            }
+        }
+
+        var totalAmount = items.Sum(i => i.Amount);
+        if (totalAmount <= 0 && items.Count > 0)
+        {
+            errors.Add(new InvoiceValidationError("InvoiceTotalAmount",
+                $"Invoice gross amount ({totalAmount}) must be greater than zero for Delivery Challan {dc.DcNo}."));
+        }
+
+        if (errors.Count > 0)
+        {
+            var summary = string.Join("; ", errors.Select(e => $"{e.Field}: {e.Message}"));
+            throw new InvoiceValidationException(errors[0].Field, $"Mandatory invoice validation failed for DC {dc.DcNo}: {summary}", errors);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -498,7 +614,24 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         bool enableLineLevel = false;
         if (dataObj != null && dataObj["enablelinelevelratestructure"] != null)
         {
-            enableLineLevel = dataObj["enablelinelevelratestructure"]!.GetValue<bool>();
+            var flagNode = dataObj["enablelinelevelratestructure"];
+            if (flagNode is JsonValue jv)
+            {
+                if (jv.TryGetValue<bool>(out var bVal))
+                {
+                    enableLineLevel = bVal;
+                }
+                else if (jv.TryGetValue<int>(out var iVal))
+                {
+                    enableLineLevel = iVal == 1;
+                }
+                else if (jv.TryGetValue<string>(out var sVal))
+                {
+                    enableLineLevel = string.Equals(sVal, "1", StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(sVal, "true", StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(sVal, "Y", StringComparison.OrdinalIgnoreCase);
+                }
+            }
         }
 
         return new ErpSalesPolicyDetail(companyCode, enableLineLevel);
@@ -542,8 +675,10 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
     private async Task<IReadOnlyList<ErpSalInvDcRow>> FetchPendingDcsAsync(
         string customerCode, string currency, string strExNonEx, string invDate, int siteId, CancellationToken cancellationToken)
     {
-        var encodedCust = Uri.EscapeDataString(customerCode.NullIsBlank());
-        var encodedCurr = Uri.EscapeDataString(currency.NullIsBlank());
+        var effectiveCust = string.IsNullOrWhiteSpace(customerCode) ? "All" : customerCode.Trim();
+        var encodedCust = Uri.EscapeDataString(effectiveCust);
+        var effectiveCurr = string.IsNullOrWhiteSpace(currency) ? "%20" : currency.Trim();
+        var encodedCurr = Uri.EscapeDataString(effectiveCurr);
         var url = $"/api/v1/sales/salesinvoice/FetchDCDtlsForSalInv/{encodedCust}/{encodedCurr}/{Uri.EscapeDataString(strExNonEx)}/{invDate}/{siteId}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -627,7 +762,9 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
 
     private async Task<ErpInvoiceShipment> GetShipmentAsync(string custCode, string shipCode, long orderId, CancellationToken cancellationToken)
     {
-        var url = $"/api/v1/sales/salesinvoice/GetShipment/{Uri.EscapeDataString(custCode)}/{Uri.EscapeDataString(shipCode)}/{orderId}/E";
+        var effectiveCust = string.IsNullOrWhiteSpace(custCode) ? "%20" : Uri.EscapeDataString(custCode.Trim());
+        var effectiveShip = string.IsNullOrWhiteSpace(shipCode) ? "%20" : Uri.EscapeDataString(shipCode.Trim());
+        var url = $"/api/v1/sales/salesinvoice/GetShipment/{effectiveCust}/{effectiveShip}/{orderId}/E";
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (response.IsSuccessStatusCode)
@@ -697,8 +834,8 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         int oafId,
         CancellationToken cancellationToken)
     {
-        var encodedRate = Uri.EscapeDataString(rateStructureCode.NullIsBlank());
-        var encodedCurr = Uri.EscapeDataString(currency.NullIsBlank());
+        var encodedRate = string.IsNullOrWhiteSpace(rateStructureCode) ? "%20" : Uri.EscapeDataString(rateStructureCode.Trim());
+        var encodedCurr = string.IsNullOrWhiteSpace(currency) ? "%20" : Uri.EscapeDataString(currency.Trim());
         var url = $"/api/v1/sales/salesinvoice/FetchItemDtls/{encodedRate}/{dcId}/{encodedCurr}/E/true/{orderId}/%20/false/{Uri.EscapeDataString(siteCode)}?strOAFID={oafId}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);

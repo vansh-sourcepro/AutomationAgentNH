@@ -60,21 +60,33 @@ public sealed record InvoiceValidationErrorResponse(string Field, string Message
 /// </summary>
 public sealed record BatchInvoiceCreationRequestDto(
     string? CustomerCode = null,
+    string? CompanyCode = null,
     int? SiteId = null,
     string? SiteCode = null,
     string? DcYear = null,
+    string? DcNumber = null,
     IReadOnlyList<long>? DcIds = null,
     IReadOnlyList<string>? DcNumbers = null,
-    bool DryRun = false)
+    bool DryRun = false,
+    bool? IsDryRun = null)
 {
-    public BatchInvoiceCreationRequest ToRequest() => new(
-        CustomerCode: CustomerCode,
-        SiteId: SiteId,
-        SiteCode: SiteCode,
-        DcYear: DcYear,
-        DcIds: DcIds,
-        DcNumbers: DcNumbers,
-        DryRun: DryRun);
+    public BatchInvoiceCreationRequest ToRequest()
+    {
+        var resolvedDcNumbers = DcNumbers?.ToList() ?? new List<string>();
+        if (!string.IsNullOrWhiteSpace(DcNumber) && !resolvedDcNumbers.Contains(DcNumber.Trim()))
+        {
+            resolvedDcNumbers.Add(DcNumber.Trim());
+        }
+
+        return new BatchInvoiceCreationRequest(
+            CustomerCode: CustomerCode,
+            SiteId: SiteId,
+            SiteCode: SiteCode,
+            DcYear: DcYear,
+            DcIds: DcIds,
+            DcNumbers: resolvedDcNumbers.Count > 0 ? resolvedDcNumbers : null,
+            DryRun: IsDryRun ?? DryRun);
+    }
 }
 
 /// <summary>

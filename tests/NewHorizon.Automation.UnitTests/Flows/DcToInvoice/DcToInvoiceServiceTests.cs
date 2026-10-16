@@ -421,6 +421,79 @@ public sealed class DcToInvoiceServiceTests
         // Verify no save call was dispatched
         _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task CreateInvoice_WhenNoRateStructureAvailable_ThrowsValidationExceptionAndPreventsCreation()
+    {
+        // Arrange
+        SetupDefaultRoutes(enableLineLevelRateStructure: false);
+        // Clear rate structure options and DC rate structure
+        _fakeErp.On("FetchDCRateStructure", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": []
+        }
+        """)!);
+
+        _fakeErp.On("FetchDCDtlsForSalInv", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "dcid": 110530,
+                    "dcNo": "000107",
+                    "dcDate": "2026-10-15T00:00:00",
+                    "dcYear": "26-27",
+                    "dcGroup": "DS",
+                    "dcSite": "CT2",
+                    "oafNo": "000045",
+                    "ordid": 10166,
+                    "shipCode": "CADD",
+                    "billTo": "A001",
+                    "billToName": "Akzo Nobel India Ltd.",
+                    "xobcurrcd": "INR",
+                    "xdcrtstrcd": null
+                }
+            ]
+        }
+        """)!);
+
+        var service = CreateService();
+
+        // Act & Assert
+        Func<Task> act = async () => await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
+        await act.Should().ThrowAsync<InvoiceValidationException>()
+            .WithMessage("*No valid Rate Structure could be resolved*");
+
+        // Verify create endpoint was never called
+        _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateInvoice_WhenZeroPendingItems_ThrowsValidationExceptionAndPreventsCreation()
+    {
+        // Arrange
+        SetupDefaultRoutes();
+        _fakeErp.On("FetchItemDtls", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": {
+                "orderdtlListModel": [],
+                "ratestructureModel": []
+            }
+        }
+        """)!);
+
+        var service = CreateService();
+
+        // Act & Assert
+        Func<Task> act = async () => await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
+        await act.Should().ThrowAsync<InvoiceValidationException>()
+            .WithMessage("*0 pending items*");
+
+        // Verify create endpoint was never called
+        _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
+    }
 }
 
 internal sealed class FakeHttpClientFactory(HttpClient client) : IHttpClientFactory

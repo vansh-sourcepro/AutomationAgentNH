@@ -148,9 +148,16 @@ public sealed partial class DcToInvoiceService
                 _logger.LogWarning(ex, "Failed to query customer list for invoice discovery");
             }
 
-            if (customerCodes.Count == 0 && !string.IsNullOrWhiteSpace(_options.CustomerCode))
+            if (customerCodes.Count == 0)
             {
-                customerCodes.Add(_options.CustomerCode.Trim());
+                if (!string.IsNullOrWhiteSpace(_options.CustomerCode))
+                {
+                    customerCodes.Add(_options.CustomerCode.Trim());
+                }
+                else
+                {
+                    customerCodes.Add("All");
+                }
             }
         }
 
