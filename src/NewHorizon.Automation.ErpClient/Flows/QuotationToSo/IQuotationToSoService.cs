@@ -21,11 +21,22 @@ public interface IQuotationToSoService
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Orchestrates the entire conversion for a customer: discovers all open authorised quotations and converts each one.
+    /// Orchestrates the conversion for a customer: discovers all open authorised quotations and converts each one.
+    /// SiteCode is optional; if omitted, all sites for the customer will be considered.
     /// </summary>
     Task<QuotationToSoSweepResult> ConvertQuotationsForCustomerAsync(
         string customerCode,
-        string siteCode,
+        string? siteCode,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Converts all eligible open authorised quotations to Sales Orders.
+    /// If customerCode is provided, converts all open quotations for that customer.
+    /// If customerCode is null/empty, discovers and converts all open quotations across all customers.
+    /// </summary>
+    Task<QuotationToSoSweepResult> ConvertAllEligibleQuotationsAsync(
+        string? customerCode,
+        string? siteCode,
         CancellationToken cancellationToken);
 
     /// <summary>

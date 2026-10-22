@@ -37,13 +37,7 @@ public static class QuotationToSoEndpoints
         ILogger<QuotationToSoService> logger,
         CancellationToken cancellationToken)
     {
-        if (request is null)
-        {
-            return Results.Problem(
-                title: "Invalid request.",
-                detail: "A JSON request body with 'quotationNumber' (or 'customerCode' and 'siteCode') is required.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
+        request ??= new ConvertQuotationsRequest();
 
         try
         {
@@ -58,13 +52,14 @@ public static class QuotationToSoEndpoints
                     request.CustomerCode,
                     request.SiteCode,
                     cancellationToken);
+
                 if (!itemResult.Success)
                 {
-                    return Results.UnprocessableEntity(new ConvertQuotationsResponse
+                    return Results.Ok(new ConvertQuotationsResponse
                     {
                         Success = false,
                         Message = itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.",
-                        SalesOrderNumber = null,
+                        SalesOrderNumber = itemResult.SalesOrderNumber,
                         Item = itemResult,
                     });
                 }
@@ -78,31 +73,27 @@ public static class QuotationToSoEndpoints
                 });
             }
 
-            // Flow B: Batch conversion for all open quotations under customer and site
-            if (string.IsNullOrWhiteSpace(request.CustomerCode) || string.IsNullOrWhiteSpace(request.SiteCode))
-            {
-                return Results.Problem(
-                    title: "Missing parameters.",
-                    detail: "Parameter 'quotationNumber' is required (or provide both 'customerCode' and 'siteCode').",
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
+            // Flow B: Convert all eligible quotations (for customer, or for all customers across site/company)
             logger.LogInformation(
-                "Triggered Quotation to Sales Order conversion for customer {CustomerCode} and site {SiteCode}",
-                request.CustomerCode,
-                request.SiteCode);
+                "Triggered Quotation to Sales Order conversion for all eligible quotations (Customer: {CustomerCode}, Site: {SiteCode})",
+                request.CustomerCode ?? "ALL",
+                request.SiteCode ?? "ALL");
 
-            var sweepResult = await service.ConvertQuotationsForCustomerAsync(
+            var sweepResult = await service.ConvertAllEligibleQuotationsAsync(
                 request.CustomerCode,
                 request.SiteCode,
                 cancellationToken);
 
             if (sweepResult.TotalFound == 0)
             {
+                var scopeDesc = !string.IsNullOrWhiteSpace(request.CustomerCode)
+                    ? $"Customer '{request.CustomerCode}'"
+                    : "the system";
+
                 return Results.Ok(new ConvertQuotationsResponse
                 {
                     Success = true,
-                    Message = $"No open authorised quotations found for Customer '{request.CustomerCode}' and Site '{request.SiteCode}'.",
+                    Message = $"No eligible open authorised quotations found for conversion in {scopeDesc}.",
                     Result = sweepResult,
                 });
             }

@@ -15,7 +15,8 @@ public static class QuotationToSoPayloadBuilder
         int companyId,
         string companyCode,
         string domesticCurrency,
-        DateTime orderDate)
+        DateTime orderDate,
+        string soGroup = "SW")
     {
         ArgumentNullException.ThrowIfNull(summary);
 
@@ -49,12 +50,20 @@ public static class QuotationToSoPayloadBuilder
 
         var formattedOrderDate = orderDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
+        var effectiveSoGroup = !string.IsNullOrWhiteSpace(soGroup) ? soGroup : "SW";
+
+        var custPoNo = GetString(qtnHeader, "customerPONumber") ?? GetString(qtnHeader, "poNumber") ?? GetString(qtnHeader, "customerPoNo") ?? string.Empty;
+        var custLoiNo = GetString(qtnHeader, "customerLOINumber") ?? GetString(qtnHeader, "loiNumber") ?? string.Empty;
+        var effectiveLoiNo = !string.IsNullOrWhiteSpace(custLoiNo)
+            ? custLoiNo
+            : (!string.IsNullOrWhiteSpace(custPoNo) ? custPoNo : $"LOI/{summary.QtnNum}");
+
         // SalesOrderDetails section
         var salesOrderDetails = new JsonObject
         {
             ["orderId"] = 0,
-            ["customerPONumber"] = string.Empty,
-            ["customerPODate"] = null,
+            ["customerPONumber"] = custPoNo,
+            ["customerPODate"] = !string.IsNullOrWhiteSpace(custPoNo) ? formattedOrderDate : null,
             ["quotationId"] = summary.QuotationId,
             ["quotationYear"] = summary.QtnYear,
             ["quotationGroup"] = summary.QtnGroup,
@@ -77,7 +86,7 @@ public static class QuotationToSoPayloadBuilder
             ["xobcrauth"] = string.Empty,
             ["amendSrNo"] = 0,
             ["ioYear"] = summary.QtnYear,
-            ["ioGroup"] = string.IsNullOrWhiteSpace(summary.QtnGroup) ? "OB" : summary.QtnGroup,
+            ["ioGroup"] = effectiveSoGroup,
             ["ioSiteId"] = summary.QuotationSiteId,
             ["ioSiteCode"] = summary.QuotationSiteCode,
             ["ioDate"] = formattedOrderDate,
@@ -97,7 +106,7 @@ public static class QuotationToSoPayloadBuilder
             ["isReturnable"] = false,
             ["isRoadPermitReceived"] = false,
             // LOI Strategy: Fulfills "Either PO or LOI is required" rule without colliding with duplicate PO checks.
-            ["customerLOINumber"] = $"LOI/{summary.QuotationNumber}",
+            ["customerLOINumber"] = effectiveLoiNo,
             ["customerLOIDate"] = formattedOrderDate,
             ["isInterBranchTransfer"] = false,
             ["customerPOId"] = 0,
@@ -110,6 +119,8 @@ public static class QuotationToSoPayloadBuilder
             ["projectName"] = string.Empty,
             ["custContactPersonId"] = string.Empty,
             ["expancebudgetamt"] = 0,
+            ["userId"] = 1,
+            ["loginUser"] = 1,
         };
 
         // Root payload
@@ -127,7 +138,9 @@ public static class QuotationToSoPayloadBuilder
             ["docType"] = "OB",
             ["docSubType"] = "OB",
             ["amdSrNo"] = 0,
-            ["msctechspecifications"] = false,
+            ["userId"] = 1,
+            ["loginUser"] = 1,
+            ["msctechspecifications"] = true,
             ["salesOrderDetails"] = salesOrderDetails,
             ["modelDetails"] = CopyArrayProperty(qtnData, "modelDetails"),
             ["discountDetails"] = CopyArrayProperty(qtnData, "discountDetails"),
@@ -146,18 +159,58 @@ public static class QuotationToSoPayloadBuilder
             ["projectLotDetails"] = new JsonArray(),
             ["equipmentAttributeDetails"] = CopyArrayProperty(qtnData, "equipmentAttributeDetails"),
             ["deletedSalesItemsDetails"] = new JsonArray(),
-            ["technicalspec"] = CopyArrayProperty(qtnData, "technicalspec"),
+            ["technicalspec"] = BuildTechnicalSpec(qtnData),
             ["agentcommisiondata"] = CopyArrayProperty(qtnData, "agentcommisiondata"),
         };
 
         return payload;
     }
 
+    private static JsonArray BuildTechnicalSpec(JsonElement qtnData)
+    {
+        var result = new JsonArray();
+        if (qtnData.TryGetProperty("technicalspec", out var specArray) && specArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var elem in specArray.EnumerateArray())
+            {
+                var node = JsonNode.Parse(elem.GetRawText());
+                if (node is JsonObject obj)
+                {
+                    obj["xtstrantype"] = "OITEM";
+                    result.Add(obj);
+                }
+            }
+        }
+        return result;
+    }
+
     private static JsonArray BuildDeliveryDetails(JsonElement qtnData, DateTime orderDate)
     {
+        var formattedDelDate = orderDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
         if (qtnData.TryGetProperty("deliveryDetails", out var delArray) && delArray.ValueKind == JsonValueKind.Array && delArray.GetArrayLength() > 0)
         {
-            return JsonNode.Parse(delArray.GetRawText())?.AsArray() ?? new JsonArray();
+            var arr = JsonNode.Parse(delArray.GetRawText())?.AsArray() ?? new JsonArray();
+            foreach (var node in arr)
+            {
+                if (node is JsonObject obj)
+                {
+                    if (string.IsNullOrWhiteSpace(obj["shipmentCode"]?.GetValue<string>()))
+                    {
+                        obj["shipmentCode"] = "CADD";
+                    }
+                    if (string.IsNullOrWhiteSpace(obj["expectedInstallationDate"]?.GetValue<string>()))
+                    {
+                        var delDate = obj["deliveryDate"]?.GetValue<string>();
+                        obj["expectedInstallationDate"] = !string.IsNullOrWhiteSpace(delDate) ? delDate : formattedDelDate;
+                    }
+                    if (string.IsNullOrWhiteSpace(obj["deliveryDate"]?.GetValue<string>()))
+                    {
+                        obj["deliveryDate"] = formattedDelDate;
+                    }
+                }
+            }
+            return arr;
         }
 
         // If quotation had no explicit delivery schedules, create one default line per model item.
@@ -165,7 +218,6 @@ public static class QuotationToSoPayloadBuilder
         if (qtnData.TryGetProperty("modelDetails", out var modelArray) && modelArray.ValueKind == JsonValueKind.Array)
         {
             var lineId = 1;
-            var formattedDelDate = orderDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
             foreach (var item in modelArray.EnumerateArray())
             {
@@ -184,7 +236,7 @@ public static class QuotationToSoPayloadBuilder
                     ["expectedInstallationDate"] = formattedDelDate,
                     ["amendSrNo"] = 0,
                     ["commitedDelDate"] = null,
-                    ["shipmentCode"] = string.Empty,
+                    ["shipmentCode"] = "CADD",
                     ["amendYear"] = string.Empty,
                     ["amendGroup"] = string.Empty,
                     ["amendSiteId"] = 0,
