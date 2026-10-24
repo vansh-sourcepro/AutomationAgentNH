@@ -84,7 +84,7 @@ public sealed class QuotationToSoPayloadBuilderTests
         Assert.NotNull(soDetails);
 
         // Verify LOI Strategy
-        Assert.Equal("LOI/26-27/QT/AHM/000999", soDetails["customerLOINumber"]?.GetValue<string>());
+        Assert.StartsWith("LOI-", soDetails["customerLOINumber"]?.GetValue<string>() ?? string.Empty);
         Assert.Equal("2026-10-19", soDetails["customerLOIDate"]?.GetValue<string>());
         Assert.Equal(string.Empty, soDetails["customerPONumber"]?.GetValue<string>());
         Assert.Null(soDetails["customerPODate"]);

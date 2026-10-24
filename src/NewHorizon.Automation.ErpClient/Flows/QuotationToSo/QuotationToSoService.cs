@@ -213,9 +213,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
         var domesticCurrency = "INR";
         var soYear = !string.IsNullOrWhiteSpace(quotation.QtnYear) ? quotation.QtnYear : GetCurrentFinancialYear();
         var soSiteId = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId : 1;
-        var soGroup = !string.IsNullOrWhiteSpace(quotation.QtnGroup)
-            ? quotation.QtnGroup
-            : await GetDefaultSalesOrderGroupAsync(soYear, soSiteId, cancellationToken);
+        var soGroup = await GetDefaultSalesOrderGroupAsync(soYear, soSiteId, cancellationToken);
 
         var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
             qtnData,
@@ -226,29 +224,71 @@ public sealed class QuotationToSoService : IQuotationToSoService
             orderDate,
             soGroup);
 
-        // Step 3: Call ERP Create Sales Order API
+        // Step 2.5: Pre-check if quotation is already converted or closed to avoid duplicate orders
+        var preVerified = await VerifyCreatedSalesOrderAsync(quotation, soYear, soGroup, cancellationToken);
+        if (preVerified is not null)
+        {
+            _logger.LogInformation(
+                "Quotation {QuotationNumber} is already converted to Sales Order {SoNumber} (Id: {SoId}). Returning existing order without duplicate creation.",
+                quotation.QuotationNumber,
+                preVerified.Value.SoNumber,
+                preVerified.Value.SoId);
+
+            return new QuotationConversionItemResult
+            {
+                QuotationId = quotation.QuotationId,
+                QuotationNumber = quotation.QuotationNumber,
+                Success = true,
+                SalesOrderNumber = preVerified.Value.SoNumber,
+                SalesOrderId = preVerified.Value.SoId,
+            };
+        }
+
+        // Step 3: Call ERP Create Sales Order API (Non-retryable to prevent duplicates on timeout)
         const string createUrl = "api/v1/sales/salesorderentry/createSalesOrderEntry";
 
         _logger.LogInformation(
-            "Creating Sales Order Receipt Entry for Quotation {QuotationNumber} with Group {Group}",
+            "Creating Sales Order Receipt Entry for Quotation {QuotationNumber} (Quotation Group: {QtnGroup}) with Sales Order Group {SoGroup}",
             quotation.QuotationNumber,
+            quotation.QtnGroup,
             soGroup);
 
-        using var createResponse = await _httpClient.PostAsJsonAsync(createUrl, payload, cancellationToken);
-        var responseContent = await createResponse.Content.ReadAsStringAsync(cancellationToken);
+        using var createRequest = new HttpRequestMessage(HttpMethod.Post, createUrl)
+        {
+            Content = JsonContent.Create(payload),
+        };
+        createRequest.Options.Set(DependencyInjection.NonRetryableKey, true);
 
-        _logger.LogInformation(
-            "ERP createSalesOrderEntry response for Quotation {QuotationNumber} (HTTP {StatusCode}): {Response}",
-            quotation.QuotationNumber,
-            (int)createResponse.StatusCode,
-            responseContent);
+        HttpResponseMessage? createResponse = null;
+        string responseContent = string.Empty;
+
+        try
+        {
+            createResponse = await _httpClient.SendAsync(createRequest, cancellationToken);
+            responseContent = await createResponse.Content.ReadAsStringAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "ERP createSalesOrderEntry response for Quotation {QuotationNumber} (HTTP {StatusCode}): {Response}",
+                quotation.QuotationNumber,
+                (int)createResponse.StatusCode,
+                responseContent);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException or Polly.ExecutionRejectedException)
+        {
+            _logger.LogWarning(
+                ex,
+                "createSalesOrderEntry encountered a transport/timeout error for Quotation {QuotationNumber}. Checking database if Sales Order was already created...",
+                quotation.QuotationNumber);
+        }
 
         // Step 4: Parse created Sales Order confirmation
-        var (soNumber, soId, error) = ParseCreateResponse(responseContent);
+        var (soNumber, soId, error) = !string.IsNullOrWhiteSpace(responseContent)
+            ? ParseCreateResponse(responseContent)
+            : (null, null, null);
 
-        // If ERP reported an error or 500, verify if the Sales Order was actually created in the database
-        // (ERP's CreateSalesOrderEntry commits the order, but often throws 500 when attempting an external notification)
-        if (string.IsNullOrWhiteSpace(soNumber) || !createResponse.IsSuccessStatusCode)
+        // If ERP reported an error or 500 or timed out, verify if the Sales Order was actually created in the database
+        // (ERP's CreateSalesOrderEntry commits the order, but often throws 500 or times out when attempting external notification)
+        if (string.IsNullOrWhiteSpace(soNumber) || createResponse is null || !createResponse.IsSuccessStatusCode)
         {
             var verified = await VerifyCreatedSalesOrderAsync(quotation, soYear, soGroup, cancellationToken);
             if (verified is not null)
@@ -256,6 +296,10 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 soNumber = verified.Value.SoNumber;
                 soId = verified.Value.SoId;
                 error = null;
+            }
+            else if (createResponse is null)
+            {
+                error = "Connection to ERP server timed out and no Sales Order was created.";
             }
         }
 
@@ -711,9 +755,9 @@ public sealed class QuotationToSoService : IQuotationToSoService
             rawNum,
             currentFy);
 
-        // Step 1: Look up quotation metadata from ERP
-        var qtnInfo = await FindQuotationAsync(trimmedQtnNo, cancellationToken);
-        if (qtnInfo is null)
+        // Step 1: Look up all candidate quotations matching this number in the financial year
+        var candidates = await FindQuotationsAsync(trimmedQtnNo, cancellationToken);
+        if (candidates.Count == 0)
         {
             return new QuotationConversionItemResult
             {
@@ -724,144 +768,191 @@ public sealed class QuotationToSoService : IQuotationToSoService
             };
         }
 
-        // Step 2: Validate authorisation
-        if (!qtnInfo.IsAuthorized)
+        _logger.LogInformation(
+            "Found {Count} candidate quotation(s) for number '{PaddedNum}' in FY '{FinancialYear}': {Groups}",
+            candidates.Count,
+            paddedNum,
+            currentFy,
+            string.Join(", ", candidates.Select(c => $"[Id: {c.QuotationId}, Group: '{c.QtnGroup}', Status: '{c.QtnStatus}']")));
+
+        var candidateNotes = new List<string>();
+
+        // Step 2: Iterate through candidate quotations in priority order
+        foreach (var qtnInfo in candidates)
         {
-            return new QuotationConversionItemResult
+            var candidateDesc = !string.IsNullOrWhiteSpace(qtnInfo.QuotationNumber)
+                ? qtnInfo.QuotationNumber
+                : $"{currentFy}/{qtnInfo.QtnGroup}/{qtnInfo.QuotationSiteCode}/{qtnInfo.QtnNum}";
+
+            // Check A: Is quotation authorized?
+            if (!qtnInfo.IsAuthorized)
             {
-                QuotationId = qtnInfo.QuotationId,
-                QuotationNumber = qtnInfo.QuotationNumber,
-                Success = false,
-                ErrorMessage = $"Quotation '{qtnInfo.QuotationNumber}' is not authorised. Only authorised quotations can be converted to Sales Orders.",
-            };
-        }
+                var note = $"Quotation '{candidateDesc}' (Id: {qtnInfo.QuotationId}, Group: '{qtnInfo.QtnGroup}') is not authorised.";
+                _logger.LogInformation("{Note}. Moving to next candidate group if available.", note);
+                candidateNotes.Add(note);
+                continue;
+            }
 
-        // Step 3: Check if already converted to Sales Order or closed
-        if (string.Equals(qtnInfo.QtnStatus, "R", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(qtnInfo.QtnStatus, "C", StringComparison.OrdinalIgnoreCase))
-        {
-            var fallbackCust = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode) ? qtnInfo.CustomerCode : fallbackCustomerCode?.Trim();
-            var soGroup = await GetDefaultSalesOrderGroupAsync(currentFy, qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1, cancellationToken);
-            var summary = new OpenQuotationSummary
+            // Check B: Is quotation already converted or closed?
+            if (string.Equals(qtnInfo.QtnStatus, "R", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(qtnInfo.QtnStatus, "C", StringComparison.OrdinalIgnoreCase))
             {
-                QuotationId = qtnInfo.QuotationId,
-                QuotationNumber = qtnInfo.QuotationNumber,
-                QtnYear = qtnInfo.QtnYear,
-                QtnGroup = qtnInfo.QtnGroup,
-                QtnNum = qtnInfo.QtnNum,
-                QuotationSiteCode = qtnInfo.QuotationSiteCode,
-                QuotationSiteId = qtnInfo.QuotationSiteId,
-                CustomerCode = fallbackCust ?? string.Empty,
-                CustomerName = qtnInfo.CustomerName,
-                QuotationDate = qtnInfo.QuotationDate,
-                QuotationCurrency = "INR",
-            };
+                var fallbackCust = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode) ? qtnInfo.CustomerCode : fallbackCustomerCode?.Trim();
+                var soGroup = await GetDefaultSalesOrderGroupAsync(currentFy, qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1, cancellationToken);
 
-            var existingSo = await VerifyCreatedSalesOrderAsync(summary, currentFy, soGroup, cancellationToken);
-            var alreadyConvertedMsg = existingSo is not null
-                ? $"Quotation '{quotationNumber}' is already converted to Sales Order '{existingSo.Value.SoNumber}'."
-                : $"Quotation '{quotationNumber}' in financial year '{currentFy}' is already converted to a Sales Order or closed (ERP Status: {qtnInfo.QtnStatus}).";
+                var summary = new OpenQuotationSummary
+                {
+                    QuotationId = qtnInfo.QuotationId,
+                    QuotationNumber = qtnInfo.QuotationNumber,
+                    QtnYear = qtnInfo.QtnYear,
+                    QtnGroup = qtnInfo.QtnGroup,
+                    QtnNum = qtnInfo.QtnNum,
+                    QuotationSiteCode = qtnInfo.QuotationSiteCode,
+                    QuotationSiteId = qtnInfo.QuotationSiteId,
+                    CustomerCode = fallbackCust ?? string.Empty,
+                    CustomerName = qtnInfo.CustomerName,
+                    QuotationDate = qtnInfo.QuotationDate,
+                    QuotationCurrency = "INR",
+                };
 
+                var existingSo = await VerifyCreatedSalesOrderAsync(summary, currentFy, soGroup, cancellationToken);
+                if (existingSo is not null)
+                {
+                    _logger.LogInformation(
+                        "Quotation '{CandidateDesc}' (Id: {QuotationId}, Group: '{QtnGroup}') is already converted to Sales Order '{SoNumber}'. Returning existing order.",
+                        candidateDesc,
+                        qtnInfo.QuotationId,
+                        qtnInfo.QtnGroup,
+                        existingSo.Value.SoNumber);
+
+                    return new QuotationConversionItemResult
+                    {
+                        QuotationId = qtnInfo.QuotationId,
+                        QuotationNumber = candidateDesc,
+                        Success = true,
+                        SalesOrderNumber = existingSo.Value.SoNumber,
+                        SalesOrderId = existingSo.Value.SoId,
+                    };
+                }
+
+                var alreadyMsg = $"Quotation '{candidateDesc}' (Id: {qtnInfo.QuotationId}, Group: '{qtnInfo.QtnGroup}') is already converted or closed (ERP Status: {qtnInfo.QtnStatus}).";
+                _logger.LogInformation("{Note}. Moving to next candidate group if available.", alreadyMsg);
+                candidateNotes.Add(alreadyMsg);
+                continue;
+            }
+
+            // Check C: Resolve customer code
+            var customerCode = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode)
+                ? qtnInfo.CustomerCode
+                : fallbackCustomerCode?.Trim();
+
+            var siteCode = !string.IsNullOrWhiteSpace(qtnInfo.QuotationSiteCode)
+                ? qtnInfo.QuotationSiteCode
+                : fallbackSiteCode?.Trim();
+
+            if (string.IsNullOrWhiteSpace(customerCode))
+            {
+                var note = $"Could not determine Customer Code for Quotation '{candidateDesc}' (Id: {qtnInfo.QuotationId}).";
+                _logger.LogInformation("{Note}. Moving to next candidate group if available.", note);
+                candidateNotes.Add(note);
+                continue;
+            }
+
+            // Check D: Fetch open quotation details via Sales Order Entry discovery
+            var openQuotations = await GetOpenAuthorisedQuotationsAsync(
+                customerCode,
+                siteCode ?? string.Empty,
+                cancellationToken);
+
+            var targetQuotation = openQuotations.FirstOrDefault(q =>
+                q.QuotationId == qtnInfo.QuotationId
+                || (IsSameFinancialYear(q.QtnYear, currentFy) && (
+                    string.Equals(q.QtnNum, qtnInfo.QtnNum, StringComparison.OrdinalIgnoreCase)
+                    && (string.IsNullOrWhiteSpace(qtnInfo.QtnGroup) || string.Equals(q.QtnGroup, qtnInfo.QtnGroup, StringComparison.OrdinalIgnoreCase)))));
+
+            if (targetQuotation is null)
+            {
+                targetQuotation = new OpenQuotationSummary
+                {
+                    QuotationId = qtnInfo.QuotationId,
+                    QuotationNumber = !string.IsNullOrWhiteSpace(qtnInfo.QuotationNumber) ? qtnInfo.QuotationNumber : paddedNum,
+                    QtnYear = qtnInfo.QtnYear,
+                    QtnGroup = qtnInfo.QtnGroup,
+                    QtnNum = qtnInfo.QtnNum,
+                    QuotationSiteCode = qtnInfo.QuotationSiteCode,
+                    QuotationSiteId = qtnInfo.QuotationSiteId,
+                    CustomerCode = customerCode,
+                    CustomerName = qtnInfo.CustomerName,
+                    QuotationDate = qtnInfo.QuotationDate,
+                    QuotationCurrency = "INR",
+                };
+            }
+
+            // Step 3: Attempt conversion for this candidate
             _logger.LogInformation(
-                "Quotation '{PaddedNum}' is already converted. {Message}",
-                paddedNum,
-                alreadyConvertedMsg);
+                "Attempting conversion for candidate Quotation '{CandidateDesc}' (Id: {QuotationId}, Group: '{Group}')",
+                candidateDesc,
+                qtnInfo.QuotationId,
+                qtnInfo.QtnGroup);
 
-            return new QuotationConversionItemResult
+            var itemResult = await ConvertSingleQuotationAsync(targetQuotation, cancellationToken);
+            if (itemResult.Success)
             {
-                QuotationId = qtnInfo.QuotationId,
-                QuotationNumber = qtnInfo.QuotationNumber,
-                Success = false,
-                SalesOrderNumber = existingSo?.SoNumber,
-                SalesOrderId = existingSo?.SoId,
-                ErrorMessage = alreadyConvertedMsg,
-            };
+                _logger.LogInformation(
+                    "Successfully converted Quotation '{CandidateDesc}' to Sales Order '{SalesOrderNumber}' (Id: {SalesOrderId})",
+                    candidateDesc,
+                    itemResult.SalesOrderNumber,
+                    itemResult.SalesOrderId);
+
+                return itemResult;
+            }
+
+            // If conversion failed, record note and try next candidate
+            var failNote = $"Quotation '{candidateDesc}' (Group: '{qtnInfo.QtnGroup}') conversion failed: {itemResult.ErrorMessage}";
+            _logger.LogWarning("{FailNote}. Trying next candidate group if available.", failNote);
+            candidateNotes.Add(failNote);
         }
 
-        // Step 4: Resolve CustomerCode and SiteCode
-        var customerCode = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode)
-            ? qtnInfo.CustomerCode
-            : fallbackCustomerCode?.Trim();
+        // All candidates failed or were already converted
+        var consolidatedMsg = candidates.Count == 1
+            ? candidateNotes.FirstOrDefault() ?? $"Quotation '{trimmedQtnNo}' could not be converted."
+            : $"Processed {candidates.Count} candidate quotation(s) for number '{paddedNum}': {string.Join(" | ", candidateNotes)}";
 
-        var siteCode = !string.IsNullOrWhiteSpace(qtnInfo.QuotationSiteCode)
-            ? qtnInfo.QuotationSiteCode
-            : fallbackSiteCode?.Trim();
-
-        if (string.IsNullOrWhiteSpace(customerCode))
+        return new QuotationConversionItemResult
         {
-            return new QuotationConversionItemResult
-            {
-                QuotationId = qtnInfo.QuotationId,
-                QuotationNumber = qtnInfo.QuotationNumber,
-                Success = false,
-                ErrorMessage = $"Could not determine Customer Code for Quotation '{paddedNum}' in financial year '{currentFy}'. Please ensure the quotation exists in the ERP.",
-            };
-        }
-
-        // Step 5: Fetch open quotation details via Sales Order Entry's discovery endpoint
-        var openQuotations = await GetOpenAuthorisedQuotationsAsync(
-            customerCode,
-            siteCode ?? string.Empty,
-            cancellationToken);
-
-        // Match directly on numerical number (e.g. "000005" / "5") and current financial year (e.g. "26-27")
-        var targetQuotation = openQuotations.FirstOrDefault(q =>
-            IsSameFinancialYear(q.QtnYear, currentFy) && (
-                string.Equals(q.QtnNum, paddedNum, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(q.QtnNum, rawNum, StringComparison.OrdinalIgnoreCase)
-                || (qtnInfo.QuotationId > 0 && q.QuotationId == qtnInfo.QuotationId)
-                || q.QuotationNumber.EndsWith(paddedNum, StringComparison.OrdinalIgnoreCase)
-            ));
-
-        // Fallback: If not in openQuotations list but verified open via direct quotation header, construct the summary directly
-        if (targetQuotation is null && !string.Equals(qtnInfo.QtnStatus, "R", StringComparison.OrdinalIgnoreCase) && qtnInfo.QuotationId > 0)
-        {
-            targetQuotation = new OpenQuotationSummary
-            {
-                QuotationId = qtnInfo.QuotationId,
-                QuotationNumber = !string.IsNullOrWhiteSpace(qtnInfo.QuotationNumber) ? qtnInfo.QuotationNumber : paddedNum,
-                QtnYear = qtnInfo.QtnYear,
-                QtnGroup = qtnInfo.QtnGroup,
-                QtnNum = qtnInfo.QtnNum,
-                QuotationSiteCode = qtnInfo.QuotationSiteCode,
-                QuotationSiteId = qtnInfo.QuotationSiteId,
-                CustomerCode = customerCode,
-                CustomerName = qtnInfo.CustomerName,
-                QuotationDate = qtnInfo.QuotationDate,
-                QuotationCurrency = "INR",
-            };
-        }
-
-        if (targetQuotation is null)
-        {
-            return new QuotationConversionItemResult
-            {
-                QuotationId = qtnInfo.QuotationId,
-                QuotationNumber = qtnInfo.QuotationNumber,
-                Success = false,
-                ErrorMessage = $"Quotation number '{paddedNum}' in financial year '{currentFy}' is not available for Sales Order creation (it may already be converted to a Sales Order, closed, or not authorised).",
-            };
-        }
-
-        // Step 6: Convert the quotation to a Sales Order Receipt
-        return await ConvertSingleQuotationAsync(targetQuotation, cancellationToken);
+            QuotationId = candidates[0].QuotationId,
+            QuotationNumber = candidates[0].QuotationNumber,
+            Success = false,
+            ErrorMessage = consolidatedMsg,
+        };
     }
 
-    private async Task<QuotationLookupInfo?> FindQuotationAsync(
+    private async Task<IReadOnlyList<QuotationLookupInfo>> FindQuotationsAsync(
         string quotationNumber,
         CancellationToken cancellationToken)
     {
         var currentFy = GetCurrentFinancialYear();
         var (rawNum, paddedNum) = NormalizeQuotationNumber(quotationNumber);
 
+        // Check if user specified a group in the string, e.g. "26-27/TE/NF1/000007"
+        string? userSpecifiedGroup = null;
+        var parts = quotationNumber.Split(['/', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length >= 4)
+        {
+            userSpecifiedGroup = parts[1];
+        }
+
         _logger.LogInformation(
-            "Searching for Quotation numerical number '{PaddedNum}' (Raw: '{RawNum}') in current financial year '{FinancialYear}'",
+            "Searching for Quotation numerical number '{PaddedNum}' (Raw: '{RawNum}', SpecifiedGroup: '{SpecifiedGroup}') in FY '{FinancialYear}'",
             paddedNum,
             rawNum,
+            userSpecifiedGroup ?? "ANY",
             currentFy);
 
+        var candidates = new List<QuotationLookupInfo>();
+        var seenIds = new HashSet<int>();
+
         // Strategy 1: Direct database lookup via selectQtnFieldsOnSearchCriteria (QTNDETAILS)
-        // Matches purely on numerical number (e.g. "000005") and current financial year (e.g. "26-27") without synthetic string formatting.
         try
         {
             const string searchCriteriaUrl = "api/v1/sales/QuotationEntry/selectQtnFieldsOnSearchCriteria";
@@ -902,15 +993,21 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         var authBy = GetIntProperty(item, "authBy", "authorizerId");
                         var isAuth = authBy > 0 || GetBoolProperty(item, "isAuthorise", "isAuthorized");
 
-                        // Strictly ensure the match belongs to the current financial year
                         if (!IsSameFinancialYear(qtnYear, currentFy))
                         {
                             continue;
                         }
 
+                        if (autoId > 0 && !seenIds.Add(autoId))
+                        {
+                            continue;
+                        }
+
+                        var formattedQNumber = $"{qtnYear}/{qtnGrp}/{locCode}/{qtnNum}";
+
                         var initialInfo = new QuotationLookupInfo(
                             autoId,
-                            quotationNumber,
+                            formattedQNumber,
                             qtnYear,
                             qtnGrp,
                             qtnNum,
@@ -926,7 +1023,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         var header = await TryFetchQuotationHeaderAsync(initialInfo, cancellationToken);
                         if (header is not null)
                         {
-                            return initialInfo with
+                            candidates.Add(initialInfo with
                             {
                                 CustomerCode = !string.IsNullOrWhiteSpace(header.CustomerCode) ? header.CustomerCode : initialInfo.CustomerCode,
                                 CustomerName = header.CustomerName ?? string.Empty,
@@ -936,10 +1033,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
                                 QtnStatus = header.QtnStatus ?? string.Empty,
                                 IsAuthorized = header.IsAuthorized || initialInfo.IsAuthorized,
                                 QuotationDate = header.QuotationDate,
-                            };
+                            });
                         }
-
-                        return initialInfo;
+                        else
+                        {
+                            candidates.Add(initialInfo);
+                        }
                     }
                 }
             }
@@ -997,9 +1096,14 @@ public sealed class QuotationToSoService : IQuotationToSoService
                     var sCode = GetStringProperty(item, "siteCode");
                     var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD");
                     var isAuth = GetBoolProperty(item, "isAuthorized", "isAuthorise");
+                    var status = GetStringProperty(item, "status", "qtnStatus") ?? string.Empty;
 
-                    // Strictly ensure the match belongs to the current financial year
                     if (!IsSameFinancialYear(qYear, currentFy))
+                    {
+                        continue;
+                    }
+
+                    if (qId > 0 && !seenIds.Add(qId))
                     {
                         continue;
                     }
@@ -1014,14 +1118,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                          || qNumber.EndsWith("-" + rawNum, StringComparison.OrdinalIgnoreCase)
                          || qNumber.EndsWith(paddedNum, StringComparison.OrdinalIgnoreCase)))
                     {
-                        _logger.LogInformation(
-                            "Found Quotation {QuotationNumber} (Id: {QuotationId}, Customer: {CustomerCode}, Site: {SiteCode}) via quotationEntryList",
-                            qNumber,
-                            qId,
-                            cCode,
-                            sCode);
-
-                        return new QuotationLookupInfo(
+                        var info = new QuotationLookupInfo(
                             qId,
                             qNumber,
                             qYear ?? currentFy,
@@ -1031,9 +1128,29 @@ public sealed class QuotationToSoService : IQuotationToSoService
                             sCode ?? string.Empty,
                             cCode ?? string.Empty,
                             string.Empty,
-                            string.Empty,
+                            status,
                             isAuth,
                             null);
+
+                        var header = await TryFetchQuotationHeaderAsync(info, cancellationToken);
+                        if (header is not null)
+                        {
+                            candidates.Add(info with
+                            {
+                                CustomerCode = !string.IsNullOrWhiteSpace(header.CustomerCode) ? header.CustomerCode : info.CustomerCode,
+                                CustomerName = header.CustomerName ?? string.Empty,
+                                QuotationSiteCode = !string.IsNullOrWhiteSpace(header.SiteCode) ? header.SiteCode : info.QuotationSiteCode,
+                                QuotationSiteId = header.SiteId > 0 ? header.SiteId : info.QuotationSiteId,
+                                QtnGroup = !string.IsNullOrWhiteSpace(header.Group) ? header.Group : info.QtnGroup,
+                                QtnStatus = !string.IsNullOrWhiteSpace(header.QtnStatus) ? header.QtnStatus : status,
+                                IsAuthorized = header.IsAuthorized || info.IsAuthorized,
+                                QuotationDate = header.QuotationDate,
+                            });
+                        }
+                        else
+                        {
+                            candidates.Add(info);
+                        }
                     }
                 }
             }
@@ -1043,7 +1160,13 @@ public sealed class QuotationToSoService : IQuotationToSoService
             _logger.LogWarning(ex, "Failed to query quotationEntryList for {QuotationNumber}", quotationNumber);
         }
 
-        return null;
+        // Sort candidates:
+        // 1. If user specified group, place matching group first
+        // 2. Open quotations (not 'R' and not 'C') before closed/converted ones
+        return candidates
+            .OrderByDescending(c => !string.IsNullOrWhiteSpace(userSpecifiedGroup) && string.Equals(c.QtnGroup, userSpecifiedGroup, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(c => !string.Equals(c.QtnStatus, "R", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.QtnStatus, "C", StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     private string GetCurrentFinancialYear()

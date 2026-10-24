@@ -52,23 +52,33 @@ public static class QuotationToSoPayloadBuilder
 
         var effectiveSoGroup = !string.IsNullOrWhiteSpace(soGroup) ? soGroup : "SW";
 
-        var custPoNo = GetString(qtnHeader, "customerPONumber") ?? GetString(qtnHeader, "poNumber") ?? GetString(qtnHeader, "customerPoNo") ?? string.Empty;
-        var custLoiNo = GetString(qtnHeader, "customerLOINumber") ?? GetString(qtnHeader, "loiNumber") ?? string.Empty;
-        var effectiveLoiNo = !string.IsNullOrWhiteSpace(custLoiNo)
-            ? custLoiNo
-            : (!string.IsNullOrWhiteSpace(custPoNo) ? custPoNo : $"LOI/{summary.QtnNum}");
+        var siteId = summary.QuotationSiteId > 0
+            ? summary.QuotationSiteId
+            : (GetInt(qtnHeader, "siteId") > 0 ? GetInt(qtnHeader, "siteId") : (GetInt(qtnHeader, "locationId") > 0 ? GetInt(qtnHeader, "locationId") : 1));
+        var siteCode = !string.IsNullOrWhiteSpace(summary.QuotationSiteCode)
+            ? summary.QuotationSiteCode
+            : (GetString(qtnHeader, "siteCode") ?? GetString(qtnHeader, "locationCode") ?? "NF1");
 
-        // SalesOrderDetails section
+        var randomLoiNo = $"LOI-{Random.Shared.Next(100000, 999999)}";
+
+        var rawQtnDate = summary.QuotationDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            ?? GetString(qtnHeader, "quotationDate")
+            ?? GetString(qtnHeader, "qtnDate");
+        var qtnDateStr = (!string.IsNullOrWhiteSpace(rawQtnDate) && !rawQtnDate.StartsWith("0001-01-01", StringComparison.Ordinal))
+            ? rawQtnDate
+            : formattedOrderDate;
+
+        // SalesOrderDetails section - only mandatory fields with red * in ERP UI
         var salesOrderDetails = new JsonObject
         {
             ["orderId"] = 0,
-            ["customerPONumber"] = custPoNo,
-            ["customerPODate"] = !string.IsNullOrWhiteSpace(custPoNo) ? formattedOrderDate : null,
+            ["customerPONumber"] = string.Empty,
+            ["customerPODate"] = null,
             ["quotationId"] = summary.QuotationId,
             ["quotationYear"] = summary.QtnYear,
             ["quotationGroup"] = summary.QtnGroup,
             ["quotationNumber"] = summary.QtnNum,
-            ["quotationDate"] = summary.QuotationDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["quotationDate"] = qtnDateStr,
             ["customerCode"] = customerCode,
             ["customerName"] = customerName,
             ["salesManCode"] = salesmanCode,
@@ -87,8 +97,8 @@ public static class QuotationToSoPayloadBuilder
             ["amendSrNo"] = 0,
             ["ioYear"] = summary.QtnYear,
             ["ioGroup"] = effectiveSoGroup,
-            ["ioSiteId"] = summary.QuotationSiteId,
-            ["ioSiteCode"] = summary.QuotationSiteCode,
+            ["ioSiteId"] = siteId,
+            ["ioSiteCode"] = siteCode,
             ["ioDate"] = formattedOrderDate,
             ["custType"] = "CU",
             ["lcDetail"] = "F",
@@ -98,6 +108,8 @@ public static class QuotationToSoPayloadBuilder
             ["agentCode"] = agentCode,
             ["salesOrderRefNo"] = string.Empty,
             ["buyerCode"] = 0,
+            ["soDeliveryDate"] = formattedOrderDate,
+            ["sodeliveryDate"] = formattedOrderDate,
             ["currencyCode"] = currencyCode,
             ["bookCode"] = bookCode,
             ["ioNumber"] = string.Empty,
@@ -105,8 +117,8 @@ public static class QuotationToSoPayloadBuilder
             ["isFreeSupply"] = false,
             ["isReturnable"] = false,
             ["isRoadPermitReceived"] = false,
-            // LOI Strategy: Fulfills "Either PO or LOI is required" rule without colliding with duplicate PO checks.
-            ["customerLOINumber"] = effectiveLoiNo,
+            // LOI Strategy: Fulfills "Either PO or LOI is required" rule with a random LOI number and current date
+            ["customerLOINumber"] = randomLoiNo,
             ["customerLOIDate"] = formattedOrderDate,
             ["isInterBranchTransfer"] = false,
             ["customerPOId"] = 0,
@@ -123,15 +135,16 @@ public static class QuotationToSoPayloadBuilder
             ["loginUser"] = 1,
         };
 
-        // Root payload
+        // Root payload: Populates only mandatory details (salesOrderDetails, modelDetails, deliveryDetails, rateStructureDetails)
+        // Skips all optional non-mandatory collections (termDetails, paymentDetails, textDetails, notes, specs, etc.)
         var payload = new JsonObject
         {
             ["authorizationRequired"] = "Y",
             ["autoNumberRequired"] = "Y",
             ["siteRequired"] = "Y",
-            ["fromLocationId"] = summary.QuotationSiteId,
-            ["fromLocationCode"] = summary.QuotationSiteCode,
-            ["fromLocationName"] = summary.QuotationSiteCode,
+            ["fromLocationId"] = siteId,
+            ["fromLocationCode"] = siteCode,
+            ["fromLocationName"] = siteCode,
             ["companyId"] = companyId,
             ["companyCode"] = companyCode,
             ["domesticCurrencyCode"] = domesticCurrency,
@@ -140,48 +153,54 @@ public static class QuotationToSoPayloadBuilder
             ["amdSrNo"] = 0,
             ["userId"] = 1,
             ["loginUser"] = 1,
-            ["msctechspecifications"] = true,
+            ["msctechspecifications"] = false,
             ["salesOrderDetails"] = salesOrderDetails,
-            ["modelDetails"] = CopyArrayProperty(qtnData, "modelDetails"),
+            ["modelDetails"] = BuildModelDetails(qtnData, orderDate),
             ["discountDetails"] = CopyArrayProperty(qtnData, "discountDetails"),
             ["rateStructureDetails"] = CopyArrayProperty(qtnData, "rateStructureDetails"),
             ["deliveryDetails"] = BuildDeliveryDetails(qtnData, orderDate),
-            ["paymentDetails"] = CopyArrayProperty(qtnData, "paymentDetails"),
-            ["termDetails"] = CopyArrayProperty(qtnData, "termDetails"),
+            ["paymentDetails"] = new JsonArray(),
+            ["termDetails"] = new JsonArray(),
             ["specificationDetails"] = new JsonArray(),
             ["optionalItemDetails"] = new JsonArray(),
-            ["textDetails"] = BuildTextDetails(qtnData),
-            ["standardTerms"] = CopyArrayProperty(qtnData, "standardTerms"),
+            ["textDetails"] = new JsonArray(),
+            ["standardTerms"] = new JsonArray(),
             ["historyDetails"] = new JsonArray(),
             ["addOnDetails"] = new JsonArray(),
-            ["subItemDetails"] = CopyArrayProperty(qtnData, "subItemDetails"),
-            ["noteDetails"] = CopyArrayProperty(qtnData, "noteDetails"),
+            ["subItemDetails"] = new JsonArray(),
+            ["noteDetails"] = new JsonArray(),
             ["projectLotDetails"] = new JsonArray(),
-            ["equipmentAttributeDetails"] = CopyArrayProperty(qtnData, "equipmentAttributeDetails"),
+            ["equipmentAttributeDetails"] = new JsonArray(),
             ["deletedSalesItemsDetails"] = new JsonArray(),
-            ["technicalspec"] = BuildTechnicalSpec(qtnData),
-            ["agentcommisiondata"] = CopyArrayProperty(qtnData, "agentcommisiondata"),
+            ["technicalspec"] = new JsonArray(),
+            ["agentcommisiondata"] = new JsonArray(),
         };
 
         return payload;
     }
 
-    private static JsonArray BuildTechnicalSpec(JsonElement qtnData)
+    private static JsonArray BuildModelDetails(JsonElement qtnData, DateTime orderDate)
     {
-        var result = new JsonArray();
-        if (qtnData.TryGetProperty("technicalspec", out var specArray) && specArray.ValueKind == JsonValueKind.Array)
+        var formattedDate = orderDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        if (qtnData.TryGetProperty("modelDetails", out var modelArray) && modelArray.ValueKind == JsonValueKind.Array)
         {
-            foreach (var elem in specArray.EnumerateArray())
+            var arr = JsonNode.Parse(modelArray.GetRawText())?.AsArray() ?? new JsonArray();
+            foreach (var node in arr)
             {
-                var node = JsonNode.Parse(elem.GetRawText());
                 if (node is JsonObject obj)
                 {
-                    obj["xtstrantype"] = "OITEM";
-                    result.Add(obj);
+                    obj["docType"] = "O";
+
+                    EnsureValidDate(obj, "costdate", formattedDate);
+                    EnsureValidDate(obj, "amendmentDate", formattedDate);
+                    EnsureValidDate(obj, "amendmentAuthDate", formattedDate);
                 }
             }
+            return arr;
         }
-        return result;
+
+        return new JsonArray();
     }
 
     private static JsonArray BuildDeliveryDetails(JsonElement qtnData, DateTime orderDate)
@@ -199,15 +218,11 @@ public static class QuotationToSoPayloadBuilder
                     {
                         obj["shipmentCode"] = "CADD";
                     }
-                    if (string.IsNullOrWhiteSpace(obj["expectedInstallationDate"]?.GetValue<string>()))
-                    {
-                        var delDate = obj["deliveryDate"]?.GetValue<string>();
-                        obj["expectedInstallationDate"] = !string.IsNullOrWhiteSpace(delDate) ? delDate : formattedDelDate;
-                    }
-                    if (string.IsNullOrWhiteSpace(obj["deliveryDate"]?.GetValue<string>()))
-                    {
-                        obj["deliveryDate"] = formattedDelDate;
-                    }
+                    EnsureValidDate(obj, "deliveryDate", formattedDelDate);
+                    EnsureValidDate(obj, "expectedInstallationDate", formattedDelDate);
+                    EnsureValidDate(obj, "commitedDelDate", formattedDelDate);
+                    EnsureValidDate(obj, "amendDate", formattedDelDate);
+                    EnsureValidDate(obj, "amendAuthDate", formattedDelDate);
                 }
             }
             return arr;
@@ -235,14 +250,14 @@ public static class QuotationToSoPayloadBuilder
                     ["deliveryDate"] = formattedDelDate,
                     ["expectedInstallationDate"] = formattedDelDate,
                     ["amendSrNo"] = 0,
-                    ["commitedDelDate"] = null,
+                    ["commitedDelDate"] = formattedDelDate,
                     ["shipmentCode"] = "CADD",
                     ["amendYear"] = string.Empty,
                     ["amendGroup"] = string.Empty,
                     ["amendSiteId"] = 0,
                     ["amendNumber"] = string.Empty,
-                    ["amendDate"] = null,
-                    ["amendAuthDate"] = null,
+                    ["amendDate"] = formattedDelDate,
+                    ["amendAuthDate"] = formattedDelDate,
                     ["oafQty"] = 0,
                     ["sjoQty"] = 0,
                     ["lineId"] = lineId++,
@@ -254,24 +269,29 @@ public static class QuotationToSoPayloadBuilder
         return result;
     }
 
-    private static JsonArray BuildTextDetails(JsonElement qtnData)
+    private static void EnsureValidDate(JsonObject obj, string propName, string fallbackDate)
     {
-        var result = new JsonArray();
-        if (qtnData.TryGetProperty("quotationTextDetails", out var textArr) && textArr.ValueKind == JsonValueKind.Array)
+        try
         {
-            foreach (var t in textArr.EnumerateArray())
+            if (!obj.ContainsKey(propName) || obj[propName] == null)
             {
-                result.Add(new JsonObject
-                {
-                    ["termDocType"] = "SO",
-                    ["termId"] = GetString(t, "termId") ?? string.Empty,
-                    ["remark"] = GetString(t, "remark") ?? string.Empty,
-                    ["termLineId"] = GetInt(t, "termLineId"),
-                    ["termAmendSrNo"] = 0,
-                });
+                obj[propName] = fallbackDate;
+                return;
+            }
+
+            var val = obj[propName]?.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(val)
+                || val.StartsWith("0001-01-01", StringComparison.Ordinal)
+                || val.StartsWith("1900-01-01", StringComparison.Ordinal)
+                || val.Equals("null", StringComparison.OrdinalIgnoreCase))
+            {
+                obj[propName] = fallbackDate;
             }
         }
-        return result;
+        catch
+        {
+            obj[propName] = fallbackDate;
+        }
     }
 
     private static JsonArray CopyArrayProperty(JsonElement root, string propName)
