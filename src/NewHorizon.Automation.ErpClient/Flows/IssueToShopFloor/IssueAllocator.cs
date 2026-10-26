@@ -68,7 +68,8 @@ internal static class IssueAllocator
                     item.SjoId,
                     item.WoId,
                     item.RandomNumber,
-                    row.InwardNo));
+                    row.InwardNo,
+                    item.RequiredQuantity));
             }
 
             if (remaining > 0)

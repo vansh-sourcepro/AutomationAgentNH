@@ -83,9 +83,16 @@ internal sealed class DocumentNumberSelection
             .DistinctBy(sjo => sjo.Id)
             .ToList();
 
-    private static bool IsRunningNumber(string value) => value.Length > 0 && value.All(char.IsAsciiDigit);
+    private static bool IsRunningNumber(string value) =>
+        value.Length > 0 && value.Length <= 10 && value.All(char.IsLetterOrDigit);
 
-    private static string Pad(string number) => number.Trim().PadLeft(RunningNumberWidth, '0');
+    private static string Pad(string number)
+    {
+        var trimmed = number.Trim();
+        return trimmed.All(char.IsAsciiDigit)
+            ? trimmed.PadLeft(RunningNumberWidth, '0')
+            : trimmed;
+    }
 
     private static bool Same(string? left, string? right) =>
         string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);

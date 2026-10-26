@@ -8,6 +8,7 @@ public sealed class DocumentNumberSelectionTests
     private static readonly SjoHeader ThisYear = Sjo(1, "26-27", "SJ", "NF1", "000123");
     private static readonly SjoHeader LastYear = Sjo(2, "25-26", "SJ", "NF1", "000123");
     private static readonly SjoHeader Similar = Sjo(3, "26-27", "SJ", "NF1", "001230");
+    private static readonly SjoHeader AlphanumericSjo = Sjo(4, "26-27", "SJ", "CBP", "S26037");
 
     [Fact]
     public void A_full_number_matches_exactly_one_sjo()
@@ -35,12 +36,35 @@ public sealed class DocumentNumberSelectionTests
         Parse("0123").Match([Similar]).Should().BeEmpty();
     }
 
+    [Fact]
+    public void Full_and_bare_alphanumeric_sjo_numbers_are_supported_without_zero_padding()
+    {
+        var fullSelection = Parse("26-27/SJ/CBP/S26037");
+        fullSelection.IsFullNumber.Should().BeTrue();
+        fullSelection.Number.Should().Be("S26037");
+        fullSelection.Match([AlphanumericSjo]).Should().ContainSingle().Which.Id.Should().Be(4);
+
+        var bareSelection = Parse("S26037");
+        bareSelection.IsFullNumber.Should().BeFalse();
+        bareSelection.Number.Should().Be("S26037");
+        bareSelection.Match([AlphanumericSjo]).Should().ContainSingle().Which.Id.Should().Be(4);
+    }
+
+    [Fact]
+    public void Numeric_running_numbers_are_padded_to_six_digits()
+    {
+        Parse("26-27/SJ/NF1/123").Number.Should().Be("000123");
+        Parse("123").Number.Should().Be("000123");
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("ABC")]
     [InlineData("26-27/SJ/000123")]
-    [InlineData("26-27/SJ/NF1/12A")]
+    [InlineData("26-27/SJ/NF1/12#A")]
+    [InlineData("26-27/SJ/NF1/12345678901")]
+    [InlineData("12345678901")]
+    [InlineData("26-27//NF1/123")]
     public void Rejects_text_that_is_not_an_sjo_number(string input)
     {
         DocumentNumberSelection.TryParse(input, out var selection, out var error).Should().BeFalse();

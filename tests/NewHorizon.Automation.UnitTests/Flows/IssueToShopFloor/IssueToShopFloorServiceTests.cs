@@ -103,6 +103,58 @@ public sealed class IssueToShopFloorServiceTests
     }
 
     [Fact]
+    public async Task Multi_level_assembly_with_work_orders_on_subassembly_passes_work_order_check()
+    {
+        var erp = SjoIssueErp.Ready();
+        erp.Route("GetSJOItemCode4Allocation", body =>
+        {
+            var flag = body?["flag"]?.GetValue<string>();
+            return flag == "V"
+                ? new JsonArray(new JsonObject { ["itemCode"] = "FG-1", ["randomno"] = 1 })
+                : new JsonArray(
+                    new JsonObject { ["itemCode"] = "FG-1", ["randomno"] = 1 },
+                    new JsonObject { ["itemCode"] = "SUB-ASSY-1", ["randomno"] = 2 });
+        });
+
+        erp.RouteByPath("GetWODtl4AllocationWoCreation", path =>
+            path.EndsWith("/1", StringComparison.Ordinal)
+                ? new JsonArray()
+                : new JsonArray(new JsonObject { ["wonumber"] = "26-27/WO/NF1/000010", ["wostatus"] = "OPEN" }));
+
+        var result = await Build(erp).ConvertAsync(IssueSource.Sjo, "26-27/SJ/NF1/000123", dryRun: true, CancellationToken.None);
+
+        result.Reason.Should().BeNull();
+        result.Ready.Should().BeTrue();
+        result.Checks.Should().Contain(check => check.Name == "WorkOrder" && check.Passed && check.Detail!.Contains("000010"));
+    }
+
+    [Fact]
+    public async Task Multi_level_assembly_with_only_closed_work_orders_on_subassemblies_is_refused()
+    {
+        var erp = SjoIssueErp.Ready();
+        erp.Route("GetSJOItemCode4Allocation", body =>
+        {
+            var flag = body?["flag"]?.GetValue<string>();
+            return flag == "V"
+                ? new JsonArray(new JsonObject { ["itemCode"] = "FG-1", ["randomno"] = 1 })
+                : new JsonArray(
+                    new JsonObject { ["itemCode"] = "FG-1", ["randomno"] = 1 },
+                    new JsonObject { ["itemCode"] = "SUB-ASSY-1", ["randomno"] = 2 });
+        });
+
+        erp.RouteByPath("GetWODtl4AllocationWoCreation", path =>
+            path.EndsWith("/1", StringComparison.Ordinal)
+                ? new JsonArray()
+                : new JsonArray(new JsonObject { ["wonumber"] = "26-27/WO/NF1/000010", ["wostatus"] = "CLOSE" }));
+
+        ShouldRefuse(
+            await Build(erp).ConvertAsync(IssueSource.Sjo, "26-27/SJ/NF1/000123", false, CancellationToken.None),
+            erp,
+            "WorkOrder",
+            "no open Work Order");
+    }
+
+    [Fact]
     public async Task No_allocated_warehouse_is_refused_as_allocation_not_done()
     {
         var erp = SjoIssueErp.Ready();
@@ -422,6 +474,7 @@ public sealed class IssueToShopFloorServiceTests
 internal static class SjoIssueErp
 {
     public static FakeErp Ready() => new FakeErp()
+        .Route("getIssueOfItmSite", new JsonArray(new JsonObject { ["site"] = "NF1", ["siteName"] = "Plant 1", ["siteID"] = 1 }))
         .Route("sjoentryList", new JsonArray(IssueToShopFloorServiceTests.SjoRow(5341, "26-27")))
         .Route("GetSJOItemCode4Allocation", new JsonArray(new JsonObject { ["itemCode"] = "FG-1", ["randomno"] = 7 }))
         .Route("GetWODtl4AllocationWoCreation", new JsonArray(new JsonObject { ["wonumber"] = "26-27/WO/NF1/000010", ["wostatus"] = "OPEN" }))

@@ -16,6 +16,19 @@ public sealed class IssueAllocatorTests
         allocation.Shortages.Should().BeEmpty();
         allocation.Lines.Select(line => (line.WarehouseCode, line.Quantity))
             .Should().Equal(("WH1", 12m), ("WH2", 10m));
+        allocation.Lines.Should().AllSatisfy(line => line.RequiredQuantity.Should().Be(22m));
+    }
+
+    [Fact]
+    public void Sets_required_quantity_on_each_allocated_line()
+    {
+        var item = Item("RM-100", required: 22);
+
+        var allocation = IssueAllocator.Allocate([(item, [Stock(1, "WH1", 12), Stock(2, "WH2", 200)])]);
+
+        allocation.Lines.Should().HaveCount(2);
+        allocation.Lines[0].RequiredQuantity.Should().Be(22m);
+        allocation.Lines[1].RequiredQuantity.Should().Be(22m);
     }
 
     [Fact]
@@ -24,6 +37,7 @@ public sealed class IssueAllocatorTests
         var allocation = IssueAllocator.Allocate([(Item("RM-100", required: 5), [Stock(1, "WH1", 12), Stock(2, "WH2", 200)])]);
 
         allocation.Lines.Should().ContainSingle().Which.Quantity.Should().Be(5m);
+        allocation.Lines.Single().RequiredQuantity.Should().Be(5m);
     }
 
     [Fact]

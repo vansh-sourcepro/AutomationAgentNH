@@ -62,7 +62,8 @@ public sealed record IssueLine(
     long SjoId,
     long WoId,
     int RandomNumber,
-    string InwardNo = "");
+    string InwardNo = "",
+    decimal? RequiredQuantity = null);
 
 /// <summary>An item the allocated warehouses cannot cover in full.</summary>
 public sealed record IssueShortage(string ItemCode, int RandomNumber, decimal Required, decimal Available);

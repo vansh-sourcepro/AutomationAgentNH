@@ -162,7 +162,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
                 return await RefuseAndTrackAsync(run.Refuse("DocumentNumber", parseError!));
             }
 
-            if (source == IssueSource.Sjo && _options.Sites.Count == 0)
+            if (source == IssueSource.Sjo && _options.Sites.Count == 0 && (!selection!.IsFullNumber || string.IsNullOrWhiteSpace(selection.SiteCode)))
             {
                 return await RefuseAndTrackAsync(run.Refuse(
                     "Configuration",
@@ -198,7 +198,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
             // 2. Where the issue is numbered and raised.
             var today = _clock.LocalDate;
-            var documentControl = await GetDocumentControlAsync(today, cancellationToken);
+            var documentControl = await GetDocumentControlAsync(today, document!.SiteId, cancellationToken);
             if (documentControl.Error is not null)
             {
                 return await RefuseAndTrackAsync(run.Refuse("IssueNumbering", documentControl.Error));
@@ -343,7 +343,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
                 numbering.AuthorisationRequired,
                 numbering.AutoNumberRequired,
                 numbering.SiteRequired,
-                _options.LocationId,
+                numbering.LocationId,
                 userId,
                 _options.FinFlag,
                 _options.CurrencyCode,
@@ -424,7 +424,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
                 return Array.Empty<string>();
             }
 
-            var candidates = await FindSjosAsync(string.Empty, cancellationToken);
+            var candidates = await FindSjosAsync(string.Empty, _options.Sites, cancellationToken);
             return candidates
                 .Where(sjo => sjo.Status.Equals(_options.AuthorisedStatus, StringComparison.OrdinalIgnoreCase))
                 .Select(sjo => sjo.FullNumber)
@@ -445,10 +445,27 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
         DocumentNumberSelection selection,
         CancellationToken cancellationToken)
     {
-        var candidates = selection.Match(await FindSjosAsync(selection.Number, cancellationToken));
+        var sites = _options.Sites;
+        if (selection.IsFullNumber && !string.IsNullOrWhiteSpace(selection.SiteCode))
+        {
+            try
+            {
+                var siteId = await FindIssueSiteIdAsync(IssueSource.Sjo, selection, cancellationToken);
+                if (siteId is not null && !sites.Contains(siteId.Value))
+                {
+                    sites = [.. sites, siteId.Value];
+                }
+            }
+            catch (ErpBusinessException ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve site ID for SJO site code '{SiteCode}'.", selection.SiteCode);
+            }
+        }
+
+        var candidates = selection.Match(await FindSjosAsync(selection.Number, sites, cancellationToken));
         if (candidates.Count == 0)
         {
-            return (null, run.Refuse("SjoFound", $"No SJO '{selection.Input}' was found at sites {string.Join(", ", _options.Sites)}."));
+            return (null, run.Refuse("SjoFound", $"No SJO '{selection.Input}' was found at sites {string.Join(", ", sites)}."));
         }
 
         if (candidates.Count > 1)
@@ -488,7 +505,30 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
         run.Pass("Cbom", "The CBOM is generated.");
 
-        var workOrders = await GetWorkOrdersAsync(sjo.Id, cbomRandomNumber.Value, cancellationToken);
+        var workOrders = (await GetWorkOrdersAsync(sjo.Id, cbomRandomNumber.Value, cancellationToken)).ToList();
+        if (workOrders.Count == 0)
+        {
+            // For multi-level assemblies, work orders are created on sub-assemblies rather than the top-level parent.
+            var candidateRandomNumbers = await FindCbomRandomNumbersAsync(sjo.Id, cancellationToken);
+            foreach (var candidateRandomNumber in candidateRandomNumbers)
+            {
+                if (candidateRandomNumber == cbomRandomNumber.Value)
+                {
+                    continue;
+                }
+
+                var candidateWorkOrders = await GetWorkOrdersAsync(sjo.Id, candidateRandomNumber, cancellationToken);
+                if (candidateWorkOrders.Count > 0)
+                {
+                    workOrders.AddRange(candidateWorkOrders);
+                    if (candidateWorkOrders.Any(wo => wo.Status.Equals("OPEN", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
         if (workOrders.Count == 0)
         {
             return (null, run.Refuse("WorkOrder", $"No Work Order exists for SJO {sjo.FullNumber}. Create the Work Order first."));
@@ -504,7 +544,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
         run.Pass("WorkOrder", $"Open Work Order(s): {string.Join(", ", openWorkOrders.Select(wo => wo.Number))}.");
 
-        return (new IssueDocument(sjo.Id, sjo.FullNumber, sjo), null);
+        return (new IssueDocument(sjo.Id, sjo.FullNumber, sjo.SiteId, sjo.SiteCode, sjo), null);
     }
 
     /// <summary>
@@ -552,7 +592,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
         run.Pass("DocumentFound", $"{noun} {fullNumber} (id {documentId}) is open, authorised and has allocated stock to issue.");
 
-        return (new IssueDocument(documentId.Value, fullNumber, Sjo: null), null);
+        return (new IssueDocument(documentId.Value, fullNumber, siteId.Value, selection.SiteCode!, Sjo: null), null);
     }
 
     // ---- ERP reads ------------------------------------------------------------------------------
@@ -574,9 +614,12 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
     /// is the one the ERP's own SJO screen uses, and it works.
     /// </para>
     /// </remarks>
-    private async Task<IReadOnlyList<SjoHeader>> FindSjosAsync(string runningNumber, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<SjoHeader>> FindSjosAsync(
+        string runningNumber,
+        IReadOnlyList<int> sites,
+        CancellationToken cancellationToken)
     {
-        var endpoint = Endpoints.SjoList(_options.Sites);
+        var endpoint = Endpoints.SjoList(sites);
         var candidates = new List<SjoHeader>();
         var seen = 0;
         int? totalRows = null;
@@ -653,6 +696,34 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
         return row is null ? null : row.Int("randomno");
     }
 
+    /// <summary>
+    /// Lists the CBOM items' random numbers for multi-level assemblies where the top-level SJO item
+    /// has no direct Work Order.
+    /// </summary>
+    private async Task<IReadOnlyList<int>> FindCbomRandomNumbersAsync(long sjoId, CancellationToken cancellationToken)
+    {
+        var body = new JsonObject
+        {
+            ["sjoid"] = sjoId,
+            ["itemcode"] = string.Empty,
+            ["flag"] = "L",
+            ["intRandomNum"] = 0,
+            ["pageNumber"] = 1,
+            ["pageSize"] = 100,
+            ["sortField"] = string.Empty,
+            ["sortDirection"] = string.Empty,
+            ["searchValue"] = string.Empty,
+        };
+
+        var rows = (await PostJsonArrayAsync(Endpoints.CbomItem, body, cancellationToken)).Objects().ToList();
+
+        return rows
+            .Select(row => row.Int("randomno"))
+            .Where(r => r > 0)
+            .Distinct()
+            .ToList();
+    }
+
     private async Task<IReadOnlyList<(string Number, string Status)>> GetWorkOrdersAsync(
         long sjoId,
         int randomNumber,
@@ -668,6 +739,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
     private async Task<(IssueNumbering? Defaults, string? Error)> GetDocumentControlAsync(
         DateOnly issueDate,
+        int locationId,
         CancellationToken cancellationToken)
     {
         var financialYear = FinancialYears.For(issueDate);
@@ -675,7 +747,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
             financialYear,
             IssuePayloadBuilder.DocType,
             IssuePayloadBuilder.DocSubType,
-            _options.LocationId);
+            locationId);
 
         JsonArray rows;
         try
@@ -684,7 +756,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
         }
         catch (ErpBusinessException ex)
         {
-            return (null, $"Document Control has no Issue to Shop Floor numbering for {financialYear} at location {_options.LocationId}: {ex.LaymanMessage}");
+            return (null, $"Document Control has no Issue to Shop Floor numbering for {financialYear} at location {locationId}: {ex.LaymanMessage}");
         }
 
         var row = rows.Objects().FirstOrDefault(r => r.String("isDefault").Equals("Y", StringComparison.OrdinalIgnoreCase))
@@ -692,13 +764,13 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
         if (row is null)
         {
-            return (null, $"Document Control has no Issue to Shop Floor (IS/NI) numbering for {financialYear} at location {_options.LocationId}.");
+            return (null, $"Document Control has no Issue to Shop Floor (IS/NI) numbering for {financialYear} at location {locationId}.");
         }
 
         var numbering = new IssueNumbering(
             financialYear,
             row.String("groupCode"),
-            row.Int("locationId", _options.LocationId),
+            row.Int("locationId", locationId),
             row.String("locationCode"),
             YesNo(row, "isLocationRequired"),
             YesNo(row, "isAutoNumberGenerated"),
@@ -1044,7 +1116,7 @@ internal sealed class IssueToShopFloorService : IIssueToShopFloorService
 
     /// <summary>The checks of one run, and the result they add up to.</summary>
     /// <summary>The document an issue is raised against. <see cref="Sjo"/> is set on the SJO-wise tab only.</summary>
-    private sealed record IssueDocument(long Id, string FullNumber, SjoHeader? Sjo);
+    private sealed record IssueDocument(long Id, string FullNumber, int SiteId, string SiteCode, SjoHeader? Sjo);
 
     private sealed class Run(IssueSource source, string documentNumber, bool dryRun)
     {
