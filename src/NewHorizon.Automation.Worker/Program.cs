@@ -14,6 +14,7 @@ using NewHorizon.Automation.Worker.Configuration;
 using NewHorizon.Automation.Worker.Diagnostics;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IndentToPo;
+using NewHorizon.Automation.Worker.Flows.QuotationToSo;
 using NewHorizon.Automation.Worker.Flows.QuotationToSo.Endpoints;
 using NewHorizon.Automation.Worker.Logging;
 using NewHorizon.Automation.Worker.Services;
@@ -195,6 +196,7 @@ try
 
             // Each automation flow's own timers, under the same usable-database gate.
             builder.Services.AddIndentToPoScheduler();
+            builder.Services.AddQuotationToSoScheduler();
         }
     }
     else

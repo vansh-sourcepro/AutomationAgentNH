@@ -10,6 +10,9 @@ public sealed record ConvertQuotationsRequest
     /// <summary>Specific quotation number to convert (e.g. "26-QT-000001", "QTN/26/000001", or "000001").</summary>
     public string? QuotationNumber { get; init; }
 
+    /// <summary>Multiple quotation numbers separated by commas (e.g. "1, 2, 3" or "000001, 000002").</summary>
+    public string? QuotationNumbers { get; init; }
+
     /// <summary>Customer code whose authorised quotations will be converted (if converting by customer).</summary>
     public string? CustomerCode { get; init; }
 

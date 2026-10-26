@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NewHorizon.Automation.Domain.Configuration;
 using NewHorizon.Automation.Domain.Errors;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.QuotationToSo;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.Domain.Logging;
 
@@ -40,6 +41,16 @@ public sealed class AutomationDbContext : DbContext
 
     /// <summary>One indent type's automation settings — run mode, daily schedule, target sites. Three rows.</summary>
     public DbSet<IndentPoAutomationConfig> IndentPoAutomationConfigs => Set<IndentPoAutomationConfig>();
+
+    /// <summary>Quotation to Sales Order automation configuration row.</summary>
+    public DbSet<QuotationSoAutomationConfig> QuotationSoAutomationConfigs => Set<QuotationSoAutomationConfig>();
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+        base.OnConfiguring(optionsBuilder);
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

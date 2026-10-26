@@ -92,7 +92,7 @@ public sealed class QuotationToSoPayloadBuilderTests
         // Verify Header Information
         Assert.Equal(1234, soDetails["quotationId"]?.GetValue<int>());
         Assert.Equal("26-27", soDetails["ioYear"]?.GetValue<string>());
-        Assert.Equal("QT", soDetails["ioGroup"]?.GetValue<string>());
+        Assert.Equal("SW", soDetails["ioGroup"]?.GetValue<string>());
         Assert.Equal(1, soDetails["ioSiteId"]?.GetValue<int>());
         Assert.Equal("AHM", soDetails["ioSiteCode"]?.GetValue<string>());
         Assert.Equal("2026-10-19", soDetails["ioDate"]?.GetValue<string>());
