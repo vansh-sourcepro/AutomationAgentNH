@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
+using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Flows.QuotationToSo;
 using NewHorizon.Automation.Domain.Flows.QuotationToSo;
+using NewHorizon.Automation.ErpClient.Flows.QuotationToSo;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.QuotationToSo.Contracts;
 
@@ -43,6 +45,9 @@ public static class SoAutomationEndpoints
     private static async Task<IResult> UpdateConfigAsync(
         UpdateSoAutomationRequest? request,
         IQuotationSoAutomationConfigRepository configs,
+        IQuotationToSoService service,
+        IClock clock,
+        ILogger<QuotationToSoService> logger,
         ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
@@ -85,7 +90,111 @@ public static class SoAutomationEndpoints
         };
 
         var saved = await configs.UpsertAsync(update, ActorOf(user), cancellationToken);
-        return Results.Ok(ToResponse(saved));
+
+        // If the configuration is active and either RunMode is Api, ClearScheduleTime is true, or no ScheduleTime is set,
+        // automatically execute the conversion immediately in the same call so the user does not have to call a separate API.
+        string? createdSoNumber = null;
+        var shouldExecuteImmediately = saved.IsActive
+            && (saved.RunMode == SoAutomationRunMode.Api
+                || request.ClearScheduleTime
+                || (saved.ScheduleTime is null && saved.RunMode != SoAutomationRunMode.Timer));
+
+        if (shouldExecuteImmediately)
+        {
+            logger.LogInformation("Configuration set to immediate API execution (RunMode: {RunMode}). Auto-triggering conversion...", saved.RunMode);
+
+            saved.RecordRunStarted(clock.UtcNow, null);
+            await configs.SaveAsync(saved, cancellationToken);
+
+            var quotationList = saved.QuotationNumbers?
+                .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            try
+            {
+                if (quotationList is { Count: 1 })
+                {
+                    var qtnNo = quotationList[0];
+                    var itemResult = await service.ConvertQuotationByNumberAsync(
+                        qtnNo,
+                        saved.CustomerCode,
+                        saved.SiteCode,
+                        cancellationToken);
+
+                    var status = itemResult.Success ? "Success" : "Failed";
+                    var message = itemResult.Success
+                        ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'."
+                        : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.";
+
+                    createdSoNumber = itemResult.SalesOrderNumber;
+                    saved.RecordRunCompleted(status, message, clock.UtcNow);
+                    await configs.SaveAsync(saved, cancellationToken);
+                }
+                else if (quotationList is { Count: > 1 })
+                {
+                    var succeeded = 0;
+                    var failed = 0;
+                    var soNumbers = new List<string>();
+
+                    foreach (var qtn in quotationList)
+                    {
+                        var item = await service.ConvertQuotationByNumberAsync(
+                            qtn,
+                            saved.CustomerCode,
+                            saved.SiteCode,
+                            cancellationToken);
+
+                        if (item.Success)
+                        {
+                            succeeded++;
+                            if (!string.IsNullOrWhiteSpace(item.SalesOrderNumber))
+                            {
+                                soNumbers.Add(item.SalesOrderNumber);
+                            }
+                        }
+                        else
+                        {
+                            failed++;
+                        }
+                    }
+
+                    var status = failed == 0 ? "Success" : succeeded > 0 ? "PartialSuccess" : "Failed";
+                    var message = $"Processed {quotationList.Count} quotation(s): {succeeded} converted successfully, {failed} failed.";
+                    if (soNumbers.Count > 0)
+                    {
+                        createdSoNumber = string.Join(", ", soNumbers);
+                    }
+
+                    saved.RecordRunCompleted(status, message, clock.UtcNow);
+                    await configs.SaveAsync(saved, cancellationToken);
+                }
+                else
+                {
+                    var sweepResult = await service.ConvertAllEligibleQuotationsAsync(
+                        saved.CustomerCode,
+                        saved.SiteCode,
+                        cancellationToken);
+
+                    var status = sweepResult.Failed == 0 ? "Success" : sweepResult.Succeeded > 0 ? "PartialSuccess" : "Failed";
+                    var message = sweepResult.TotalFound == 0
+                        ? "No eligible open authorised quotations found for conversion."
+                        : $"Processed {sweepResult.TotalFound} quotation(s): {sweepResult.Succeeded} converted successfully, {sweepResult.Failed} failed.";
+
+                    saved.RecordRunCompleted(status, message, clock.UtcNow);
+                    await configs.SaveAsync(saved, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Automatic conversion execution failed during configuration update.");
+                saved.RecordRunCompleted("Failed", ex.Message, clock.UtcNow);
+                await configs.SaveAsync(saved, cancellationToken);
+            }
+        }
+
+        return Results.Ok(ToResponse(saved, createdSoNumber));
     }
 
     private static async Task<IResult> SetEnabledAsync(
@@ -103,7 +212,7 @@ public static class SoAutomationEndpoints
         return Results.Ok(ToResponse(saved));
     }
 
-    public static SoAutomationConfigResponse ToResponse(QuotationSoAutomationConfig config) => new(
+    public static SoAutomationConfigResponse ToResponse(QuotationSoAutomationConfig config, string? salesOrderNumber = null) => new(
         config.IsActive,
         config.RunMode.ToString(),
         config.ScheduleTime,
@@ -116,7 +225,8 @@ public static class SoAutomationEndpoints
         config.LastRunStatus,
         config.LastRunMessage,
         config.UpdatedAtUtc,
-        config.UpdatedBy);
+        config.UpdatedBy,
+        salesOrderNumber);
 
     private static bool TryParseTime(string? value, out TimeOnly? time, out IResult? error)
     {

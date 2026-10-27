@@ -16,7 +16,8 @@ public sealed record SoAutomationConfigResponse(
     string? LastRunStatus,
     string? LastRunMessage,
     DateTimeOffset UpdatedAtUtc,
-    string? UpdatedBy);
+    string? UpdatedBy,
+    string? SalesOrderNumber = null);
 
 /// <summary>
 /// Update payload for Quotation to Sales Order automation configuration.
