@@ -25,8 +25,6 @@ public class DcToInvoiceAutomationConfigDto
 {
     public bool? AutomationEnabled { get; set; }
     public string? AutomationTime { get; set; }
-    
-    public string? DcNumber { get; set; }
     public string? AutomationMode { get; set; }
     public List<string>? DcNumbers { get; set; }
 }

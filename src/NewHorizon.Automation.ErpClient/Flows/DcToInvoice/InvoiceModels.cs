@@ -177,7 +177,9 @@ internal sealed record ErpInvoiceDocControlDefault(
     int LocationId,
     string SiteRequired,
     string AutoNumberRequired,
-    string AuthorisationRequired);
+    string AuthorisationRequired,
+    string DocType = "EX",
+    string DocSubType = "SX");
 
 internal sealed record ErpSalInvDcRow(
     long DcId,

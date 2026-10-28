@@ -122,17 +122,14 @@ public sealed class DcToInvoiceSchedulerService : BackgroundService
 
     private async Task RunMainApiAsync(DcToInvoiceAutomationConfig config, CancellationToken cancellationToken)
     {
-        var requestPayload = new BatchInvoiceCreationRequestDto
-        {
-            DryRun = false
-        };
+        var requestPayload = new BatchInvoiceCreationRequestDto();
 
         if (config.AutomationMode != "TIMER" && config.DcNumbers != null && config.DcNumbers.Count > 0)
         {
             requestPayload = requestPayload with { DcNumbers = config.DcNumbers.Select(x => x.Trim()).ToList() };
         }
 
-        var endpoint = $"http://127.0.0.1:{_options.Host.ManagementApiPort}/api/v1/sales/salesinvoice/CreateInvoicesFromDeliveryChallans";
+        var endpoint = $"http://127.0.0.1:{_options.Host.ManagementApiPort}/api/v1/sales/salesinvoice/CreateInvoiceFromDeliveryChallan";
 
         try
         {

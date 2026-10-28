@@ -402,7 +402,7 @@ public sealed class DcToInvoiceServiceTests
     }
 
     [Fact]
-    public async Task BatchCreateInvoices_DryRun_ReportsWouldCreate()
+    public async Task BatchCreateInvoices_ProcessesAndCreatesInvoice()
     {
         // Arrange
         SetupDefaultRoutes();
@@ -410,16 +410,16 @@ public sealed class DcToInvoiceServiceTests
 
         // Act
         var result = await service.CreateInvoicesFromDeliveryChallansAsync(
-            new BatchInvoiceCreationRequest(CustomerCode: "A001", DryRun: true));
+            new BatchInvoiceCreationRequest(CustomerCode: "A001"));
 
         // Assert
         result.Should().NotBeNull();
         result.Data.TotalDeliveryChallans.Should().Be(1);
-        result.Data.Results[0].Status.Should().Be("WOULD_CREATE");
-        result.Data.CreatedInvoiceCount.Should().Be(0);
+        result.Data.Results[0].Status.Should().Be("SUCCESS");
+        result.Data.CreatedInvoiceCount.Should().Be(1);
 
-        // Verify no save call was dispatched
-        _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
+        // Verify save call was dispatched
+        _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeTrue();
     }
 
     [Fact]
@@ -458,6 +458,30 @@ public sealed class DcToInvoiceServiceTests
         }
         """)!);
 
+        _fakeErp.On("FetchItemDtls", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": {
+                "orderdtlListModel": [
+                    {
+                        "salesItemCode": "ITEM01",
+                        "salesItemName": "Test Item",
+                        "dcQty": 10.0,
+                        "invoiceQty": 10.0,
+                        "ordRateDis": 100.0,
+                        "suom": "NOS",
+                        "iuom": "NOS",
+                        "convFact": 1.0,
+                        "oafId": 1,
+                        "oafDetailLineNo": 1,
+                        "ratestructurecd": null
+                    }
+                ],
+                "ratestructureModel": []
+            }
+        }
+        """)!);
+
         var service = CreateService();
 
         // Act & Assert
@@ -492,6 +516,93 @@ public sealed class DcToInvoiceServiceTests
             .WithMessage("*0 pending items*");
 
         // Verify create endpoint was never called
+        _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateInvoice_WhenDcItemHasZeroDcAutoId_CreatesInvoiceBasedOnDcId_AndPassesZeroRndNo()
+    {
+        // Arrange: ERP returns items where dcautoid / dcRndNo is 0 (standard ERP behavior per TFS 25436)
+        SetupDefaultRoutes();
+        _fakeErp.On("FetchItemDtls", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": {
+                "orderdtlListModel": [
+                    {
+                        "salesItemCode": "0RAP01870203005",
+                        "salesItemName": "VALVE 2 INCH",
+                        "intItmCode": "0RAP01870203005",
+                        "dcQty": 10.0,
+                        "invoiceQty": 10.0,
+                        "ordRateDis": 2500.0,
+                        "dcautoid": 0,
+                        "dcRndNo": null,
+                        "oafId": 10169,
+                        "convFact": 1.0,
+                        "amount": 25000.0,
+                        "amountWithTax": 29500.0
+                    }
+                ],
+                "ratestructureModel": []
+            }
+        }
+        """)!);
+
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
+
+        // Assert: Creation succeeds based on DCId (matching ERP WebApp)
+        result.Should().NotBeNull();
+        result.InvoiceNumber.Should().Be("000045");
+        result.DcId.Should().Be(110530);
+
+        var createRequest = _fakeErp.Requests.FirstOrDefault(r => r.Path.Contains("salesinvoice/create"));
+        createRequest.Should().NotBeNull();
+        var dtInvDtl = createRequest!.Body!["dtInvDtl"] as JsonArray;
+        dtInvDtl.Should().NotBeNull();
+        dtInvDtl![0]!["XIDDCID"]!.ToString().Should().Be("110530");
+        dtInvDtl[0]!["XIDDCRNDNO"]!.ToString().Should().Be("0");
+    }
+
+    [Fact]
+    public async Task CreateInvoice_WhenAllItemsHaveZeroInvoiceQty_ThrowsValidationException_AndNeverCallsCreate()
+    {
+        // Arrange: DC has items, but none have pending quantity to invoice
+        SetupDefaultRoutes();
+        _fakeErp.On("FetchItemDtls", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": {
+                "orderdtlListModel": [
+                    {
+                        "salesItemCode": "0RAP01870203005",
+                        "salesItemName": "VALVE 2 INCH",
+                        "intItmCode": "0RAP01870203005",
+                        "dcQty": 10.0,
+                        "invoiceQty": 0.0,
+                        "maxInvQty": 0.0,
+                        "ordRateDis": 2500.0,
+                        "dcautoid": 0,
+                        "oafId": 10169,
+                        "convFact": 1.0
+                    }
+                ],
+                "ratestructureModel": []
+            }
+        }
+        """)!);
+
+        var service = CreateService();
+
+        // Act & Assert
+        Func<Task> act = async () => await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
+        await act.Should().ThrowAsync<InvoiceValidationException>()
+            .WithMessage("*no items with valid Delivery Challan ID and pending invoice quantity > 0*");
+
+        // Verify create endpoint was strictly NEVER called
         _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
     }
 }

@@ -32,10 +32,27 @@ public sealed partial class DcToInvoiceService
         foreach (var dc in pendingDcs)
         {
             var itemsSummary = new List<PendingDcItemSummary>();
+            string? resolvedRateStru = dc.DcRateStructureCode;
+            if (string.IsNullOrWhiteSpace(resolvedRateStru))
+            {
+                try
+                {
+                    var available = await FetchDcRateStructuresAsync(dc.DcId, dc.DcSite, dc.BillTo, cancellationToken);
+                    if (available.Count > 0)
+                    {
+                        resolvedRateStru = available[0].RateStructureCode;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to resolve rate structure for pending DC {DcId}", dc.DcId);
+                }
+            }
+
             try
             {
                 var (items, _) = await FetchInvoiceItemsAndTaxesAsync(
-                    dc.DcRateStructureCode ?? "",
+                    resolvedRateStru ?? string.Empty,
                     dc.DcId,
                     dc.CurrencyCode,
                     dc.OrderId,
@@ -99,11 +116,130 @@ public sealed partial class DcToInvoiceService
         CancellationToken cancellationToken = default)
     {
         var siteId = request?.SiteId ?? _options.SiteId;
-        var dryRun = request?.DryRun ?? false;
 
         _logger.LogInformation(
-            "DcToInvoice: Master batch automation started. SiteId={SiteId}, CustomerFilter={Cust}, DryRun={DryRun}",
-            siteId, request?.CustomerCode, dryRun);
+            "DcToInvoice: Master batch automation started. SiteId={SiteId}, CustomerFilter={Cust}",
+            siteId, request?.CustomerCode);
+
+        // ── Direct Processing for Explicit DC Numbers or DC IDs ──
+        bool hasExplicitNumbers = request?.DcNumbers != null && request.DcNumbers.Count > 0;
+        bool hasExplicitIds = request?.DcIds != null && request.DcIds.Count > 0;
+
+        if (hasExplicitNumbers || hasExplicitIds)
+        {
+            var targets = new List<(long? DcId, string? DcNo)>();
+            if (hasExplicitIds)
+            {
+                foreach (var id in request!.DcIds!)
+                {
+                    if (id > 0) targets.Add((id, null));
+                }
+            }
+            if (hasExplicitNumbers)
+            {
+                foreach (var no in request!.DcNumbers!)
+                {
+                    if (!string.IsNullOrWhiteSpace(no)) targets.Add((null, no.Trim()));
+                }
+            }
+
+            _logger.LogInformation("DcToInvoice: Master batch executing directly for {Count} target DC(s)", targets.Count);
+
+            var specificResults = new List<DcInvoiceResult>();
+            int specificSuccess = 0;
+            int specificFailed = 0;
+            int specificTotalItems = 0;
+            int specificSuccessItems = 0;
+            int specificFailedItems = 0;
+            int specificCreatedInvoices = 0;
+
+            foreach (var target in targets)
+            {
+                var label = target.DcId.HasValue ? $"Id: {target.DcId.Value}" : $"No: '{target.DcNo}'";
+                try
+                {
+                    _logger.LogInformation("DcToInvoice: Directly invoking CreateInvoiceFromDeliveryChallanAsync for DC {Target}", label);
+                    var invoiceResult = await CreateInvoiceFromDeliveryChallanAsync(
+                        dcId: target.DcId,
+                        dcNo: target.DcNo,
+                        customerCode: request?.CustomerCode,
+                        cancellationToken: cancellationToken);
+
+                    specificSuccess++;
+                    specificCreatedInvoices++;
+                    specificTotalItems += invoiceResult.ItemCount;
+                    specificSuccessItems += invoiceResult.ItemCount;
+
+                    var itemResults = new List<InvoiceItemResult>
+                    {
+                        new(
+                            ItemCode: "ALL_ITEMS",
+                            ItemName: "All Dispatched Items",
+                            DcQuantity: invoiceResult.TotalInvoiceQty,
+                            InvoiceQuantity: invoiceResult.TotalInvoiceQty,
+                            Rate: 0m,
+                            Amount: invoiceResult.TotalInvoiceAmount,
+                            RateStructureCode: invoiceResult.RateStructureCode ?? "",
+                            Status: "SUCCESS",
+                            InvoiceCreated: true,
+                            InvoiceId: invoiceResult.InvoiceId,
+                            InvoiceNumber: invoiceResult.InvoiceNumber,
+                            Message: $"Invoice {invoiceResult.InvoiceNumber} created successfully.")
+                    };
+
+                    specificResults.Add(new DcInvoiceResult(
+                        DcId: invoiceResult.DcId,
+                        DcNo: invoiceResult.DcNo,
+                        CustomerCode: invoiceResult.CustomerCode ?? request?.CustomerCode ?? "",
+                        ShipmentCode: "",
+                        Status: "SUCCESS",
+                        InvoiceNumber: invoiceResult.InvoiceNumber,
+                        InvoiceId: invoiceResult.InvoiceId,
+                        Items: itemResults,
+                        TotalAmount: invoiceResult.TotalInvoiceAmount,
+                        TotalQuantity: invoiceResult.TotalInvoiceQty,
+                        Message: $"Invoice {invoiceResult.InvoiceNumber} created successfully.",
+                        Authorized: invoiceResult.Authorized,
+                        RateStructureCode: invoiceResult.RateStructureCode,
+                        LineLevelRateStructureApplied: invoiceResult.LineLevelRateStructureApplied));
+                }
+                catch (Exception ex)
+                {
+                    specificFailed++;
+                    specificTotalItems++;
+                    specificFailedItems++;
+                    _logger.LogError(ex, "DcToInvoice: Failure processing specific DC {Target}: {Message}", label, ex.Message);
+                    specificResults.Add(new DcInvoiceResult(
+                        DcId: target.DcId ?? 0,
+                        DcNo: target.DcNo ?? "",
+                        CustomerCode: request?.CustomerCode ?? "",
+                        ShipmentCode: "",
+                        Status: "FAILED",
+                        InvoiceNumber: null,
+                        InvoiceId: null,
+                        Items: Array.Empty<InvoiceItemResult>(),
+                        TotalAmount: 0m,
+                        TotalQuantity: 0m,
+                        Message: ex.Message));
+                }
+            }
+
+            return new BatchInvoiceCreationResult(
+                Success: specificFailed == 0,
+                Message: specificFailed == 0
+                    ? $"Successfully processed {specificSuccess} Delivery Challan(s)."
+                    : $"Processed {specificResults.Count} Delivery Challan(s) with {specificFailed} failure(s).",
+                Data: new BatchInvoiceCreationData(
+                    TotalDeliveryChallans: targets.Count,
+                    ProcessedDeliveryChallans: targets.Count,
+                    SuccessfulDeliveryChallans: specificSuccess,
+                    FailedDeliveryChallans: specificFailed,
+                    TotalItems: specificTotalItems,
+                    SuccessfulItems: specificSuccessItems,
+                    FailedItems: specificFailedItems,
+                    CreatedInvoiceCount: specificCreatedInvoices,
+                    Results: specificResults));
+        }
 
         // ── Step 1: Discover candidate customers ──
         var customerCodes = new List<string>();
@@ -240,27 +376,10 @@ public sealed partial class DcToInvoiceService
                 "DcToInvoice: [{Index}/{Total}] Processing DC Id={DcId}, No={DcNo}, Customer={Cust}",
                 i + 1, candidateDcs.Count, dc.DcId, dc.DcNo, dc.BillTo);
 
-            if (dryRun)
-            {
-                results.Add(new DcInvoiceResult(
-                    DcId: dc.DcId,
-                    DcNo: dc.DcNo,
-                    CustomerCode: dc.BillTo,
-                    ShipmentCode: dc.ShipCode,
-                    Status: "WOULD_CREATE",
-                    InvoiceNumber: null,
-                    InvoiceId: null,
-                    Items: Array.Empty<InvoiceItemResult>(),
-                    TotalAmount: 0m,
-                    TotalQuantity: 0m,
-                    Message: "Dry run: Delivery Challan is eligible for Sales Invoice creation."));
-                continue;
-            }
-
             try
             {
                 var invoiceResult = await CreateInvoiceFromDeliveryChallanAsync(
-                    dc.DcId, dc.DcNo, dc.BillTo, cancellationToken);
+                    dc.DcId, dc.DcNo, dc.BillTo, cancellationToken: cancellationToken);
 
                 successfulCount++;
                 createdInvoiceCount++;
@@ -378,9 +497,7 @@ public sealed partial class DcToInvoiceService
             }
         }
 
-        var message = dryRun
-            ? $"Dry run: {candidateDcs.Count} Delivery Challans evaluated."
-            : $"Processed {candidateDcs.Count} Delivery Challans: {successfulCount} succeeded ({createdInvoiceCount} invoices created), {failedCount} failed.";
+        var message = $"Processed {candidateDcs.Count} Delivery Challans: {successfulCount} succeeded ({createdInvoiceCount} invoices created), {failedCount} failed.";
 
         _logger.LogInformation("DcToInvoice: Master batch automation finished. {Summary}", message);
 

@@ -29,20 +29,19 @@ public static class DcToInvoiceEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        // Master batch automation API: processes ALL eligible Delivery Challans sequentially in one execution
+        // Master automation API: processes ALL, MULTIPLE, or SINGLE Delivery Challans
+        endpoints
+            .MapPost(
+                "/api/v1/sales/salesinvoice/CreateInvoiceFromDeliveryChallan",
+                CreateInvoicesFromAllDeliveryChallansAsync)
+            .WithName("CreateInvoiceFromDeliveryChallan")
+            .AddEndpointFilter<ApiKeyFilter>();
+
         endpoints
             .MapPost(
                 "/api/v1/sales/salesinvoice/CreateInvoicesFromDeliveryChallans",
                 CreateInvoicesFromAllDeliveryChallansAsync)
             .WithName("CreateInvoicesFromDeliveryChallans")
-            .AddEndpointFilter<ApiKeyFilter>();
-
-        // Individual DC-to-Invoice conversion endpoint
-        endpoints
-            .MapPost(
-                "/api/v1/sales/salesinvoice/CreateInvoiceFromDeliveryChallan",
-                CreateInvoiceFromSingleDcAsync)
-            .WithName("CreateInvoiceFromDeliveryChallan")
             .AddEndpointFilter<ApiKeyFilter>();
 
         // Query pending / eligible Delivery Challans
@@ -80,7 +79,6 @@ public static class DcToInvoiceEndpoints
         {
             AutomationEnabled = config.AutomationEnabled,
             AutomationTime = config.AutomationTime,
-            DcNumber = config.DcNumbers?.FirstOrDefault(),
             AutomationMode = config.AutomationMode,
             DcNumbers = config.DcNumbers
         });
@@ -109,14 +107,7 @@ public static class DcToInvoiceEndpoints
             normalizedTime = parsedTime.ToString("HH:mm");
         }
 
-        var dcList = dto.DcNumbers;
-        if (dcList == null || dcList.Count == 0)
-        {
-            if (!string.IsNullOrWhiteSpace(dto.DcNumber))
-            {
-                dcList = new List<string> { dto.DcNumber.Trim() };
-            }
-        }
+        var dcList = dto.DcNumbers?.Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var config = await repo.GetConfigAsync(cancellationToken);
         bool timeChanged = config.AutomationTime != normalizedTime;
@@ -198,7 +189,6 @@ public static class DcToInvoiceEndpoints
         {
             AutomationEnabled = config.AutomationEnabled,
             AutomationTime = config.AutomationTime,
-            DcNumber = config.DcNumbers?.FirstOrDefault(),
             AutomationMode = config.AutomationMode,
             DcNumbers = config.DcNumbers
         });
@@ -232,13 +222,13 @@ public static class DcToInvoiceEndpoints
         // Apply selection parameter logic based on mode
         if (req.DcNumbers == null || req.DcNumbers.Count == 0)
         {
-            if (config.AutomationMode == "INDIVIDUAL" && config.DcNumbers != null && config.DcNumbers.Count > 0)
+            if ((config.AutomationMode == "INDIVIDUAL" || config.AutomationMode == "BOTH") && config.DcNumbers != null && config.DcNumbers.Count > 0)
             {
                 req = req with { DcNumbers = config.DcNumbers };
             }
             else
             {
-                // In TIMER or BOTH mode without specific DC numbers, process all eligible Delivery Challans dynamically
+                // In TIMER mode (or when no specific DC numbers are saved), process all eligible Delivery Challans dynamically
                 req = req with { DcNumbers = null };
             }
         }

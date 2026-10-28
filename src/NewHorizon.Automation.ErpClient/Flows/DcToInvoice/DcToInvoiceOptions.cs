@@ -33,4 +33,7 @@ public sealed class DcToInvoiceOptions
 
     /// <summary>Invoice of (default: "ProductSpare" -> "P").</summary>
     public string InvoiceOf { get; set; } = "P";
+
+    /// <summary>Default Rate Structure Code if DC carries none (default: "GST18").</summary>
+    public string DefaultRateStructureCode { get; set; } = "GST18";
 }
