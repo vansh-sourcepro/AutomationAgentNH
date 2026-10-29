@@ -69,9 +69,17 @@ public sealed class InMemoryJobRepository : IJobRepository
         CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<Guid>>([]);
 
-    public Task<IReadOnlyDictionary<JobStatus, int>> GetStatusCountsAsync(CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyDictionary<JobStatus, int>>(
-            _jobs.Values.GroupBy(job => job.Status).ToDictionary(group => group.Key, group => group.Count()));
+    public Task<IReadOnlyDictionary<JobStatus, int>> GetStatusCountsAsync(CancellationToken cancellationToken, string? workflowType = null)
+    {
+        var source = _jobs.Values.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(workflowType))
+        {
+            source = source.Where(job => string.Equals(job.WorkflowType, workflowType.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<JobStatus, int>>(
+            source.GroupBy(job => job.Status).ToDictionary(group => group.Key, group => group.Count()));
+    }
 
     public Task<IReadOnlySet<string>> GetExistingIdempotencyKeysAsync(
         IReadOnlyCollection<string> idempotencyKeys,

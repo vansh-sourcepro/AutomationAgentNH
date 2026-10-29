@@ -84,6 +84,14 @@ public sealed class IndentPoAutomationConfig
     public static IndentPoAutomationConfig CreateDefault(IndentKind indentKind, DateTimeOffset nowUtc) =>
         new(Guid.NewGuid(), indentKind, nowUtc);
 
+    public static IndentPoAutomationConfig CreateQuotationDefault(DateTimeOffset nowUtc, Guid? id = null) =>
+        new(id ?? Guid.NewGuid(), IndentKind.Quotation, nowUtc)
+        {
+            IsActive = true,
+            RunMode = PoAutomationRunMode.Both,
+            DryRun = false,
+        };
+
     /// <summary>
     /// True when the scheduler should start a run for this type right now: PO Automation is switched
     /// on (<see cref="IsActive"/> — the master toggle the PO Automation screen persists), the mode
@@ -193,6 +201,104 @@ public sealed class IndentPoAutomationConfig
         LastTriggeredAtUtc = nowUtc;
         LastRunStatus = status.ToString();
         LastRunReference = runId;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Updates configuration for Quotation to Sales Order automation row.
+    /// </summary>
+    public void UpdateFromQuotation(
+        PoAutomationRunMode? runMode,
+        TimeOnly? scheduleTime,
+        bool clearScheduleTime,
+        string? quotationNumbers,
+        bool clearQuotationNumbers,
+        string? sites,
+        bool? isActive,
+        bool? dryRun,
+        DateTimeOffset nowUtc,
+        string? updatedBy)
+    {
+        var scheduleBefore = ScheduleTime;
+
+        if (runMode.HasValue)
+        {
+            RunMode = runMode.Value;
+        }
+
+        if (isActive.HasValue)
+        {
+            IsActive = isActive.Value;
+        }
+
+        if (dryRun.HasValue)
+        {
+            DryRun = dryRun.Value;
+        }
+
+        if (scheduleTime is not null)
+        {
+            ScheduleTime = scheduleTime;
+        }
+
+        if (clearScheduleTime)
+        {
+            ScheduleTime = null;
+        }
+
+        if (ScheduleTime is not null && ScheduleTime != scheduleBefore)
+        {
+            LastScheduledRunDate = null;
+        }
+
+        if (quotationNumbers is not null)
+        {
+            IndentNumbers = quotationNumbers;
+        }
+
+        if (clearQuotationNumbers)
+        {
+            IndentNumbers = null;
+        }
+
+        if (sites is not null)
+        {
+            Sites = sites;
+        }
+
+        UpdatedAtUtc = nowUtc;
+        UpdatedBy = updatedBy;
+    }
+
+    /// <summary>
+    /// Directly sets the active toggle for Quotation to Sales Order automation.
+    /// </summary>
+    public void SetActiveForQuotation(bool active, DateTimeOffset nowUtc, string? updatedBy)
+    {
+        IsActive = active;
+        UpdatedAtUtc = nowUtc;
+        UpdatedBy = updatedBy;
+    }
+
+    /// <summary>
+    /// Records when Quotation to Sales Order automation run starts.
+    /// </summary>
+    public void RecordQuotationRunStarted(DateTimeOffset nowUtc, DateOnly? scheduledDate)
+    {
+        LastTriggeredAtUtc = nowUtc;
+        if (scheduledDate.HasValue)
+        {
+            LastScheduledRunDate = scheduledDate.Value;
+        }
+    }
+
+    /// <summary>
+    /// Records completion status for Quotation to Sales Order automation run.
+    /// </summary>
+    public void RecordQuotationRunCompleted(string status, DateTimeOffset nowUtc)
+    {
+        LastRunStatus = status.Length > 20 ? status[..20] : status;
+        LastTriggeredAtUtc = nowUtc;
         UpdatedAtUtc = nowUtc;
     }
 

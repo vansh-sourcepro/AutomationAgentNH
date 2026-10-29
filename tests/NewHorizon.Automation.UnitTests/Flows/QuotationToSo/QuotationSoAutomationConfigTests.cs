@@ -135,4 +135,92 @@ public sealed class QuotationSoAutomationConfigTests
         config.LastRunStatus.Should().Be("Success");
         config.LastRunMessage.Should().Be("1 quotation converted to Sales Order 1001");
     }
+
+    [Fact]
+    public void FromSnapshot_reconstructs_all_properties_accurately()
+    {
+        var id = Guid.NewGuid();
+        var time = new TimeOnly(15, 30);
+        var snapshot = QuotationSoAutomationConfig.FromSnapshot(
+            id: id,
+            isActive: true,
+            runMode: SoAutomationRunMode.Timer,
+            scheduleTime: time,
+            quotationNumbers: "QTN-001, QTN-002",
+            customerCode: "CUST-99",
+            siteCode: "SITE-1",
+            dryRun: true,
+            lastScheduledRunDate: Today,
+            lastTriggeredAtUtc: Now,
+            lastRunStatus: "Success",
+            lastRunMessage: "All processed",
+            updatedAtUtc: Now,
+            updatedBy: "automation-test");
+
+        snapshot.Id.Should().Be(id);
+        snapshot.IsActive.Should().BeTrue();
+        snapshot.RunMode.Should().Be(SoAutomationRunMode.Timer);
+        snapshot.ScheduleTime.Should().Be(time);
+        snapshot.QuotationNumbers.Should().Be("QTN-001, QTN-002");
+        snapshot.CustomerCode.Should().Be("CUST-99");
+        snapshot.SiteCode.Should().Be("SITE-1");
+        snapshot.DryRun.Should().BeTrue();
+        snapshot.LastScheduledRunDate.Should().Be(Today);
+        snapshot.LastTriggeredAtUtc.Should().Be(Now);
+        snapshot.LastRunStatus.Should().Be("Success");
+        snapshot.LastRunMessage.Should().Be("All processed");
+        snapshot.UpdatedAtUtc.Should().Be(Now);
+        snapshot.UpdatedBy.Should().Be("automation-test");
+    }
+
+    [Fact]
+    public void IndentPoAutomationConfig_quotation_helpers_function_correctly()
+    {
+        var row = NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoAutomationConfig.CreateQuotationDefault(Now);
+
+        row.IndentKind.Should().Be(NewHorizon.Automation.Domain.Flows.IndentToPo.IndentKind.Quotation);
+        row.IsActive.Should().BeTrue();
+        row.RunMode.Should().Be(NewHorizon.Automation.Domain.Flows.IndentToPo.PoAutomationRunMode.Both);
+        row.DryRun.Should().BeFalse();
+
+        row.UpdateFromQuotation(
+            runMode: NewHorizon.Automation.Domain.Flows.IndentToPo.PoAutomationRunMode.Timer,
+            scheduleTime: new TimeOnly(14, 0),
+            clearScheduleTime: false,
+            quotationNumbers: "00001, 00002",
+            clearQuotationNumbers: false,
+            sites: "SITE-ALPHA",
+            isActive: false,
+            dryRun: true,
+            nowUtc: Now,
+            updatedBy: "admin");
+
+        row.RunMode.Should().Be(NewHorizon.Automation.Domain.Flows.IndentToPo.PoAutomationRunMode.Timer);
+        row.ScheduleTime.Should().Be(new TimeOnly(14, 0));
+        row.IndentNumbers.Should().Be("00001, 00002");
+        row.Sites.Should().Be("SITE-ALPHA");
+        row.IsActive.Should().BeFalse();
+        row.DryRun.Should().BeTrue();
+        row.UpdatedBy.Should().Be("admin");
+
+        row.SetActiveForQuotation(true, Now, "lead");
+        row.IsActive.Should().BeTrue();
+        row.UpdatedBy.Should().Be("lead");
+
+        row.RecordQuotationRunStarted(Now, Today);
+        row.LastTriggeredAtUtc.Should().Be(Now);
+        row.LastScheduledRunDate.Should().Be(Today);
+
+        row.RecordQuotationRunCompleted("StatusThatIsWayTooLongAndExceedsTwentyCharacters", Now);
+        row.LastRunStatus.Should().HaveLength(20);
+        row.LastRunStatus.Should().Be("StatusThatIsWayTooLo");
+    }
+
+    [Fact]
+    public void IndentDocumentTypes_maps_quotation_kind_correctly()
+    {
+        NewHorizon.Automation.Domain.Flows.IndentToPo.IndentDocumentTypes.For(
+            NewHorizon.Automation.Domain.Flows.IndentToPo.IndentKind.Quotation)
+            .Should().Be("Quotation");
+    }
 }

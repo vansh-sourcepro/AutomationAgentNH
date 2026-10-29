@@ -60,5 +60,5 @@ public interface IProcessJobService
     /// no gaps — a day nothing happened on is still a row, at zero, so a chart's x-axis stays a
     /// continuous date range rather than skipping quiet days.
     /// </summary>
-    Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(int days, CancellationToken cancellationToken);
+    Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(int days, CancellationToken cancellationToken, string? workflow = null);
 }

@@ -24,6 +24,11 @@ public static class WorkflowNames
     public const string IndentToPurchaseOrder = "IndentToPurchaseOrder";
 
     /// <summary>
+    /// Authorised customer quotation → sales order receipt.
+    /// </summary>
+    public const string QuotationToSalesOrder = "QuotationToSalesOrder";
+
+    /// <summary>
     /// Every workflow name, for validating a caller's filter. Listing them back in a refusal is
     /// the difference between "you typed a workflow that does not exist" and an empty result the
     /// caller reads as "nothing has run".
@@ -37,6 +42,7 @@ public static class WorkflowNames
         AutoShop,
         AutoShopCycle,
         IndentToPurchaseOrder,
+        QuotationToSalesOrder,
     ];
 }
 

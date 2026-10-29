@@ -55,7 +55,7 @@ public interface IJobRepository
         CancellationToken cancellationToken);
 
     /// <summary>Counts by status for the dashboard, in one round trip.</summary>
-    Task<IReadOnlyDictionary<JobStatus, int>> GetStatusCountsAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyDictionary<JobStatus, int>> GetStatusCountsAsync(CancellationToken cancellationToken, string? workflowType = null);
 
     /// <summary>Document identities that already have a job, so reconciliation enqueues only gaps.</summary>
     Task<IReadOnlySet<string>> GetExistingIdempotencyKeysAsync(

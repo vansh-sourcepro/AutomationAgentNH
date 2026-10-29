@@ -14,6 +14,7 @@ public enum IndentKind
     Regular = 0,
     Capital = 1,
     Service = 2,
+    Quotation = 3,
 }
 
 /// <summary>
@@ -27,11 +28,14 @@ public static class IndentDocumentTypes
     public const string Capital = "CapitalIndent";
     public const string Service = "ServiceIndent";
 
+    public const string Quotation = "Quotation";
+
     public static string For(IndentKind kind) => kind switch
     {
         IndentKind.Regular => Regular,
         IndentKind.Capital => Capital,
         IndentKind.Service => Service,
+        IndentKind.Quotation => Quotation,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown indent kind."),
     };
 }

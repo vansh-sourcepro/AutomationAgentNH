@@ -246,6 +246,8 @@ public sealed record ProcessJobSummary(
 /// <summary>Filter for the runs list. Page size is clamped by the service, not the caller.</summary>
 public sealed record ProcessRunQuery
 {
+    public string? WorkflowType { get; init; }
+
     public DateTimeOffset? FromUtc { get; init; }
 
     public DateTimeOffset? ToUtc { get; init; }

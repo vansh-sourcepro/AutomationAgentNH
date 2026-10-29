@@ -322,10 +322,16 @@ public sealed class JobRepository : IJobRepository
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyDictionary<JobStatus, int>> GetStatusCountsAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? workflowType = null)
     {
-        var counts = await _dbContext.Jobs
-            .AsNoTracking()
+        var query = _dbContext.Jobs.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(workflowType))
+        {
+            query = query.Where(job => job.WorkflowType == workflowType.Trim());
+        }
+
+        var counts = await query
             .GroupBy(job => job.Status)
             .Select(group => new { Status = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);

@@ -3,6 +3,7 @@ using NewHorizon.Automation.Application.Configuration;
 using NewHorizon.Automation.Application.Flows.IndentToPo;
 using NewHorizon.Automation.Application.Workflows.Definitions;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.QuotationToSo;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.ErpClient.Flows.IndentToPo;
 using NewHorizon.Automation.Worker.Contracts;
@@ -159,9 +160,10 @@ public static class ProcessJobEndpoints
     private static async Task<IResult> GetDailyStatsAsync(
         IProcessJobService processJobs,
         CancellationToken cancellationToken,
-        int days = 30)
+        int days = 30,
+        string? workflow = null)
     {
-        var stats = await processJobs.GetDailyStatsAsync(days, cancellationToken);
+        var stats = await processJobs.GetDailyStatsAsync(days, cancellationToken, workflow);
 
         return Results.Ok(stats.Select(ProcessJobMapper.ToResponse).ToList());
     }
@@ -212,16 +214,21 @@ public static class ProcessJobEndpoints
             return (null, kindError);
         }
 
-        // Validated against the five real stages rather than passed through: a typo would
+        var allStages = IndentPoStages.InOrder
+            .Concat(QuotationToSoStages.InOrder)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Validated against the real stages rather than passed through: a typo would
         // otherwise return an empty grid, which reads as "nothing happened" instead of "you asked
         // for a stage that does not exist".
         if (!string.IsNullOrWhiteSpace(stage)
-            && !IndentPoStages.InOrder.Contains(stage.Trim(), StringComparer.OrdinalIgnoreCase))
+            && !allStages.Contains(stage.Trim(), StringComparer.OrdinalIgnoreCase))
         {
             return (null, Results.Problem(
                 title: "Unknown stage.",
                 detail: $"'{stage}' is not a stage. Expected one of: "
-                    + $"{string.Join(", ", IndentPoStages.InOrder)}.",
+                    + $"{string.Join(", ", allStages)}.",
                 statusCode: StatusCodes.Status400BadRequest));
         }
 
@@ -234,7 +241,7 @@ public static class ProcessJobEndpoints
             TriggerSource = triggerSource,
             Stage = string.IsNullOrWhiteSpace(stage)
                 ? null
-                : IndentPoStages.InOrder.First(known =>
+                : allStages.First(known =>
                     known.Equals(stage.Trim(), StringComparison.OrdinalIgnoreCase)),
             IndentKind = indentKind,
             FromUtc = from,
@@ -356,6 +363,7 @@ public static class ProcessJobEndpoints
     private static async Task<IResult> ListRunsAsync(
         IProcessJobService processJobs,
         CancellationToken cancellationToken,
+        string? workflow = null,
         string? trigger = null,
         string? status = null,
         DateTimeOffset? from = null,
@@ -363,6 +371,16 @@ public static class ProcessJobEndpoints
         int page = 1,
         int pageSize = 50)
     {
+        if (!string.IsNullOrWhiteSpace(workflow)
+            && !WorkflowNames.All.Contains(workflow.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                title: "Unknown workflow.",
+                detail: $"'{workflow}' is not a workflow. Expected one of: "
+                    + $"{string.Join(", ", WorkflowNames.All)}.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         TriggerSource? triggerSource = null;
         if (!string.IsNullOrWhiteSpace(trigger))
         {
@@ -396,6 +414,7 @@ public static class ProcessJobEndpoints
         var result = await processJobs.ListRunsAsync(
             new ProcessRunQuery
             {
+                WorkflowType = workflow,
                 TriggerSource = triggerSource,
                 Status = runStatus,
                 FromUtc = from,

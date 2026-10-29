@@ -74,6 +74,7 @@ public static class DependencyInjection
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddIndentToPoTracking();
+        services.AddQuotationToSoTracking();
 
         return services;
     }

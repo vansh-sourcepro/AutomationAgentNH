@@ -570,9 +570,7 @@ public sealed class ProcessJobService : IProcessJobService, IIndentPoTracker
         return new PagedResult<AutomationRun>(items, total, bounded.Page, bounded.PageSize);
     }
 
-    public async Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(
-        int days,
-        CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(int days, CancellationToken cancellationToken, string? workflow = null)
     {
         var bounded = Math.Clamp(days, 1, MaxDailyStatsDays);
 
@@ -584,7 +582,7 @@ public sealed class ProcessJobService : IProcessJobService, IIndentPoTracker
         var fromUtc = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var toUtc = new DateTimeOffset(today.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
 
-        var raw = await _tracking.GetDailyStatsAsync(fromUtc, toUtc, cancellationToken);
+        var raw = await _tracking.GetDailyStatsAsync(fromUtc, toUtc, cancellationToken, workflow);
         var byDate = raw.ToDictionary(stat => stat.Date);
 
         // Filled day by day rather than returning `raw` as-is: a day nothing finished on has no row

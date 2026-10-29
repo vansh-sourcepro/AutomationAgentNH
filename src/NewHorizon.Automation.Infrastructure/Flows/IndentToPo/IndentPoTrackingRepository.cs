@@ -408,7 +408,8 @@ public sealed class IndentPoTrackingRepository : IIndentPoTrackingRepository
     public async Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? workflowType = null)
     {
         // Only finished jobs have a day to be counted against — a job still Running has not
         // resolved to either outcome yet, and belongs on neither series until it does.
@@ -417,6 +418,12 @@ public sealed class IndentPoTrackingRepository : IIndentPoTrackingRepository
             && job.CompletedAtUtc != null
             && job.CompletedAtUtc >= fromUtc
             && job.CompletedAtUtc <= toUtc);
+
+        if (!string.IsNullOrWhiteSpace(workflowType))
+        {
+            var workflow = workflowType.Trim();
+            finished = finished.Where(job => job.WorkflowType == workflow);
+        }
 
         var convertedByDay = await finished
             .Where(job => _dbContext.IndentPoOutcomes.Any(outcome =>
@@ -441,6 +448,7 @@ public sealed class IndentPoTrackingRepository : IIndentPoTrackingRepository
                 && job.CompletedAtUtc != null
                 && job.CompletedAtUtc >= fromUtc
                 && job.CompletedAtUtc <= toUtc
+                && (workflowType == null || job.WorkflowType == workflowType.Trim())
             group outcome by job.CompletedAtUtc!.Value.Date into g
             select new { Date = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -616,6 +624,11 @@ public sealed class IndentPoTrackingRepository : IIndentPoTrackingRepository
     private IQueryable<AutomationRun> Filter(ProcessRunQuery query)
     {
         var runs = _dbContext.Runs.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(query.WorkflowType))
+        {
+            runs = runs.Where(run => run.WorkflowType == query.WorkflowType.Trim());
+        }
 
         if (query.FromUtc is { } from)
         {

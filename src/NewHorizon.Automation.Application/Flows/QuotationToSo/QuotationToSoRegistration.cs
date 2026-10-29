@@ -11,6 +11,16 @@ public static class QuotationToSoRegistration
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddScoped<IQuotationSoAutomationConfigRepository, NullQuotationSoAutomationConfigRepository>();
+        services.TryAddScoped<IQuotationToSoTracker, NullQuotationToSoTracker>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddQuotationToSoTracking(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IQuotationToSoTracker, QuotationToSoTracker>();
 
         return services;
     }

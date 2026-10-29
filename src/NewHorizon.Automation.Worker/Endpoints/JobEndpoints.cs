@@ -265,12 +265,17 @@ public static class JobEndpoints
 
     private static async Task<IResult> GetDashboardAsync(
         IJobRepository jobs,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? workflowType = null)
     {
-        var counts = await jobs.GetStatusCountsAsync(cancellationToken);
+        var counts = await jobs.GetStatusCountsAsync(cancellationToken, workflowType);
+
+        var cycleWorkflow = string.IsNullOrWhiteSpace(workflowType)
+            ? WorkflowNames.AutoShopCycle
+            : workflowType.Trim();
 
         var live = await jobs.ListAsync(
-            new JobQuery { WorkflowType = WorkflowNames.AutoShopCycle, PageSize = 1, Status = JobStatus.Running },
+            new JobQuery { WorkflowType = cycleWorkflow, PageSize = 1, Status = JobStatus.Running },
             cancellationToken);
 
         var runningCycle = live.Items.FirstOrDefault();

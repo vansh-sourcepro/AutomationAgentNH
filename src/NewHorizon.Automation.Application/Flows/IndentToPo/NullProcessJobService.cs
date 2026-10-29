@@ -97,8 +97,6 @@ public sealed class NullProcessJobService : IProcessJobService, IIndentPoTracker
         CancellationToken cancellationToken) =>
         Task.FromResult(new PagedResult<AutomationRun>([], 0, 1, 0));
 
-    public Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(
-        int days,
-        CancellationToken cancellationToken) =>
+    public Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(int days, CancellationToken cancellationToken, string? workflow = null) =>
         Task.FromResult<IReadOnlyList<DailyConversionStat>>([]);
 }

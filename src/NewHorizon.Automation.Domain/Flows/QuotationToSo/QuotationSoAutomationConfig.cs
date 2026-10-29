@@ -87,6 +87,37 @@ public sealed class QuotationSoAutomationConfig
             RunMode = SoAutomationRunMode.Both,
         };
 
+    public static QuotationSoAutomationConfig FromSnapshot(
+        Guid id,
+        bool isActive,
+        SoAutomationRunMode runMode,
+        TimeOnly? scheduleTime,
+        string? quotationNumbers,
+        string? customerCode,
+        string? siteCode,
+        bool dryRun,
+        DateOnly? lastScheduledRunDate,
+        DateTimeOffset? lastTriggeredAtUtc,
+        string? lastRunStatus,
+        string? lastRunMessage,
+        DateTimeOffset updatedAtUtc,
+        string? updatedBy) =>
+        new(id, updatedAtUtc)
+        {
+            IsActive = isActive,
+            RunMode = runMode,
+            ScheduleTime = scheduleTime,
+            QuotationNumbers = quotationNumbers,
+            CustomerCode = customerCode,
+            SiteCode = siteCode,
+            DryRun = dryRun,
+            LastScheduledRunDate = lastScheduledRunDate,
+            LastTriggeredAtUtc = lastTriggeredAtUtc,
+            LastRunStatus = lastRunStatus,
+            LastRunMessage = lastRunMessage,
+            UpdatedBy = updatedBy,
+        };
+
     /// <summary>
     /// Checks whether the scheduled timer should run right now.
     /// </summary>

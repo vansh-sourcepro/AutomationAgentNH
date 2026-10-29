@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Flows.QuotationToSo;
 using NewHorizon.Automation.Domain.Flows.QuotationToSo;
+using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.ErpClient.Flows.QuotationToSo;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.QuotationToSo.Contracts;
@@ -46,6 +47,7 @@ public static class SoAutomationEndpoints
         UpdateSoAutomationRequest? request,
         IQuotationSoAutomationConfigRepository configs,
         IQuotationToSoService service,
+        IQuotationToSoTracker tracker,
         IClock clock,
         ILogger<QuotationToSoService> logger,
         ClaimsPrincipal user,
@@ -112,6 +114,14 @@ public static class SoAutomationEndpoints
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            var triggeredBy = ActorOf(user) ?? "API";
+            await tracker.StartRunAsync(
+                TriggerSource.Api,
+                triggeredBy,
+                triggerReference: null,
+                saved.QuotationNumbers,
+                cancellationToken);
+
             try
             {
                 if (quotationList is { Count: 1 })
@@ -131,6 +141,8 @@ public static class SoAutomationEndpoints
                     createdSoNumber = itemResult.SalesOrderNumber;
                     saved.RecordRunCompleted(status, message, clock.UtcNow);
                     await configs.SaveAsync(saved, cancellationToken);
+
+                    await tracker.CompleteRunAsync(1, cancellationToken);
                 }
                 else if (quotationList is { Count: > 1 })
                 {
@@ -169,6 +181,8 @@ public static class SoAutomationEndpoints
 
                     saved.RecordRunCompleted(status, message, clock.UtcNow);
                     await configs.SaveAsync(saved, cancellationToken);
+
+                    await tracker.CompleteRunAsync(quotationList.Count, cancellationToken);
                 }
                 else
                 {
@@ -184,6 +198,8 @@ public static class SoAutomationEndpoints
 
                     saved.RecordRunCompleted(status, message, clock.UtcNow);
                     await configs.SaveAsync(saved, cancellationToken);
+
+                    await tracker.CompleteRunAsync(sweepResult.TotalFound, cancellationToken);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -191,6 +207,8 @@ public static class SoAutomationEndpoints
                 logger.LogError(ex, "Automatic conversion execution failed during configuration update.");
                 saved.RecordRunCompleted("Failed", ex.Message, clock.UtcNow);
                 await configs.SaveAsync(saved, cancellationToken);
+
+                await tracker.FailRunAsync(ex.Message, 0, cancellationToken);
             }
         }
 

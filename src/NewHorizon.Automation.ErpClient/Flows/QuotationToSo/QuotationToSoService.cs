@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Configuration;
+using NewHorizon.Automation.Application.Flows.QuotationToSo;
+using NewHorizon.Automation.Domain.Flows.QuotationToSo;
 
 namespace NewHorizon.Automation.ErpClient.Flows.QuotationToSo;
 
@@ -18,23 +20,27 @@ public sealed class QuotationToSoService : IQuotationToSoService
     private readonly int _companyId;
     private readonly string _companyCode;
     private readonly IClock _clock;
+    private readonly IQuotationToSoTracker _tracker;
     private readonly ILogger<QuotationToSoService> _logger;
 
     public QuotationToSoService(
         IHttpClientFactory httpClientFactory,
         IOptions<AutomationAgentOptions> options,
         IClock clock,
+        IQuotationToSoTracker tracker,
         ILogger<QuotationToSoService> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(tracker);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClient = httpClientFactory.CreateClient(DependencyInjection.ErpHttpClientName);
         _companyId = options.Value.ErpApi.CompanyId;
         _companyCode = "NH1";
         _clock = clock;
+        _tracker = tracker;
         _logger = logger;
     }
 
@@ -164,10 +170,24 @@ public sealed class QuotationToSoService : IQuotationToSoService
     {
         ArgumentNullException.ThrowIfNull(quotation);
 
-        _logger.LogInformation(
-            "Fetching quotation details for Quotation {QuotationNumber} (Id: {QuotationId})",
+        await _tracker.StartExecutionAsync(new TrackedQuotation(
+            quotation.QuotationId,
             quotation.QuotationNumber,
-            quotation.QuotationId);
+            quotation.QuotationSiteId,
+            quotation.CustomerCode,
+            quotation.QuotationDate.HasValue ? DateOnly.FromDateTime(quotation.QuotationDate.Value) : null), cancellationToken);
+
+        try
+        {
+            await _tracker.EnterStageAsync(
+                QuotationToSoStages.QuotationDetail,
+                QuotationToSoTasks.GetQuotationDetail,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Fetching quotation details for Quotation {QuotationNumber} (Id: {QuotationId})",
+                quotation.QuotationNumber,
+                quotation.QuotationId);
 
         // Step 1: Fetch full Quotation structure from ERP
         var detailsUrl = $"api/v1/sales/QuotationEntry/getQuotationDetail/{Uri.EscapeDataString(quotation.QtnYear)}/{Uri.EscapeDataString(quotation.QtnGroup)}/{Uri.EscapeDataString(quotation.QtnNum)}/{quotation.QuotationSiteId}/0/SEARCH/10";
@@ -183,12 +203,15 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 (int)qtnResponse.StatusCode,
                 err);
 
+            var errorMsg = $"Failed to fetch quotation details from ERP (HTTP {(int)qtnResponse.StatusCode}): {err}";
+            await _tracker.FailExecutionAsync(errorMsg, err, transient: false, cancellationToken);
+
             return new QuotationConversionItemResult
             {
                 QuotationId = quotation.QuotationId,
                 QuotationNumber = quotation.QuotationNumber,
                 Success = false,
-                ErrorMessage = $"Failed to fetch quotation details from ERP (HTTP {(int)qtnResponse.StatusCode}): {err}",
+                ErrorMessage = errorMsg,
             };
         }
 
@@ -199,12 +222,15 @@ public sealed class QuotationToSoService : IQuotationToSoService
         var root = qtnJson.RootElement;
         if (!root.TryGetProperty("data", out var qtnData) || qtnData.ValueKind != JsonValueKind.Object)
         {
+            const string emptyMsg = "ERP returned empty quotation data structure.";
+            await _tracker.FailExecutionAsync(emptyMsg, emptyMsg, transient: false, cancellationToken);
+
             return new QuotationConversionItemResult
             {
                 QuotationId = quotation.QuotationId,
                 QuotationNumber = quotation.QuotationNumber,
                 Success = false,
-                ErrorMessage = "ERP returned empty quotation data structure.",
+                ErrorMessage = emptyMsg,
             };
         }
 
@@ -225,6 +251,11 @@ public sealed class QuotationToSoService : IQuotationToSoService
             soGroup);
 
         // Step 2.5: Pre-check if quotation is already converted or closed to avoid duplicate orders
+        await _tracker.EnterStageAsync(
+            QuotationToSoStages.Validation,
+            QuotationToSoTasks.VerifyExistingSalesOrder,
+            cancellationToken);
+
         var preVerified = await VerifyCreatedSalesOrderAsync(quotation, soYear, soGroup, cancellationToken);
         if (preVerified is not null)
         {
@@ -233,6 +264,10 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 quotation.QuotationNumber,
                 preVerified.Value.SoNumber,
                 preVerified.Value.SoId);
+
+            await _tracker.SkipExecutionAsync(
+                $"Quotation '{quotation.QuotationNumber}' is already converted to Sales Order '{preVerified.Value.SoNumber}'.",
+                cancellationToken);
 
             return new QuotationConversionItemResult
             {
@@ -245,6 +280,11 @@ public sealed class QuotationToSoService : IQuotationToSoService
         }
 
         // Step 3: Call ERP Create Sales Order API (Non-retryable to prevent duplicates on timeout)
+        await _tracker.EnterStageAsync(
+            QuotationToSoStages.CreateSalesOrder,
+            QuotationToSoTasks.CreateSalesOrderEntry,
+            cancellationToken);
+
         const string createUrl = "api/v1/sales/salesorderentry/createSalesOrderEntry";
 
         _logger.LogInformation(
@@ -310,6 +350,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 quotation.QuotationNumber,
                 error);
 
+            await _tracker.FailExecutionAsync(error, error, transient: false, cancellationToken);
+
             return new QuotationConversionItemResult
             {
                 QuotationId = quotation.QuotationId,
@@ -325,6 +367,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
             soId,
             quotation.QuotationNumber);
 
+        await _tracker.CompleteExecutionAsync(soNumber!, soId, cancellationToken);
+
         return new QuotationConversionItemResult
         {
             QuotationId = quotation.QuotationId,
@@ -333,6 +377,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
             SalesOrderNumber = soNumber,
             SalesOrderId = soId,
         };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await _tracker.FailExecutionAsync(ex.Message, ex.ToString(), transient: true, cancellationToken);
+            throw;
+        }
     }
 
     /// <inheritdoc/>

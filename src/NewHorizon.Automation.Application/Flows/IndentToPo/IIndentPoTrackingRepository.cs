@@ -84,8 +84,5 @@ public interface IIndentPoTrackingRepository
     /// finished are simply absent, which is why <see cref="IProcessJobService.GetDailyStatsAsync"/>
     /// (the zero-filling caller) exists as a separate layer rather than this being the public read.
     /// </summary>
-    Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(
-        DateTimeOffset fromUtc,
-        DateTimeOffset toUtc,
-        CancellationToken cancellationToken);
+    Task<IReadOnlyList<DailyConversionStat>> GetDailyStatsAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken, string? workflowType = null);
 }

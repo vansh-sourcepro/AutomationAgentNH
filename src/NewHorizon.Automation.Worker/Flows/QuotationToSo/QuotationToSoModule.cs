@@ -16,6 +16,7 @@ public static class QuotationToSoModule
 
         services.AddHttpClient(QuotationToSoSchedulerService.HttpClientName);
         services.AddHostedService<QuotationToSoSchedulerService>();
+        services.AddScoped<IQuotationToSoDashboardService, QuotationToSoDashboardService>();
 
         return services;
     }
