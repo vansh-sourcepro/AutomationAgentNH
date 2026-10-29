@@ -99,58 +99,46 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
         foreach (var item in qtnDetailsArr.EnumerateArray())
         {
-            var qtnId = GetIntProperty(item, "quotationID", "quotationId", "qtnID");
-            var qtnNumFormatted = GetStringProperty(item, "qtnNumber", "quotationNumber", "qtn Number");
-            var qtnYear = GetStringProperty(item, "quotationYear", "qtnYear");
-            var qtnGroup = GetStringProperty(item, "quotationGroup", "qtnGroup");
-            var qtnNum = GetStringProperty(item, "quotationNumber", "qtnNum");
-            var qtnSiteCode = GetStringProperty(item, "quotationSiteCode", "qtnLocCode") ?? trimmedSite;
-            var qtnSiteId = GetIntProperty(item, "quotationSiteId", "qtnSiteId");
-            var custCode = GetStringProperty(item, "customerCode", "custCD") ?? trimmedCust;
-            var custName = GetStringProperty(item, "customerName");
-            var currency = GetStringProperty(item, "quotationCurrency", "qtnCurrency");
-            var salesmanCode = GetStringProperty(item, "salesmanCode");
-            var salesmanName = GetStringProperty(item, "salesmanName");
-            var consultantCode = GetStringProperty(item, "consultantCode");
-            var consultantName = GetStringProperty(item, "consultantName");
-            var agentCode = GetStringProperty(item, "agentCode");
-            var inqNo = GetStringProperty(item, "inquiryNo", "inqNo");
-            var gstNo = GetStringProperty(item, "gstno", "gstNo");
-            var revNo = GetIntProperty(item, "revisionNo");
-
-            DateTime? qtnDate = null;
-            if (item.TryGetProperty("quotationDate", out var qdElem) && qdElem.ValueKind == JsonValueKind.String)
+            var summary = ParseOpenQuotationSummaryItem(item, trimmedCust, trimmedSite);
+            if (summary is not null)
             {
-                if (DateTime.TryParse(qdElem.GetString(), CultureInfo.InvariantCulture, out var dt))
+                results.Add(summary);
+            }
+        }
+
+        // Fallback: If site was specified and returned 0, try wildcard location %20 so location parameter format differences don't hide quotations
+        if (results.Count == 0 && locParam != "%20")
+        {
+            try
+            {
+                var fbUrl = $"api/v1/sales/salesorderentry/getOpenQuotationDetailsForSO/{Uri.EscapeDataString(trimmedCust)}/%20/%20/0/false";
+                using var fbResp = await _httpClient.GetAsync(fbUrl, cancellationToken);
+                if (fbResp.IsSuccessStatusCode)
                 {
-                    qtnDate = dt;
+                    using var fbDoc = await JsonDocument.ParseAsync(
+                        await fbResp.Content.ReadAsStreamAsync(cancellationToken),
+                        cancellationToken: cancellationToken);
+
+                    var fbRoot = fbDoc.RootElement;
+                    if (fbRoot.TryGetProperty("data", out var fbData) && fbData.ValueKind == JsonValueKind.Object)
+                    {
+                        if (fbData.TryGetProperty("quotationDetails", out var fbArr) && fbArr.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in fbArr.EnumerateArray())
+                            {
+                                var summary = ParseOpenQuotationSummaryItem(item, trimmedCust, trimmedSite);
+                                if (summary is not null && MatchesSiteFilter(trimmedSite, summary.QuotationSiteId, summary.QuotationSiteCode, summary.QuotationNumber))
+                                {
+                                    results.Add(summary);
+                                }
+                            }
+                        }
+                    }
                 }
             }
-
-            if (qtnId > 0 && !string.IsNullOrWhiteSpace(qtnNumFormatted))
+            catch (Exception ex)
             {
-                results.Add(new OpenQuotationSummary
-                {
-                    QuotationId = qtnId,
-                    QuotationNumber = qtnNumFormatted,
-                    QtnYear = qtnYear ?? string.Empty,
-                    QtnGroup = qtnGroup ?? string.Empty,
-                    QtnNum = qtnNum ?? string.Empty,
-                    QuotationSiteCode = qtnSiteCode,
-                    QuotationSiteId = qtnSiteId,
-                    CustomerCode = custCode,
-                    CustomerName = custName,
-                    QuotationDate = qtnDate,
-                    RevisionNo = revNo,
-                    QuotationCurrency = currency,
-                    SalesmanCode = salesmanCode,
-                    SalesmanName = salesmanName,
-                    ConsultantCode = consultantCode,
-                    ConsultantName = consultantName,
-                    AgentCode = agentCode,
-                    InquiryNo = inqNo,
-                    GstNo = gstNo,
-                });
+                _logger.LogWarning(ex, "Failed to query wildcard location fallback for customer {Customer}", trimmedCust);
             }
         }
 
@@ -398,6 +386,15 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
         var openQuotations = await GetOpenAuthorisedQuotationsAsync(trimmedCust, trimmedSite, cancellationToken);
 
+        // Fallback: If no quotations were found via SO discovery API for this customer,
+        // query quotationEntryList directly for this customer so location differences or discovery gaps don't drop quotations.
+        if (openQuotations.Count == 0)
+        {
+            _logger.LogInformation("No quotations returned by SO discovery API for customer {Customer}. Checking quotationEntryList fallback...", trimmedCust);
+            var entryListQuotations = await DiscoverQuotationsFromEntryListAsync(trimmedCust, trimmedSite, cancellationToken);
+            openQuotations = entryListQuotations;
+        }
+
         if (openQuotations.Count == 0)
         {
             return new QuotationToSoSweepResult
@@ -418,6 +415,16 @@ public sealed class QuotationToSoService : IQuotationToSoService
             try
             {
                 var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken);
+                // Fallback retry via numerical search if single conversion needed numerical lookup
+                if (!itemResult.Success && !string.IsNullOrWhiteSpace(qtn.QuotationNumber))
+                {
+                    _logger.LogInformation("Retrying quotation {QuotationNumber} via numerical search fallback...", qtn.QuotationNumber);
+                    var fallbackResult = await ConvertQuotationByNumberAsync(qtn.QuotationNumber, qtn.CustomerCode, qtn.QuotationSiteCode, cancellationToken);
+                    if (fallbackResult.Success)
+                    {
+                        itemResult = fallbackResult;
+                    }
+                }
                 results.Add(itemResult);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -457,10 +464,14 @@ public sealed class QuotationToSoService : IQuotationToSoService
         var trimmedCust = customerCode?.Trim();
         var trimmedSite = siteCode?.Trim();
 
-        // If customer is specified, delegate to ConvertQuotationsForCustomerAsync
-        if (!string.IsNullOrWhiteSpace(trimmedCust))
+        var isAllCustomers = string.IsNullOrWhiteSpace(trimmedCust)
+            || string.Equals(trimmedCust, "ALL", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmedCust, "MULTIPLE", StringComparison.OrdinalIgnoreCase);
+
+        // If a specific customer is specified, delegate to ConvertQuotationsForCustomerAsync
+        if (!isAllCustomers)
         {
-            return await ConvertQuotationsForCustomerAsync(trimmedCust, trimmedSite, cancellationToken);
+            return await ConvertQuotationsForCustomerAsync(trimmedCust!, trimmedSite, cancellationToken);
         }
 
         _logger.LogInformation("Discovering all eligible open authorised quotations across all customers (Site: {SiteCode})", trimmedSite ?? "ALL");
@@ -470,7 +481,28 @@ public sealed class QuotationToSoService : IQuotationToSoService
         var seenQuotationIds = new HashSet<int>();
         var candidateCustomerCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Step 1: Query selectQtnFieldsOnSearchCriteria for all quotations in the current FY
+        // Strategy 1: Direct sweep via quotationEntryList (with authStatus = "" so ERP returns all records)
+        try
+        {
+            var fromEntryList = await DiscoverQuotationsFromEntryListAsync(null, trimmedSite, cancellationToken);
+            foreach (var q in fromEntryList)
+            {
+                if (seenQuotationIds.Add(q.QuotationId))
+                {
+                    openQuotations.Add(q);
+                    if (!string.IsNullOrWhiteSpace(q.CustomerCode))
+                    {
+                        candidateCustomerCodes.Add(q.CustomerCode);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query quotationEntryList while discovering quotations.");
+        }
+
+        // Strategy 2: Query selectQtnFieldsOnSearchCriteria for all quotations in the current FY
         try
         {
             const string searchCriteriaUrl = "api/v1/sales/QuotationEntry/selectQtnFieldsOnSearchCriteria";
@@ -501,22 +533,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 {
                     foreach (var item in dataElem.EnumerateArray())
                     {
-                        var qtnYear = GetStringProperty(item, "qtnYear", "quotationYear", "year") ?? currentFy;
-                        if (!IsSameFinancialYear(qtnYear, currentFy))
-                        {
-                            continue;
-                        }
-
-                        var authBy = GetIntProperty(item, "authBy", "authorizerId");
-                        var isAuth = authBy > 0 || GetBoolProperty(item, "isAuthorise", "isAuthorized");
-                        if (!isAuth)
-                        {
-                            continue;
-                        }
-
-                        var qtnStatus = GetStringProperty(item, "qtnStatus", "status") ?? string.Empty;
-                        if (string.Equals(qtnStatus, "R", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(qtnStatus, "C", StringComparison.OrdinalIgnoreCase))
+                        if (!IsAuthorizedQuotation(item) || !IsOpenQuotation(item))
                         {
                             continue;
                         }
@@ -525,6 +542,34 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         if (!string.IsNullOrWhiteSpace(custCode))
                         {
                             candidateCustomerCodes.Add(custCode.Trim());
+                        }
+
+                        var qtnId = GetIntProperty(item, "quotationId", "qtnID", "autoID", "id");
+                        var qNumber = GetStringProperty(item, "qtnNumber", "quotationNumber", "qtn Number");
+                        var qYear = GetStringProperty(item, "qtnYear", "quotationYear", "year") ?? currentFy;
+                        var qGroup = GetStringProperty(item, "qtnGroup", "quotationGroup", "group") ?? string.Empty;
+                        var qSiteId = GetIntProperty(item, "quotationSiteId", "siteID", "siteId");
+                        var qSiteCode = GetStringProperty(item, "locationCode", "siteCode", "quotationSiteCode") ?? string.Empty;
+
+                        if (qtnId > 0 && !seenQuotationIds.Contains(qtnId) && MatchesSiteFilter(trimmedSite, qSiteId, qSiteCode, qNumber))
+                        {
+                            var (yr, grp, num) = ParseQuotationParts(qNumber ?? string.Empty, qYear, qGroup);
+                            if (seenQuotationIds.Add(qtnId))
+                            {
+                                openQuotations.Add(new OpenQuotationSummary
+                                {
+                                    QuotationId = qtnId,
+                                    QuotationNumber = !string.IsNullOrWhiteSpace(qNumber) ? qNumber : $"{yr}/{grp}/{qSiteCode}/{num}",
+                                    QtnYear = yr,
+                                    QtnGroup = grp,
+                                    QtnNum = num,
+                                    QuotationSiteCode = qSiteCode,
+                                    QuotationSiteId = qSiteId > 0 ? qSiteId : 1,
+                                    CustomerCode = custCode ?? string.Empty,
+                                    CustomerName = GetStringProperty(item, "customerName"),
+                                    QuotationCurrency = "INR",
+                                });
+                            }
                         }
                     }
                 }
@@ -535,81 +580,15 @@ public sealed class QuotationToSoService : IQuotationToSoService
             _logger.LogWarning(ex, "Failed to query selectQtnFieldsOnSearchCriteria while discovering candidate customers.");
         }
 
-        // Step 2: Also check quotationEntryList to find any other customer with open quotations
-        try
-        {
-            const string listUrl = "api/v1/sales/QuotationEntry/quotationEntryList";
-            var filter = new
-            {
-                pageSize = 100,
-                pageNumber = 1,
-                sortField = "Date",
-                sortDirection = "desc",
-                searchValue = string.Empty,
-                userLocationIds = "0",
-                authStatus = "A",
-                loginUser = 1,
-                restcoresalestrans = false,
-                docType = "QT",
-                docSubType = "QT",
-            };
-
-            using var listResponse = await _httpClient.PostAsJsonAsync(listUrl, filter, cancellationToken);
-            if (listResponse.IsSuccessStatusCode)
-            {
-                using var jsonDoc = await JsonDocument.ParseAsync(
-                    await listResponse.Content.ReadAsStreamAsync(cancellationToken),
-                    cancellationToken: cancellationToken);
-
-                var root = jsonDoc.RootElement;
-                if (root.TryGetProperty("data", out var dataElem) && dataElem.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in dataElem.EnumerateArray())
-                    {
-                        var qYear = GetStringProperty(item, "qtnYear", "year");
-                        if (!IsSameFinancialYear(qYear, currentFy))
-                        {
-                            continue;
-                        }
-
-                        var isAuth = GetBoolProperty(item, "isAuthorized", "isAuthorise");
-                        if (!isAuth)
-                        {
-                            continue;
-                        }
-
-                        var qtnStatus = GetStringProperty(item, "status", "qtnStatus") ?? string.Empty;
-                        if (string.Equals(qtnStatus, "R", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(qtnStatus, "C", StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        var custCode = GetStringProperty(item, "customerCode", "custCode", "custCD");
-                        if (!string.IsNullOrWhiteSpace(custCode))
-                        {
-                            candidateCustomerCodes.Add(custCode.Trim());
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to query quotationEntryList while discovering candidate customers.");
-        }
-
-        _logger.LogInformation("Found {Count} candidate customers with potentially open quotations", candidateCustomerCodes.Count);
-
-        // Step 3: For each discovered customer, query ERP's official Sales Order discovery endpoint: getOpenQuotationDetailsForSO
+        // Strategy 3: Query getOpenQuotationDetailsForSO for all discovered candidate customers with wildcard location
         foreach (var cust in candidateCustomerCodes)
         {
             try
             {
-                var custQuotations = await GetOpenAuthorisedQuotationsAsync(cust, trimmedSite ?? string.Empty, cancellationToken);
+                var custQuotations = await GetOpenAuthorisedQuotationsAsync(cust, string.Empty, cancellationToken);
                 foreach (var q in custQuotations)
                 {
-                    if (seenQuotationIds.Add(q.QuotationId))
+                    if (MatchesSiteFilter(trimmedSite, q.QuotationSiteId, q.QuotationSiteCode, q.QuotationNumber) && seenQuotationIds.Add(q.QuotationId))
                     {
                         openQuotations.Add(q);
                     }
@@ -643,6 +622,16 @@ public sealed class QuotationToSoService : IQuotationToSoService
             try
             {
                 var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken);
+                // Fallback retry via numerical search if single conversion needed numerical lookup
+                if (!itemResult.Success && !string.IsNullOrWhiteSpace(qtn.QuotationNumber))
+                {
+                    _logger.LogInformation("Retrying quotation {QuotationNumber} via numerical search fallback...", qtn.QuotationNumber);
+                    var fallbackResult = await ConvertQuotationByNumberAsync(qtn.QuotationNumber, qtn.CustomerCode, qtn.QuotationSiteCode, cancellationToken);
+                    if (fallbackResult.Success)
+                    {
+                        itemResult = fallbackResult;
+                    }
+                }
                 results.Add(itemResult);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1662,5 +1651,269 @@ public sealed class QuotationToSoService : IQuotationToSoService
         }
 
         return false;
+    }
+
+    private async Task<List<OpenQuotationSummary>> DiscoverQuotationsFromEntryListAsync(
+        string? targetCustomer,
+        string? targetSite,
+        CancellationToken cancellationToken)
+    {
+        var currentFy = GetCurrentFinancialYear();
+        var results = new List<OpenQuotationSummary>();
+        const string listUrl = "api/v1/sales/QuotationEntry/quotationEntryList";
+
+        var filter = new
+        {
+            pageSize = 100,
+            pageNumber = 1,
+            sortField = "Date",
+            sortDirection = "desc",
+            searchValue = targetCustomer ?? string.Empty,
+            userLocationIds = "0",
+            authStatus = "",
+            loginUser = 1,
+            restcoresalestrans = false,
+            docType = "QT",
+            docSubType = "QT",
+        };
+
+        using var listResponse = await _httpClient.PostAsJsonAsync(listUrl, filter, cancellationToken);
+        if (!listResponse.IsSuccessStatusCode)
+        {
+            return results;
+        }
+
+        using var jsonDoc = await JsonDocument.ParseAsync(
+            await listResponse.Content.ReadAsStreamAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+
+        var root = jsonDoc.RootElement;
+        if (!root.TryGetProperty("data", out var dataElem) || dataElem.ValueKind != JsonValueKind.Array)
+        {
+            return results;
+        }
+
+        foreach (var item in dataElem.EnumerateArray())
+        {
+            if (!IsAuthorizedQuotation(item) || !IsOpenQuotation(item))
+            {
+                continue;
+            }
+
+            var qId = GetIntProperty(item, "qtnID", "id", "quotationID");
+            var qNumber = GetStringProperty(item, "qtnNumber", "number", "quotationNumber");
+            var qYear = GetStringProperty(item, "qtnYear", "year", "quotationYear") ?? currentFy;
+            var qGroup = GetStringProperty(item, "qtnGroup", "group", "quotationGroup");
+            var sId = GetIntProperty(item, "siteId", "siteID");
+            var sCode = GetStringProperty(item, "siteCode", "locationCode");
+            var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD");
+            var cName = GetStringProperty(item, "customerName");
+
+            if (!string.IsNullOrWhiteSpace(targetCustomer) && !string.Equals(targetCustomer, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(cCode, targetCustomer, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+            }
+
+            if (!MatchesSiteFilter(targetSite, sId, sCode, qNumber))
+            {
+                continue;
+            }
+
+            if (qId > 0 && !string.IsNullOrWhiteSpace(qNumber))
+            {
+                var (yr, grp, num) = ParseQuotationParts(qNumber, qYear, qGroup);
+
+                DateTime? qDate = null;
+                if (item.TryGetProperty("quotationDate", out var qdElem) || item.TryGetProperty("date", out qdElem))
+                {
+                    if (qdElem.ValueKind == JsonValueKind.String && DateTime.TryParse(qdElem.GetString(), CultureInfo.InvariantCulture, out var dt))
+                    {
+                        qDate = dt;
+                    }
+                }
+
+                results.Add(new OpenQuotationSummary
+                {
+                    QuotationId = qId,
+                    QuotationNumber = qNumber,
+                    QtnYear = yr,
+                    QtnGroup = grp,
+                    QtnNum = num,
+                    QuotationSiteCode = sCode ?? string.Empty,
+                    QuotationSiteId = sId > 0 ? sId : 1,
+                    CustomerCode = cCode ?? string.Empty,
+                    CustomerName = cName,
+                    QuotationDate = qDate,
+                    QuotationCurrency = "INR",
+                });
+            }
+        }
+
+        return results;
+    }
+
+    private static bool IsAuthorizedQuotation(JsonElement item)
+    {
+        var authBy = GetIntProperty(item, "authBy", "authorizerId", "authby");
+        if (authBy > 0)
+        {
+            return true;
+        }
+
+        if (GetBoolProperty(item, "isAuthorized", "isAuthorise", "isAuthorised"))
+        {
+            return true;
+        }
+
+        var authStatus = GetStringProperty(item, "authStatus", "authorizationStatus", "authorizeStatus");
+        if (string.Equals(authStatus, "A", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(authStatus, "Authorized", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(authStatus, "Y", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsOpenQuotation(JsonElement item)
+    {
+        var status = GetStringProperty(item, "status", "qtnStatus", "quotationStatus");
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return true;
+        }
+
+        var trimmed = status.Trim();
+        if (string.Equals(trimmed, "C", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "R", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Closed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Rejected", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesSiteFilter(string? targetSite, int siteId, string? siteCode, string? quotationNumber)
+    {
+        if (string.IsNullOrWhiteSpace(targetSite) || targetSite == "0" || string.Equals(targetSite, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var cleanTarget = targetSite.Trim();
+
+        if (siteId > 0 && int.TryParse(cleanTarget, NumberStyles.Integer, CultureInfo.InvariantCulture, out var targetId) && siteId == targetId)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(siteCode) && string.Equals(siteCode.Trim(), cleanTarget, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(quotationNumber))
+        {
+            var parts = quotationNumber.Split(['/', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Any(p => string.Equals(p, cleanTarget, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static (string Year, string Group, string Num) ParseQuotationParts(
+        string quotationNumber,
+        string? fallbackYear,
+        string? fallbackGroup)
+    {
+        var clean = quotationNumber.Trim();
+        var parts = clean.Split(['/', '-'], StringSplitOptions.TrimEntries);
+        if (parts.Length >= 4)
+        {
+            var year = parts[0];
+            if (parts.Length >= 5 && parts[1].Length == 2 && char.IsDigit(parts[1][0]))
+            {
+                year = $"{parts[0]}-{parts[1]}";
+                var grp = parts[2];
+                var num = parts[^1];
+                return (year, grp, num);
+            }
+            return (parts[0], parts[1], parts[^1]);
+        }
+        if (parts.Length == 3)
+        {
+            return (parts[0], parts[1], parts[2]);
+        }
+
+        return (fallbackYear ?? string.Empty, fallbackGroup ?? string.Empty, clean);
+    }
+
+    private static OpenQuotationSummary? ParseOpenQuotationSummaryItem(JsonElement item, string defaultCustomer, string defaultSite)
+    {
+        var qtnId = GetIntProperty(item, "quotationID", "quotationId", "qtnID");
+        var qtnNumFormatted = GetStringProperty(item, "qtnNumber", "quotationNumber", "qtn Number");
+        var qtnYear = GetStringProperty(item, "quotationYear", "qtnYear");
+        var qtnGroup = GetStringProperty(item, "quotationGroup", "qtnGroup");
+        var qtnNum = GetStringProperty(item, "quotationNumber", "qtnNum");
+        var qtnSiteCode = GetStringProperty(item, "quotationSiteCode", "qtnLocCode") ?? defaultSite;
+        var qtnSiteId = GetIntProperty(item, "quotationSiteId", "qtnSiteId");
+        var custCode = GetStringProperty(item, "customerCode", "custCD") ?? defaultCustomer;
+        var custName = GetStringProperty(item, "customerName");
+        var currency = GetStringProperty(item, "quotationCurrency", "qtnCurrency");
+        var salesmanCode = GetStringProperty(item, "salesmanCode");
+        var salesmanName = GetStringProperty(item, "salesmanName");
+        var consultantCode = GetStringProperty(item, "consultantCode");
+        var consultantName = GetStringProperty(item, "consultantName");
+        var agentCode = GetStringProperty(item, "agentCode");
+        var inqNo = GetStringProperty(item, "inquiryNo", "inqNo");
+        var gstNo = GetStringProperty(item, "gstno", "gstNo");
+        var revNo = GetIntProperty(item, "revisionNo");
+
+        DateTime? qtnDate = null;
+        if (item.TryGetProperty("quotationDate", out var qdElem) && qdElem.ValueKind == JsonValueKind.String)
+        {
+            if (DateTime.TryParse(qdElem.GetString(), CultureInfo.InvariantCulture, out var dt))
+            {
+                qtnDate = dt;
+            }
+        }
+
+        if (qtnId > 0 && !string.IsNullOrWhiteSpace(qtnNumFormatted))
+        {
+            return new OpenQuotationSummary
+            {
+                QuotationId = qtnId,
+                QuotationNumber = qtnNumFormatted,
+                QtnYear = qtnYear ?? string.Empty,
+                QtnGroup = qtnGroup ?? string.Empty,
+                QtnNum = qtnNum ?? string.Empty,
+                QuotationSiteCode = qtnSiteCode,
+                QuotationSiteId = qtnSiteId > 0 ? qtnSiteId : 1,
+                CustomerCode = custCode,
+                CustomerName = custName,
+                QuotationDate = qtnDate,
+                RevisionNo = revNo,
+                QuotationCurrency = currency,
+                SalesmanCode = salesmanCode,
+                SalesmanName = salesmanName,
+                ConsultantCode = consultantCode,
+                ConsultantName = consultantName,
+                AgentCode = agentCode,
+                InquiryNo = inqNo,
+                GstNo = gstNo,
+            };
+        }
+
+        return null;
     }
 }

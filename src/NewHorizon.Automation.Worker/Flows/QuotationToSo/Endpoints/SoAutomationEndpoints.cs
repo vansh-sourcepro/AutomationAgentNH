@@ -76,17 +76,38 @@ public static class SoAutomationEndpoints
             return timeError!;
         }
 
+        var clearQuotations = request.ClearQuotationNumbers
+            || (request.QuotationNumbers is not null && (string.IsNullOrWhiteSpace(request.QuotationNumbers) || string.Equals(request.QuotationNumbers.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)));
+
+        var clearCustomer = request.ClearCustomerCode
+            || (request.CustomerCode is not null && (string.IsNullOrWhiteSpace(request.CustomerCode) || string.Equals(request.CustomerCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)));
+
+        var clearSite = request.ClearSiteCode
+            || (request.SiteCode is not null && (string.IsNullOrWhiteSpace(request.SiteCode) || string.Equals(request.SiteCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)));
+
+        var quotationNumbersToSave = clearQuotations
+            ? null
+            : request.QuotationNumbers?.Trim();
+
+        var customerCodeToSave = clearCustomer
+            ? null
+            : request.CustomerCode?.Trim();
+
+        var siteCodeToSave = clearSite
+            ? null
+            : request.SiteCode?.Trim();
+
         var update = new QuotationSoAutomationConfigUpdate
         {
             RunMode = mode,
             ScheduleTime = scheduleTime,
             ClearScheduleTime = request.ClearScheduleTime,
-            QuotationNumbers = request.QuotationNumbers,
-            ClearQuotationNumbers = request.ClearQuotationNumbers,
-            CustomerCode = request.CustomerCode,
-            ClearCustomerCode = request.ClearCustomerCode,
-            SiteCode = request.SiteCode,
-            ClearSiteCode = request.ClearSiteCode,
+            QuotationNumbers = quotationNumbersToSave,
+            ClearQuotationNumbers = clearQuotations,
+            CustomerCode = customerCodeToSave,
+            ClearCustomerCode = clearCustomer,
+            SiteCode = siteCodeToSave,
+            ClearSiteCode = clearSite,
             IsActive = request.IsActive,
             DryRun = request.DryRun,
         };
@@ -108,11 +129,13 @@ public static class SoAutomationEndpoints
             saved.RecordRunStarted(clock.UtcNow, null);
             await configs.SaveAsync(saved, cancellationToken);
 
-            var quotationList = saved.QuotationNumbers?
-                .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var quotationList = string.IsNullOrWhiteSpace(saved.QuotationNumbers) || string.Equals(saved.QuotationNumbers.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : saved.QuotationNumbers
+                    .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
             var triggeredBy = ActorOf(user) ?? "API";
             await tracker.StartRunAsync(

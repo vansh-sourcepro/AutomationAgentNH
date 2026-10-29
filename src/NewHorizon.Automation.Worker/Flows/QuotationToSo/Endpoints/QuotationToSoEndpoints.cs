@@ -182,18 +182,48 @@ public static class QuotationToSoEndpoints
             logger.LogWarning(ex, "Failed to persist run started state to config repository.");
         }
 
-        var customerCode = !string.IsNullOrWhiteSpace(request.CustomerCode)
-            ? request.CustomerCode.Trim()
-            : config.CustomerCode;
+        string? customerCode;
+        if (request.CustomerCode is not null)
+        {
+            customerCode = string.IsNullOrWhiteSpace(request.CustomerCode) || string.Equals(request.CustomerCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.CustomerCode.Trim();
+        }
+        else
+        {
+            customerCode = triggerSource == TriggerSource.Timer ? config.CustomerCode : null;
+        }
 
-        var siteCode = !string.IsNullOrWhiteSpace(request.SiteCode)
-            ? request.SiteCode.Trim()
-            : config.SiteCode;
+        string? siteCode;
+        if (request.SiteCode is not null)
+        {
+            siteCode = string.IsNullOrWhiteSpace(request.SiteCode) || string.Equals(request.SiteCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.SiteCode.Trim();
+        }
+        else
+        {
+            siteCode = config.SiteCode;
+        }
 
         // Determine target quotation numbers (supports "1, 2, 3" in request.QuotationNumbers, request.QuotationNumber, or config.QuotationNumbers)
-        var quotationNumbersString = !string.IsNullOrWhiteSpace(request.QuotationNumbers)
-            ? request.QuotationNumbers
-            : (!string.IsNullOrWhiteSpace(request.QuotationNumber) ? request.QuotationNumber : config.QuotationNumbers);
+        string? quotationNumbersString;
+        if (!string.IsNullOrWhiteSpace(request.QuotationNumbers))
+        {
+            quotationNumbersString = string.Equals(request.QuotationNumbers.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.QuotationNumbers.Trim();
+        }
+        else if (!string.IsNullOrWhiteSpace(request.QuotationNumber))
+        {
+            quotationNumbersString = string.Equals(request.QuotationNumber.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.QuotationNumber.Trim();
+        }
+        else
+        {
+            quotationNumbersString = triggerSource == TriggerSource.Timer ? config.QuotationNumbers : null;
+        }
 
         var quotationList = quotationNumbersString?
             .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

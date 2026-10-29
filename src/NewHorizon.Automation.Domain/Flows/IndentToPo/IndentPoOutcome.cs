@@ -130,7 +130,7 @@ public sealed class IndentPoOutcome
             stepId,
             sequence,
             PoOutcomeKind.Created,
-            vendorCode.Trim(),
+            Blank(vendorCode, 20)!,
             Blank(currencyCode),
             Blank(rateStructureCode),
             poId,
@@ -187,8 +187,12 @@ public sealed class IndentPoOutcome
             nowUtc);
     }
 
-    private static string? Blank(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? Blank(string? value, int maxLength = 20)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
+    }
 
     /// <summary>Matches the column width, so an over-long ERP message cannot fail the save.</summary>
     private static string Truncate(string value) =>
