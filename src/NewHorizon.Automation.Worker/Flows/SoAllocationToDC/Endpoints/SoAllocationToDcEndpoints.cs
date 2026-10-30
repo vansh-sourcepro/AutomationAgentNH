@@ -29,35 +29,42 @@ public static class SoAllocationToDcEndpoints
                 "/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallansFromAllocations",
                 CreateDeliveryChallansFromAllAllocationsAsync)
             .WithName("CreateDeliveryChallansFromAllocations")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapPost(
                 "/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallanFromAllocation",
                 CreateDeliveryChallanAsync)
             .WithName("CreateDeliveryChallanFromAllocation")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapGet(
                 "/api/v1/sales/SalesAllocationDeAllocation/PendingAllocations",
                 GetPendingAllocationsAsync)
             .WithName("GetPendingAllocationsForDc")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapGet(
                 "/api/v1/sales/SalesAllocationDeAllocation/AutomationConfig",
                 GetAutomationConfigAsync)
             .WithName("GetSoAutomationConfig")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapPost(
                 "/api/v1/sales/SalesAllocationDeAllocation/AutomationConfig",
                 UpdateAutomationConfigAsync)
             .WithName("UpdateSoAutomationConfig")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapPut(
+                "/api/v1/sales/SalesAllocationDeAllocation/AutomationConfig",
+                UpdateAutomationConfigAsync)
+            .WithName("PutSoAutomationConfig")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         return endpoints;
     }
@@ -96,17 +103,30 @@ public static class SoAllocationToDcEndpoints
             normalizedTime = parsedTime.ToString("HH:mm");
         }
 
-        // Backwards compatibility for setting single OAF
-        var oafList = dto.OafNumbers;
+        // Support both single OAF number and multiple OAF numbers
+        var oafList = dto.OafNumbers?
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (oafList == null || oafList.Count == 0)
         {
             var fallback = dto.OafNumber ?? dto.AllocationNumber;
             if (!string.IsNullOrWhiteSpace(fallback))
             {
-                oafList = new List<string> { fallback.Trim() };
+                oafList = fallback.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
             }
         }
-        var primaryOaf = oafList?.FirstOrDefault();
+
+        if (oafList != null && oafList.Count == 0)
+        {
+            oafList = null;
+        }
 
         var config = await repo.GetConfigAsync(cancellationToken);
         
@@ -115,31 +135,28 @@ public static class SoAllocationToDcEndpoints
         var mode = dto.AutomationMode?.ToUpperInvariant();
         if (!dto.AutomationEnabled)
         {
-            // When Toggle is OFF, safety shutoff resets all parameters to null
+            // When Toggle is OFF, safety shutoff resets parameters to null
             mode = null;
             normalizedTime = null;
             oafList = null;
         }
         else
         {
-            if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
+            if (string.IsNullOrWhiteSpace(mode))
             {
-                // Default based on whether time is provided if mode is not specified
-                mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+                if (oafList != null && oafList.Count > 0 && !string.IsNullOrWhiteSpace(normalizedTime))
+                {
+                    mode = "BOTH";
+                }
+                else if (oafList != null && oafList.Count > 0)
+                {
+                    mode = "INDIVIDUAL";
+                }
+                else
+                {
+                    mode = "TIMER";
+                }
             }
-
-            // Enforce strict mode-based restrictions:
-            if (mode == "TIMER")
-            {
-                // In TIMER mode, user can ONLY configure time. OAF info cannot be set.
-                oafList = null;
-            }
-            else if (mode == "INDIVIDUAL")
-            {
-                // In INDIVIDUAL mode, user can ONLY configure OAFs/allocations. Time cannot be set.
-                normalizedTime = null;
-            }
-            // In BOTH mode, user can configure both time and OAF info.
         }
 
         config.AutomationEnabled = dto.AutomationEnabled;

@@ -123,9 +123,9 @@ public sealed class SoAllocationToDcSchedulerService : BackgroundService
             DryRun = false
         };
 
-        // If mode is BOTH (or defaults to BOTH/legacy), use OafNumbers.
-        // If mode is TIMER, we process ALL allocations, so we ignore OafNumbers.
-        if (config.AutomationMode != "TIMER" && config.OafNumbers != null && config.OafNumbers.Count > 0)
+        // If caller configured specific OAF numbers, process ONLY those OAF numbers.
+        // If no OAF numbers are configured, process ALL eligible allocations (existing behavior preserved).
+        if (config.OafNumbers != null && config.OafNumbers.Count > 0)
         {
             requestPayload = requestPayload with { OafNumbers = config.OafNumbers.Select(x => x.Trim()).ToList() };
         }
