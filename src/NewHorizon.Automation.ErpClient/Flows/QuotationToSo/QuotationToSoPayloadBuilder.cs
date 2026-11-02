@@ -22,7 +22,16 @@ public static class QuotationToSoPayloadBuilder
 
         var qtnHeader = GetFirstElementOrSelf(qtnData, "quotationDetails");
 
-        var customerCode = summary.CustomerCode;
+        var customerCode = !string.IsNullOrWhiteSpace(summary.CustomerCode)
+            ? summary.CustomerCode
+            : (GetString(qtnHeader, "customerCode")
+               ?? GetString(qtnHeader, "custCode")
+               ?? GetString(qtnHeader, "custCD")
+               ?? GetString(qtnHeader, "xqdCustCd")
+               ?? GetString(qtnHeader, "customer")
+               ?? GetString(qtnHeader, "partyCode")
+               ?? GetString(qtnHeader, "billToCustomerCode")
+               ?? string.Empty);
         var customerName = summary.CustomerName ?? GetString(qtnHeader, "customerName") ?? customerCode;
         var billToCode = GetString(qtnHeader, "billToCustomerCode") ?? customerCode;
         var salesmanCode = GetString(qtnHeader, "salesPersonCode") ?? summary.SalesmanCode ?? string.Empty;

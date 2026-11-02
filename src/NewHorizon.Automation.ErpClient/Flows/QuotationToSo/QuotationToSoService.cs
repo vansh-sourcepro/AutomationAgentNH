@@ -1133,7 +1133,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                     var qGroup = GetStringProperty(item, "qtnGroup", "group");
                     var sId = GetIntProperty(item, "siteId", "siteID");
                     var sCode = GetStringProperty(item, "siteCode");
-                    var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD");
+                    var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD", "xqdCustCd", "customer", "partyCode");
                     var isAuth = GetBoolProperty(item, "isAuthorized", "isAuthorise");
                     var status = GetStringProperty(item, "status", "qtnStatus") ?? string.Empty;
 
@@ -1706,7 +1706,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
             var qGroup = GetStringProperty(item, "qtnGroup", "group", "quotationGroup");
             var sId = GetIntProperty(item, "siteId", "siteID");
             var sCode = GetStringProperty(item, "siteCode", "locationCode");
-            var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD");
+            var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD", "xqdCustCd", "customer", "partyCode");
             var cName = GetStringProperty(item, "customerName");
 
             if (!string.IsNullOrWhiteSpace(targetCustomer) && !string.Equals(targetCustomer, "ALL", StringComparison.OrdinalIgnoreCase))
