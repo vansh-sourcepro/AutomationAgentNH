@@ -67,10 +67,11 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
             _dbContext.IndentPoAutomationConfigs.Add(stored);
         }
 
-        var (existingSite, existingCustomer) = ParseQuotationSites(stored.Sites);
+        var (existingSite, existingCustomer, existingAutoCreateOaf) = ParseQuotationSites(stored.Sites);
         var newSite = update.ClearSiteCode ? null : (update.SiteCode ?? existingSite);
         var newCustomer = update.ClearCustomerCode ? null : (update.CustomerCode ?? existingCustomer);
-        var formattedSites = FormatQuotationSites(newSite, newCustomer);
+        var newAutoCreateOaf = update.AutoCreateOaf ?? existingAutoCreateOaf;
+        var formattedSites = FormatQuotationSites(newSite, newCustomer, newAutoCreateOaf);
 
         var poMode = update.RunMode.HasValue ? ToPoRunMode(update.RunMode.Value) : (PoAutomationRunMode?)null;
 
@@ -128,7 +129,7 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
             _dbContext.IndentPoAutomationConfigs.Add(stored);
         }
 
-        var formattedSites = FormatQuotationSites(config.SiteCode, config.CustomerCode);
+        var formattedSites = FormatQuotationSites(config.SiteCode, config.CustomerCode, config.AutoCreateOaf);
         var poMode = ToPoRunMode(config.RunMode);
 
         stored.UpdateFromQuotation(
@@ -158,7 +159,7 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
 
     private QuotationSoAutomationConfig MapToQuotationConfig(IndentPoAutomationConfig row)
     {
-        var (siteCode, customerCode) = ParseQuotationSites(row.Sites);
+        var (siteCode, customerCode, autoCreateOaf) = ParseQuotationSites(row.Sites);
 
         return QuotationSoAutomationConfig.FromSnapshot(
             id: row.Id,
@@ -174,14 +175,15 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
             lastRunStatus: row.LastRunStatus,
             lastRunMessage: _lastRunMessage,
             updatedAtUtc: row.UpdatedAtUtc,
-            updatedBy: row.UpdatedBy);
+            updatedBy: row.UpdatedBy,
+            autoCreateOaf: autoCreateOaf);
     }
 
-    private static (string? SiteCode, string? CustomerCode) ParseQuotationSites(string? raw)
+    private static (string? SiteCode, string? CustomerCode, bool AutoCreateOaf) ParseQuotationSites(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return (null, null);
+            return (null, null, true);
         }
 
         var trimmed = raw.Trim();
@@ -193,7 +195,8 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
                 var root = doc.RootElement;
                 var site = root.TryGetProperty("site", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
                 var cust = root.TryGetProperty("customer", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
-                return (site, cust);
+                var oaf = !root.TryGetProperty("autoCreateOaf", out var o) || (o.ValueKind != JsonValueKind.False);
+                return (site, cust, oaf);
             }
             catch
             {
@@ -201,23 +204,19 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
             }
         }
 
-        return (trimmed, null);
+        return (trimmed, null, true);
     }
 
-    private static string? FormatQuotationSites(string? siteCode, string? customerCode)
+    private static string? FormatQuotationSites(string? siteCode, string? customerCode, bool autoCreateOaf)
     {
         var cleanSite = string.IsNullOrWhiteSpace(siteCode) ? null : siteCode.Trim();
         var cleanCustomer = string.IsNullOrWhiteSpace(customerCode) ? null : customerCode.Trim();
-
-        if (cleanSite is null && cleanCustomer is null)
-        {
-            return null;
-        }
 
         return JsonSerializer.Serialize(new
         {
             site = cleanSite,
             customer = cleanCustomer,
+            autoCreateOaf = autoCreateOaf,
         });
     }
 

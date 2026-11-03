@@ -15,6 +15,7 @@ public sealed class QuotationToSoTrackingTests
             QuotationToSoStages.QuotationDetail,
             QuotationToSoStages.Validation,
             QuotationToSoStages.CreateSalesOrder,
+            QuotationToSoStages.CreateOaf,
         ]);
     }
 
@@ -25,6 +26,7 @@ public sealed class QuotationToSoTrackingTests
         QuotationToSoTasks.For(QuotationToSoStages.QuotationDetail).Should().Be(QuotationToSoTasks.GetQuotationDetail);
         QuotationToSoTasks.For(QuotationToSoStages.Validation).Should().Be(QuotationToSoTasks.VerifyExistingSalesOrder);
         QuotationToSoTasks.For(QuotationToSoStages.CreateSalesOrder).Should().Be(QuotationToSoTasks.CreateSalesOrderEntry);
+        QuotationToSoTasks.For(QuotationToSoStages.CreateOaf).Should().Be(QuotationToSoTasks.CreateOrderAckEntry);
     }
 
     [Fact]

@@ -17,7 +17,9 @@ public sealed record SoAutomationConfigResponse(
     string? LastRunMessage,
     DateTimeOffset UpdatedAtUtc,
     string? UpdatedBy,
-    string? SalesOrderNumber = null);
+    string? SalesOrderNumber = null,
+    bool AutoCreateOaf = true,
+    string? OafNumber = null);
 
 /// <summary>
 /// Update payload for Quotation to Sales Order automation configuration.
@@ -33,7 +35,8 @@ public sealed record UpdateSoAutomationRequest(
     string? SiteCode = null,
     bool ClearSiteCode = false,
     bool? IsActive = null,
-    bool? DryRun = null);
+    bool? DryRun = null,
+    bool? AutoCreateOaf = null);
 
 /// <summary>
 /// Master on/off toggle payload.

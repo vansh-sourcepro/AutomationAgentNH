@@ -110,6 +110,7 @@ public static class SoAutomationEndpoints
             ClearSiteCode = clearSite,
             IsActive = request.IsActive,
             DryRun = request.DryRun,
+            AutoCreateOaf = request.AutoCreateOaf,
         };
 
         var saved = await configs.UpsertAsync(update, ActorOf(user), cancellationToken);
@@ -117,6 +118,7 @@ public static class SoAutomationEndpoints
         // If the configuration is active and either RunMode is Api, ClearScheduleTime is true, or no ScheduleTime is set,
         // automatically execute the conversion immediately in the same call so the user does not have to call a separate API.
         string? createdSoNumber = null;
+        string? createdOafNumber = null;
         var shouldExecuteImmediately = saved.IsActive
             && (saved.RunMode == SoAutomationRunMode.Api
                 || request.ClearScheduleTime
@@ -154,14 +156,18 @@ public static class SoAutomationEndpoints
                         qtnNo,
                         saved.CustomerCode,
                         saved.SiteCode,
-                        cancellationToken);
+                        cancellationToken,
+                        saved.AutoCreateOaf);
 
                     var status = itemResult.Success ? "Success" : "Failed";
                     var message = itemResult.Success
-                        ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'."
+                        ? (!string.IsNullOrWhiteSpace(itemResult.OafNumber)
+                            ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}' and OAF '{itemResult.OafNumber}'."
+                            : $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'.")
                         : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.";
 
                     createdSoNumber = itemResult.SalesOrderNumber;
+                    createdOafNumber = itemResult.OafNumber;
                     saved.RecordRunCompleted(status, message, clock.UtcNow);
                     await configs.SaveAsync(saved, cancellationToken);
 
@@ -172,6 +178,7 @@ public static class SoAutomationEndpoints
                     var succeeded = 0;
                     var failed = 0;
                     var soNumbers = new List<string>();
+                    var oafNumbers = new List<string>();
 
                     foreach (var qtn in quotationList)
                     {
@@ -179,7 +186,8 @@ public static class SoAutomationEndpoints
                             qtn,
                             saved.CustomerCode,
                             saved.SiteCode,
-                            cancellationToken);
+                            cancellationToken,
+                            saved.AutoCreateOaf);
 
                         if (item.Success)
                         {
@@ -187,6 +195,10 @@ public static class SoAutomationEndpoints
                             if (!string.IsNullOrWhiteSpace(item.SalesOrderNumber))
                             {
                                 soNumbers.Add(item.SalesOrderNumber);
+                            }
+                            if (!string.IsNullOrWhiteSpace(item.OafNumber))
+                            {
+                                oafNumbers.Add(item.OafNumber);
                             }
                         }
                         else
@@ -201,6 +213,10 @@ public static class SoAutomationEndpoints
                     {
                         createdSoNumber = string.Join(", ", soNumbers);
                     }
+                    if (oafNumbers.Count > 0)
+                    {
+                        createdOafNumber = string.Join(", ", oafNumbers);
+                    }
 
                     saved.RecordRunCompleted(status, message, clock.UtcNow);
                     await configs.SaveAsync(saved, cancellationToken);
@@ -212,12 +228,18 @@ public static class SoAutomationEndpoints
                     var sweepResult = await service.ConvertAllEligibleQuotationsAsync(
                         saved.CustomerCode,
                         saved.SiteCode,
-                        cancellationToken);
+                        cancellationToken,
+                        saved.AutoCreateOaf);
 
                     var status = sweepResult.Failed == 0 ? "Success" : sweepResult.Succeeded > 0 ? "PartialSuccess" : "Failed";
                     var message = sweepResult.TotalFound == 0
                         ? "No eligible open authorised quotations found for conversion."
                         : $"Processed {sweepResult.TotalFound} quotation(s): {sweepResult.Succeeded} converted successfully, {sweepResult.Failed} failed.";
+
+                    var successfulSos = sweepResult.Details.Where(d => d.Success && !string.IsNullOrWhiteSpace(d.SalesOrderNumber)).Select(d => d.SalesOrderNumber!).ToList();
+                    var successfulOafs = sweepResult.Details.Where(d => d.Success && !string.IsNullOrWhiteSpace(d.OafNumber)).Select(d => d.OafNumber!).ToList();
+                    if (successfulSos.Count > 0) createdSoNumber = string.Join(", ", successfulSos);
+                    if (successfulOafs.Count > 0) createdOafNumber = string.Join(", ", successfulOafs);
 
                     saved.RecordRunCompleted(status, message, clock.UtcNow);
                     await configs.SaveAsync(saved, cancellationToken);
@@ -235,7 +257,7 @@ public static class SoAutomationEndpoints
             }
         }
 
-        return Results.Ok(ToResponse(saved, createdSoNumber));
+        return Results.Ok(ToResponse(saved, createdSoNumber, createdOafNumber));
     }
 
     private static async Task<IResult> SetEnabledAsync(
@@ -253,7 +275,10 @@ public static class SoAutomationEndpoints
         return Results.Ok(ToResponse(saved));
     }
 
-    public static SoAutomationConfigResponse ToResponse(QuotationSoAutomationConfig config, string? salesOrderNumber = null) => new(
+    public static SoAutomationConfigResponse ToResponse(
+        QuotationSoAutomationConfig config,
+        string? salesOrderNumber = null,
+        string? oafNumber = null) => new(
         config.IsActive,
         config.RunMode.ToString(),
         config.ScheduleTime,
@@ -267,7 +292,9 @@ public static class SoAutomationEndpoints
         config.LastRunMessage,
         config.UpdatedAtUtc,
         config.UpdatedBy,
-        salesOrderNumber);
+        salesOrderNumber,
+        config.AutoCreateOaf,
+        oafNumber);
 
     private static bool TryParseTime(string? value, out TimeOnly? time, out IResult? error)
     {

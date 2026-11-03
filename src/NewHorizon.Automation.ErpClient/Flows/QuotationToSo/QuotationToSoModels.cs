@@ -38,6 +38,8 @@ public sealed record QuotationConversionItemResult
     public required bool Success { get; init; }
     public string? SalesOrderNumber { get; init; }
     public int? SalesOrderId { get; init; }
+    public string? OafNumber { get; init; }
+    public long? OafId { get; init; }
     public string? ErrorMessage { get; init; }
 }
 
@@ -52,4 +54,15 @@ public sealed record QuotationToSoSweepResult
     public required int Succeeded { get; init; }
     public required int Failed { get; init; }
     public required IReadOnlyList<QuotationConversionItemResult> Details { get; init; }
+}
+
+/// <summary>
+/// Result of creating an Order Acceptance Form (OAF) for a Sales Order.
+/// </summary>
+public sealed record OafCreationResult
+{
+    public required bool Success { get; init; }
+    public string? OafNumber { get; init; }
+    public long? OafId { get; init; }
+    public string? ErrorMessage { get; init; }
 }

@@ -18,6 +18,9 @@ public sealed record ConvertQuotationsRequest
 
     /// <summary>Site/location code where the quotations reside (e.g. "AHM", "HO").</summary>
     public string? SiteCode { get; init; }
+
+    /// <summary>Whether to automatically create an Order Acceptance Form (OAF) for each converted Sales Order (defaults to config setting or true).</summary>
+    public bool? AutoCreateOaf { get; init; }
 }
 
 /// <summary>
@@ -28,6 +31,7 @@ public sealed record ConvertQuotationsResponse
     public required bool Success { get; init; }
     public required string Message { get; init; }
     public string? SalesOrderNumber { get; init; }
+    public string? OafNumber { get; init; }
     public QuotationConversionItemResult? Item { get; init; }
     public QuotationToSoSweepResult? Result { get; init; }
 }

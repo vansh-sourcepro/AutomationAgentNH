@@ -176,9 +176,13 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
         await _jobs.SaveAsync(_execution, cancellationToken);
     }
 
+    public Task CompleteExecutionAsync(string salesOrderNumber, long? salesOrderId, CancellationToken cancellationToken) => CompleteExecutionAsync(salesOrderNumber, salesOrderId, null, null, cancellationToken);
+
     public async Task CompleteExecutionAsync(
         string salesOrderNumber,
         long? salesOrderId,
+        string? oafNumber,
+        long? oafId,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(salesOrderNumber);
@@ -189,7 +193,8 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
         }
 
         var now = _clock.UtcNow;
-        CompleteRunningStep(now, salesOrderNumber);
+        var fullDocumentRef = !string.IsNullOrWhiteSpace(oafNumber) ? $"{salesOrderNumber} (OAF: {oafNumber})" : salesOrderNumber;
+        CompleteRunningStep(now, fullDocumentRef);
 
         foreach (var pending in _execution.Steps.Where(s => !s.IsTerminal))
         {
@@ -206,7 +211,7 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
             currencyCode: "INR",
             rateStructureCode: null,
             poId: salesOrderId ?? 0,
-            poNumber: salesOrderNumber,
+            poNumber: fullDocumentRef,
             lineCount: 1,
             now);
 

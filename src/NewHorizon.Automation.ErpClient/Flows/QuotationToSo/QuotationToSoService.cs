@@ -154,7 +154,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
     /// <inheritdoc/>
     public async Task<QuotationConversionItemResult> ConvertSingleQuotationAsync(
         OpenQuotationSummary quotation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool autoCreateOaf = true)
     {
         ArgumentNullException.ThrowIfNull(quotation);
 
@@ -247,23 +248,61 @@ public sealed class QuotationToSoService : IQuotationToSoService
         var preVerified = await VerifyCreatedSalesOrderAsync(quotation, soYear, soGroup, cancellationToken);
         if (preVerified is not null)
         {
-            _logger.LogInformation(
-                "Quotation {QuotationNumber} is already converted to Sales Order {SoNumber} (Id: {SoId}). Returning existing order without duplicate creation.",
-                quotation.QuotationNumber,
-                preVerified.Value.SoNumber,
-                preVerified.Value.SoId);
+            var existingSoNum = preVerified.Value.SoNumber;
+            var existingSoId = preVerified.Value.SoId;
 
-            await _tracker.SkipExecutionAsync(
-                $"Quotation '{quotation.QuotationNumber}' is already converted to Sales Order '{preVerified.Value.SoNumber}'.",
-                cancellationToken);
+            _logger.LogInformation(
+                "Quotation {QuotationNumber} is already converted to Sales Order {SoNumber} (Id: {SoId}). Checking OAF...",
+                quotation.QuotationNumber,
+                existingSoNum,
+                existingSoId);
+
+            string? oafNum = null;
+            long? oafId = null;
+            string? oafErr = null;
+
+            if (autoCreateOaf)
+            {
+                await _tracker.EnterStageAsync(
+                    QuotationToSoStages.CreateOaf,
+                    QuotationToSoTasks.CreateOrderAckEntry,
+                    cancellationToken);
+
+                var oafRes = await CreateOafForSalesOrderAsync(
+                    existingSoNum,
+                    existingSoId,
+                    quotation.QuotationSiteId,
+                    quotation.QuotationSiteCode,
+                    quotation.CustomerCode,
+                    cancellationToken);
+
+                if (oafRes.Success)
+                {
+                    oafNum = oafRes.OafNumber;
+                    oafId = oafRes.OafId;
+                }
+                else
+                {
+                    oafErr = oafRes.ErrorMessage;
+                }
+            }
+
+            var skipMsg = !string.IsNullOrWhiteSpace(oafNum)
+                ? $"Quotation '{quotation.QuotationNumber}' is already converted to Sales Order '{existingSoNum}' and OAF '{oafNum}'."
+                : $"Quotation '{quotation.QuotationNumber}' is already converted to Sales Order '{existingSoNum}'.";
+
+            await _tracker.SkipExecutionAsync(skipMsg, cancellationToken);
 
             return new QuotationConversionItemResult
             {
                 QuotationId = quotation.QuotationId,
                 QuotationNumber = quotation.QuotationNumber,
                 Success = true,
-                SalesOrderNumber = preVerified.Value.SoNumber,
-                SalesOrderId = preVerified.Value.SoId,
+                SalesOrderNumber = existingSoNum,
+                SalesOrderId = existingSoId,
+                OafNumber = oafNum,
+                OafId = oafId,
+                ErrorMessage = oafErr,
             };
         }
 
@@ -355,7 +394,46 @@ public sealed class QuotationToSoService : IQuotationToSoService
             soId,
             quotation.QuotationNumber);
 
-        await _tracker.CompleteExecutionAsync(soNumber!, soId, cancellationToken);
+        string? createdOafNumber = null;
+        long? createdOafId = null;
+        string? oafCreationError = null;
+
+        if (autoCreateOaf && !string.IsNullOrWhiteSpace(soNumber) && soId.HasValue)
+        {
+            await _tracker.EnterStageAsync(
+                QuotationToSoStages.CreateOaf,
+                QuotationToSoTasks.CreateOrderAckEntry,
+                cancellationToken);
+
+            var oafResult = await CreateOafForSalesOrderAsync(
+                soNumber,
+                soId.Value,
+                quotation.QuotationSiteId,
+                quotation.QuotationSiteCode,
+                quotation.CustomerCode,
+                cancellationToken);
+
+            if (oafResult.Success)
+            {
+                createdOafNumber = oafResult.OafNumber;
+                createdOafId = oafResult.OafId;
+                _logger.LogInformation(
+                    "Successfully created OAF {OafNumber} (Id: {OafId}) for Sales Order {SalesOrderNumber}",
+                    createdOafNumber,
+                    createdOafId,
+                    soNumber);
+            }
+            else
+            {
+                oafCreationError = oafResult.ErrorMessage;
+                _logger.LogWarning(
+                    "Failed to create OAF for Sales Order {SalesOrderNumber}: {Error}",
+                    soNumber,
+                    oafCreationError);
+            }
+        }
+
+        await _tracker.CompleteExecutionAsync(soNumber!, soId, createdOafNumber, createdOafId, cancellationToken);
 
         return new QuotationConversionItemResult
         {
@@ -364,6 +442,9 @@ public sealed class QuotationToSoService : IQuotationToSoService
             Success = true,
             SalesOrderNumber = soNumber,
             SalesOrderId = soId,
+            OafNumber = createdOafNumber,
+            OafId = createdOafId,
+            ErrorMessage = oafCreationError,
         };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -377,7 +458,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
     public async Task<QuotationToSoSweepResult> ConvertQuotationsForCustomerAsync(
         string customerCode,
         string? siteCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool autoCreateOaf = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerCode);
 
@@ -414,12 +496,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
         {
             try
             {
-                var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken);
+                var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken, autoCreateOaf);
                 // Fallback retry via numerical search if single conversion needed numerical lookup
                 if (!itemResult.Success && !string.IsNullOrWhiteSpace(qtn.QuotationNumber))
                 {
                     _logger.LogInformation("Retrying quotation {QuotationNumber} via numerical search fallback...", qtn.QuotationNumber);
-                    var fallbackResult = await ConvertQuotationByNumberAsync(qtn.QuotationNumber, qtn.CustomerCode, qtn.QuotationSiteCode, cancellationToken);
+                    var fallbackResult = await ConvertQuotationByNumberAsync(qtn.QuotationNumber, qtn.CustomerCode, qtn.QuotationSiteCode, cancellationToken, autoCreateOaf);
                     if (fallbackResult.Success)
                     {
                         itemResult = fallbackResult;
@@ -459,7 +541,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
     public async Task<QuotationToSoSweepResult> ConvertAllEligibleQuotationsAsync(
         string? customerCode,
         string? siteCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool autoCreateOaf = true)
     {
         var trimmedCust = customerCode?.Trim();
         var trimmedSite = siteCode?.Trim();
@@ -471,7 +554,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
         // If a specific customer is specified, delegate to ConvertQuotationsForCustomerAsync
         if (!isAllCustomers)
         {
-            return await ConvertQuotationsForCustomerAsync(trimmedCust!, trimmedSite, cancellationToken);
+            return await ConvertQuotationsForCustomerAsync(trimmedCust!, trimmedSite, cancellationToken, autoCreateOaf);
         }
 
         _logger.LogInformation("Discovering all eligible open authorised quotations across all customers (Site: {SiteCode})", trimmedSite ?? "ALL");
@@ -621,12 +704,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
         {
             try
             {
-                var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken);
+                var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken, autoCreateOaf);
                 // Fallback retry via numerical search if single conversion needed numerical lookup
                 if (!itemResult.Success && !string.IsNullOrWhiteSpace(qtn.QuotationNumber))
                 {
                     _logger.LogInformation("Retrying quotation {QuotationNumber} via numerical search fallback...", qtn.QuotationNumber);
-                    var fallbackResult = await ConvertQuotationByNumberAsync(qtn.QuotationNumber, qtn.CustomerCode, qtn.QuotationSiteCode, cancellationToken);
+                    var fallbackResult = await ConvertQuotationByNumberAsync(qtn.QuotationNumber, qtn.CustomerCode, qtn.QuotationSiteCode, cancellationToken, autoCreateOaf);
                     if (fallbackResult.Success)
                     {
                         itemResult = fallbackResult;
@@ -780,7 +863,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
         string quotationNumber,
         string? fallbackCustomerCode,
         string? fallbackSiteCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool autoCreateOaf = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(quotationNumber);
 
@@ -858,11 +942,30 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 if (existingSo is not null)
                 {
                     _logger.LogInformation(
-                        "Quotation '{CandidateDesc}' (Id: {QuotationId}, Group: '{QtnGroup}') is already converted to Sales Order '{SoNumber}'. Returning existing order.",
+                        "Quotation '{CandidateDesc}' (Id: {QuotationId}, Group: '{QtnGroup}') is already converted to Sales Order '{SoNumber}'. Checking OAF...",
                         candidateDesc,
                         qtnInfo.QuotationId,
                         qtnInfo.QtnGroup,
                         existingSo.Value.SoNumber);
+
+                    string? oafNum = null;
+                    long? oafId = null;
+                    if (autoCreateOaf)
+                    {
+                        var oafRes = await CreateOafForSalesOrderAsync(
+                            existingSo.Value.SoNumber,
+                            existingSo.Value.SoId,
+                            qtnInfo.QuotationSiteId,
+                            qtnInfo.QuotationSiteCode,
+                            fallbackCust,
+                            cancellationToken);
+
+                        if (oafRes.Success)
+                        {
+                            oafNum = oafRes.OafNumber;
+                            oafId = oafRes.OafId;
+                        }
+                    }
 
                     return new QuotationConversionItemResult
                     {
@@ -871,6 +974,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         Success = true,
                         SalesOrderNumber = existingSo.Value.SoNumber,
                         SalesOrderId = existingSo.Value.SoId,
+                        OafNumber = oafNum,
+                        OafId = oafId,
                     };
                 }
 
@@ -934,7 +1039,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 qtnInfo.QuotationId,
                 qtnInfo.QtnGroup);
 
-            var itemResult = await ConvertSingleQuotationAsync(targetQuotation, cancellationToken);
+            var itemResult = await ConvertSingleQuotationAsync(targetQuotation, cancellationToken, autoCreateOaf);
             if (itemResult.Success)
             {
                 _logger.LogInformation(
@@ -1390,6 +1495,465 @@ public sealed class QuotationToSoService : IQuotationToSoService
         return "SW";
     }
 
+    private async Task<string> GetDefaultOafGroupAsync(
+        string year,
+        int siteId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var url = $"api/v1/admin/documentControl/getDefaultDocumentDetail/{Uri.EscapeDataString(year)}/AF/AF/{siteId}";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+                {
+                    var group = GetStringProperty(data, "groupCode", "docGroup", "group");
+                    if (!string.IsNullOrWhiteSpace(group))
+                    {
+                        return group;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query default document group for OAF at site {SiteId}", siteId);
+        }
+
+        return "OA";
+    }
+
+    private async Task<(string OafNumber, long OafId)?> FindExistingOafAsync(
+        string soYear,
+        string soGroup,
+        string soNo,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            const string listUrl = "api/v1/sales/orderackentry/list";
+            var filter = new
+            {
+                pageSize = 20,
+                pageNumber = 1,
+                sortField = "OAFID",
+                sortDirection = "DESC",
+                searchValue = soNo,
+                userId = 1,
+                restcoresalestrans = false,
+                locationIds = string.Empty,
+            };
+
+            using var response = await _httpClient.PostAsJsonAsync(listUrl, filter, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using var doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+
+            var root = doc.RootElement;
+            if (root.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in dataArr.EnumerateArray())
+                {
+                    var oafOrderNo = GetStringProperty(item, "oafOrderNumber", "salesOrder", "oafOrderNo");
+
+                    // Check if matching order number
+                    if (string.Equals(oafOrderNo?.Trim(), soNo?.Trim(), StringComparison.OrdinalIgnoreCase)
+                        || (oafOrderNo != null && oafOrderNo.Trim().TrimStart('0') == soNo?.Trim().TrimStart('0')))
+                    {
+                        var oafId = GetLongProperty(item, "oafid", "oafID", "autoId");
+                        var oafYear = GetStringProperty(item, "year", "oafDocYear") ?? soYear;
+                        var oafGrp = GetStringProperty(item, "group", "oafDocGroup") ?? "OA";
+                        var oafLoc = GetStringProperty(item, "location", "oafSiteCode") ?? string.Empty;
+                        var oafNum = GetStringProperty(item, "oafNumber", "oafNo") ?? string.Empty;
+
+                        var fullOaf = !string.IsNullOrWhiteSpace(oafLoc)
+                            ? $"{oafYear}/{oafGrp}/{oafLoc}/{oafNum}"
+                            : $"{oafYear}/{oafGrp}/{oafNum}";
+
+                        return (fullOaf, oafId);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query existing OAF for Sales Order {SoYear}/{SoGroup}/{SoNo}", soYear, soGroup, soNo);
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<OafCreationResult> CreateOafForSalesOrderAsync(
+        string salesOrderNumber,
+        long salesOrderId,
+        int siteId,
+        string? siteCode,
+        string? customerCode,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(salesOrderNumber);
+
+        var (soDocYear, soDocGroup, soSiteCode, soDocNo) = ParseSalesOrderParts(salesOrderNumber, siteCode);
+        var effSiteId = siteId > 0 ? siteId : 1;
+        var effSiteCode = !string.IsNullOrWhiteSpace(soSiteCode)
+            ? soSiteCode
+            : (!string.IsNullOrWhiteSpace(siteCode) ? siteCode : "NF1");
+
+        _logger.LogInformation(
+            "Creating Order Acceptance Form (OAF) for Sales Order {SalesOrderNumber} (Id: {SalesOrderId}, Year: {Year}, Group: {Group}, Site: {SiteCode}, No: {No})",
+            salesOrderNumber,
+            salesOrderId,
+            soDocYear,
+            soDocGroup,
+            effSiteCode,
+            soDocNo);
+
+        try
+        {
+            // Step 1: Pre-check if OAF is already created for this Sales Order
+            var existingOaf = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, cancellationToken);
+            if (existingOaf is not null)
+            {
+                _logger.LogInformation(
+                    "OAF '{OafNumber}' (Id: {OafId}) already exists for Sales Order {SalesOrderNumber}. Returning existing OAF.",
+                    existingOaf.Value.OafNumber,
+                    existingOaf.Value.OafId,
+                    salesOrderNumber);
+
+                return new OafCreationResult
+                {
+                    Success = true,
+                    OafNumber = existingOaf.Value.OafNumber,
+                    OafId = existingOaf.Value.OafId,
+                };
+            }
+
+            // Step 2: Query delivery schedule lines from ERP
+            const string scheduleUrl = "api/v1/sales/orderackentry/getItemDeliverySchedule";
+            var scheduleRequest = new
+            {
+                DOCYR = soDocYear,
+                DOCGRP = soDocGroup,
+                DOCFRLOCID = effSiteId,
+                DOCNO = soDocNo,
+                DAMDSRNO = 0,
+                OAFDAUTOID = 0,
+                ItemCode = string.Empty,
+            };
+
+            using var schedResponse = await _httpClient.PostAsJsonAsync(scheduleUrl, scheduleRequest, cancellationToken);
+            if (!schedResponse.IsSuccessStatusCode)
+            {
+                var errContent = await schedResponse.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning(
+                    "ERP returned HTTP {StatusCode} when fetching delivery schedule for Sales Order {SalesOrderNumber}: {Error}",
+                    (int)schedResponse.StatusCode,
+                    salesOrderNumber,
+                    errContent);
+
+                return new OafCreationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Failed to fetch delivery schedule from ERP for Sales Order '{salesOrderNumber}': HTTP {(int)schedResponse.StatusCode}",
+                };
+            }
+
+            using var schedDoc = await JsonDocument.ParseAsync(
+                await schedResponse.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+
+            var schedRoot = schedDoc.RootElement;
+            var scheduleLines = new List<object>();
+
+            if (schedRoot.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in dataArr.EnumerateArray())
+                {
+                    var orderLineId = GetIntProperty(item, "orderLineId", "xoafddlvrfid", "xordlineid");
+                    var delQty = GetDecimalProperty(item, "deliveryQtySUOM", "oafQty", "xorddlvqty");
+                    var alreadyOaf = GetDecimalProperty(item, "alreadyOAFQtySUOM", "xordoafsuom", "alreadyOAFQtyIUOM");
+                    var pendingQty = delQty - alreadyOaf;
+
+                    if (pendingQty <= 0)
+                    {
+                        continue;
+                    }
+
+                    var salesItemCode = GetStringProperty(item, "salesItemCode", "xordsitmcd") ?? string.Empty;
+                    var itemCode = GetStringProperty(item, "itemCode", "internalItemCode", "msiiitmcd") ?? salesItemCode;
+                    var shipCode = GetStringProperty(item, "shipmentCode", "shipCode", "xodshipcd") ?? string.Empty;
+
+                    var delDate = _clock.UtcNow.LocalDateTime;
+                    if (item.TryGetProperty("deliveryDate", out var dd) && dd.ValueKind == JsonValueKind.String &&
+                        DateTime.TryParse(dd.GetString(), CultureInfo.InvariantCulture, out var parsedDel))
+                    {
+                        delDate = parsedDel;
+                    }
+                    else if (item.TryGetProperty("xorddlvdt", out var xdd) && xdd.ValueKind == JsonValueKind.String &&
+                        DateTime.TryParse(xdd.GetString(), CultureInfo.InvariantCulture, out var parsedXdd))
+                    {
+                        delDate = parsedXdd;
+                    }
+
+                    var commitedDate = delDate;
+                    if (item.TryGetProperty("commitedDelDate", out var cd) && cd.ValueKind == JsonValueKind.String &&
+                        DateTime.TryParse(cd.GetString(), CultureInfo.InvariantCulture, out var parsedCd))
+                    {
+                        commitedDate = parsedCd;
+                    }
+                    else if (item.TryGetProperty("xordcddt", out var xcd) && xcd.ValueKind == JsonValueKind.String &&
+                        DateTime.TryParse(xcd.GetString(), CultureInfo.InvariantCulture, out var parsedXcd))
+                    {
+                        commitedDate = parsedXcd;
+                    }
+
+                    var sersalitem = GetStringProperty(item, "sersalesitem", "sersalitem", "xqlsalitmcode") ?? string.Empty;
+                    var serinteitem = GetStringProperty(item, "serinteitem", "xqlintitmcode") ?? string.Empty;
+
+                    scheduleLines.Add(new
+                    {
+                        orderLineId = orderLineId,
+                        xoafddlvrfid = orderLineId,
+                        salesItemCode = salesItemCode,
+                        itemCode = itemCode,
+                        shipCode = shipCode,
+                        deliveryDate = delDate.ToString("yyyy-MM-ddTHH:mm:ss"),
+                        commitedDelDate = commitedDate.ToString("yyyy-MM-ddTHH:mm:ss"),
+                        oafQty = pendingQty,
+                        sersalitem = sersalitem,
+                        serinteitem = serinteitem,
+                        agentcommisiondata = Array.Empty<object>(),
+                    });
+                }
+            }
+
+            if (scheduleLines.Count == 0)
+            {
+                var existingOafRetry = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, cancellationToken);
+                if (existingOafRetry is not null)
+                {
+                    return new OafCreationResult
+                    {
+                        Success = true,
+                        OafNumber = existingOafRetry.Value.OafNumber,
+                        OafId = existingOafRetry.Value.OafId,
+                    };
+                }
+
+                _logger.LogWarning("No eligible pending delivery schedule lines found for Sales Order {SalesOrderNumber}", salesOrderNumber);
+                return new OafCreationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"No eligible pending delivery schedule lines found for Sales Order '{salesOrderNumber}'.",
+                };
+            }
+
+            // Step 3: Resolve default OAF Document Group (defaults to "OA")
+            var oafGroup = await GetDefaultOafGroupAsync(soDocYear, effSiteId, cancellationToken);
+
+            var now = _clock.UtcNow.LocalDateTime;
+            var createOafPayload = new
+            {
+                strAutoNoFlag = true,
+                oafDocYear = soDocYear,
+                oafDocGroup = oafGroup,
+                oafDocType = "AF",
+                oafDocSubType = "AF",
+                oafSiteCode = effSiteCode,
+                oafSiteId = effSiteId,
+                oafOrderNo = string.Empty,
+                oafDate = now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                oafPlanningDate = now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                oafOrderId = salesOrderId,
+                isLocationReq = "Y",
+                autoNoReq = "Y",
+                autoId = salesOrderId,
+                remarkTest = string.Empty,
+                createdId = 1,
+                damdsrno = 0,
+                contactPerson1 = string.Empty,
+                contactPerson2 = string.Empty,
+                contactPerson3 = string.Empty,
+                orderState = "A",
+                internalOrderYear = soDocYear,
+                internalOrderGroup = soDocGroup,
+                internalOrderNo = soDocNo,
+                loginsiteid = effSiteId,
+                itemCode = string.Empty,
+                itemDeliveryScheduleList = scheduleLines,
+                clsNotiParams = Array.Empty<object>(),
+                prftcntrData = Array.Empty<object>(),
+            };
+
+            const string createOafUrl = "api/v1/sales/orderackentry/create";
+
+            using var createOafRequest = new HttpRequestMessage(HttpMethod.Post, createOafUrl)
+            {
+                Content = JsonContent.Create(createOafPayload),
+            };
+            createOafRequest.Options.Set(DependencyInjection.NonRetryableKey, true);
+
+            HttpResponseMessage? createResponse = null;
+            string responseBody = string.Empty;
+
+            try
+            {
+                createResponse = await _httpClient.SendAsync(createOafRequest, cancellationToken);
+                responseBody = await createResponse.Content.ReadAsStringAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "ERP createOrderAckEntry response for Sales Order {SalesOrderNumber} (HTTP {StatusCode}): {Response}",
+                    salesOrderNumber,
+                    (int)createResponse.StatusCode,
+                    responseBody);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException or Polly.ExecutionRejectedException)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "createOrderAckEntry encountered a transport/timeout error for Sales Order {SalesOrderNumber}. Verifying if OAF was created...",
+                    salesOrderNumber);
+            }
+
+            // Step 4: Parse created OAF confirmation
+            var (oafNumber, oafId, parseError) = !string.IsNullOrWhiteSpace(responseBody)
+                ? ParseOafCreateResponse(responseBody, soDocYear, oafGroup, effSiteCode)
+                : (null, null, null);
+
+            if (string.IsNullOrWhiteSpace(oafNumber) || createResponse is null || !createResponse.IsSuccessStatusCode)
+            {
+                var verifiedOaf = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, cancellationToken);
+                if (verifiedOaf is not null)
+                {
+                    oafNumber = verifiedOaf.Value.OafNumber;
+                    oafId = verifiedOaf.Value.OafId;
+                    parseError = null;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(oafNumber))
+            {
+                return new OafCreationResult
+                {
+                    Success = true,
+                    OafNumber = oafNumber,
+                    OafId = oafId,
+                };
+            }
+
+            return new OafCreationResult
+            {
+                Success = false,
+                ErrorMessage = parseError ?? "Failed to create Order Acceptance Form in ERP.",
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Unexpected error creating OAF for Sales Order {SalesOrderNumber}", salesOrderNumber);
+            return new OafCreationResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message,
+            };
+        }
+    }
+
+    private static (string? OafNumber, long? OafId, string? Error) ParseOafCreateResponse(
+        string responseContent,
+        string defaultYear,
+        string defaultGroup,
+        string defaultSite)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(responseContent);
+            var root = doc.RootElement;
+
+            var success = false;
+            if (root.TryGetProperty("success", out var succElem))
+            {
+                success = succElem.ValueKind is JsonValueKind.True;
+            }
+
+            var message = string.Empty;
+            if (root.TryGetProperty("message", out var msgElem) && msgElem.ValueKind == JsonValueKind.String)
+            {
+                message = msgElem.GetString() ?? string.Empty;
+            }
+
+            if (!success)
+            {
+                var detailedError = ParseDetailedError(root);
+                return (null, null, detailedError);
+            }
+
+            long? oafId = null;
+            if (root.TryGetProperty("data", out var dataElem))
+            {
+                if (dataElem.ValueKind == JsonValueKind.Number && dataElem.TryGetInt64(out var parsedLong))
+                {
+                    oafId = parsedLong;
+                }
+                else if (dataElem.ValueKind == JsonValueKind.String && long.TryParse(dataElem.GetString(), out var parsedStrLong))
+                {
+                    oafId = parsedStrLong;
+                }
+            }
+
+            string? oafNumber = null;
+            if (message.Contains('#'))
+            {
+                var parts = message.Split('#');
+                if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+                {
+                    oafNumber = parts[1].Trim();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(oafNumber) && oafId.HasValue && oafId.Value > 0)
+            {
+                oafNumber = $"{defaultYear}/{defaultGroup}/{defaultSite}/{oafId.Value}";
+            }
+
+            return (oafNumber, oafId, null);
+        }
+        catch
+        {
+            return (null, null, "Could not parse ERP OAF response: " + responseContent);
+        }
+    }
+
+    private (string Year, string Group, string Site, string No) ParseSalesOrderParts(
+        string salesOrderNumber,
+        string? fallbackSite)
+    {
+        var clean = salesOrderNumber.Trim();
+        var parts = clean.Split(['/'], StringSplitOptions.TrimEntries);
+        if (parts.Length >= 4)
+        {
+            return (parts[0], parts[1], !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : (fallbackSite ?? "NF1"), parts[3]);
+        }
+        if (parts.Length == 3)
+        {
+            return (parts[0], parts[1], fallbackSite ?? "NF1", parts[2]);
+        }
+
+        var currentFy = GetCurrentFinancialYear();
+        return (currentFy, "OR", fallbackSite ?? "NF1", clean);
+    }
+
     private async Task<(string SoNumber, int SoId)?> VerifyCreatedSalesOrderAsync(
         OpenQuotationSummary quotation,
         string soYear,
@@ -1590,6 +2154,62 @@ public sealed class QuotationToSoService : IQuotationToSoService
         }
 
         return null;
+    }
+
+    private static long GetLongProperty(JsonElement elem, params string[] names)
+    {
+        if (elem.ValueKind != JsonValueKind.Object)
+        {
+            return 0;
+        }
+
+        foreach (var prop in elem.EnumerateObject())
+        {
+            foreach (var name in names)
+            {
+                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt64(out var l))
+                    {
+                        return l;
+                    }
+                    if (prop.Value.ValueKind == JsonValueKind.String && long.TryParse(prop.Value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var isStr))
+                    {
+                        return isStr;
+                    }
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private static decimal GetDecimalProperty(JsonElement elem, params string[] names)
+    {
+        if (elem.ValueKind != JsonValueKind.Object)
+        {
+            return 0m;
+        }
+
+        foreach (var prop in elem.EnumerateObject())
+        {
+            foreach (var name in names)
+            {
+                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetDecimal(out var d))
+                    {
+                        return d;
+                    }
+                    if (prop.Value.ValueKind == JsonValueKind.String && decimal.TryParse(prop.Value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var isStr))
+                    {
+                        return isStr;
+                    }
+                }
+            }
+        }
+
+        return 0m;
     }
 
     private static int GetIntProperty(JsonElement elem, params string[] names)

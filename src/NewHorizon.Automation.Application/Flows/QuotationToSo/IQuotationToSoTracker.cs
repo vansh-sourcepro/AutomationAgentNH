@@ -41,6 +41,13 @@ public interface IQuotationToSoTracker
         long? salesOrderId,
         CancellationToken cancellationToken);
 
+    Task CompleteExecutionAsync(
+        string salesOrderNumber,
+        long? salesOrderId,
+        string? oafNumber,
+        long? oafId,
+        CancellationToken cancellationToken);
+
     Task SkipExecutionAsync(string reason, CancellationToken cancellationToken);
 
     Task FailExecutionAsync(

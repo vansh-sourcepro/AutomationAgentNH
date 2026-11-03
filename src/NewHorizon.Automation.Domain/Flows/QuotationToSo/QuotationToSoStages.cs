@@ -9,6 +9,7 @@ public static class QuotationToSoStages
     public const string QuotationDetail = "QuotationDetail";
     public const string Validation = "Validation";
     public const string CreateSalesOrder = "CreateSalesOrder";
+    public const string CreateOaf = "CreateOaf";
 
     public static IReadOnlyList<string> InOrder { get; } =
     [
@@ -16,6 +17,7 @@ public static class QuotationToSoStages
         QuotationDetail,
         Validation,
         CreateSalesOrder,
+        CreateOaf,
     ];
 }
 
@@ -28,6 +30,7 @@ public static class QuotationToSoTasks
     public const string GetQuotationDetail = "GetQuotationDetail";
     public const string VerifyExistingSalesOrder = "VerifyExistingSalesOrder";
     public const string CreateSalesOrderEntry = "CreateSalesOrderEntry";
+    public const string CreateOrderAckEntry = "CreateOrderAckEntry";
 
     public static string For(string stage) => stage switch
     {
@@ -35,6 +38,7 @@ public static class QuotationToSoTasks
         QuotationToSoStages.QuotationDetail => GetQuotationDetail,
         QuotationToSoStages.Validation => VerifyExistingSalesOrder,
         QuotationToSoStages.CreateSalesOrder => CreateSalesOrderEntry,
+        QuotationToSoStages.CreateOaf => CreateOrderAckEntry,
         _ => stage,
     };
 }

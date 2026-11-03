@@ -18,6 +18,7 @@ public sealed class QuotationSoAutomationConfigTests
         config.RunMode.Should().Be(SoAutomationRunMode.Both);
         config.ScheduleTime.Should().BeNull();
         config.QuotationNumbers.Should().BeNull();
+        config.AutoCreateOaf.Should().BeTrue();
     }
 
     [Fact]
@@ -222,5 +223,26 @@ public sealed class QuotationSoAutomationConfigTests
         NewHorizon.Automation.Domain.Flows.IndentToPo.IndentDocumentTypes.For(
             NewHorizon.Automation.Domain.Flows.IndentToPo.IndentKind.Quotation)
             .Should().Be("Quotation");
+    }
+
+    [Fact]
+    public void AutoCreateOaf_toggle_can_be_updated()
+    {
+        var config = QuotationSoAutomationConfig.CreateDefault(Now);
+        config.AutoCreateOaf.Should().BeTrue();
+
+        config.Update(new QuotationSoAutomationConfigUpdate
+        {
+            AutoCreateOaf = false
+        }, Now, "tester");
+
+        config.AutoCreateOaf.Should().BeFalse();
+
+        config.Update(new QuotationSoAutomationConfigUpdate
+        {
+            AutoCreateOaf = true
+        }, Now, "tester");
+
+        config.AutoCreateOaf.Should().BeTrue();
     }
 }

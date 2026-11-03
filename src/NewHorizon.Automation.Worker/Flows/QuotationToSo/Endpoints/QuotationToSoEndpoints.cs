@@ -231,6 +231,7 @@ public static class QuotationToSoEndpoints
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var autoCreateOaf = request.AutoCreateOaf ?? config.AutoCreateOaf;
         var triggeredBy = TriggeredByFor(triggerSource, user);
 
         await tracker.StartRunAsync(
@@ -255,11 +256,14 @@ public static class QuotationToSoEndpoints
                     qtnNo,
                     customerCode,
                     siteCode,
-                    cancellationToken);
+                    cancellationToken,
+                    autoCreateOaf);
 
                 var status = itemResult.Success ? "Success" : "Failed";
                 var message = itemResult.Success
-                    ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'."
+                    ? (!string.IsNullOrWhiteSpace(itemResult.OafNumber)
+                        ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}' and OAF '{itemResult.OafNumber}'."
+                        : $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'.")
                     : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.";
 
                 config.RecordRunCompleted(status, message, clock.UtcNow);
@@ -272,6 +276,7 @@ public static class QuotationToSoEndpoints
                     Success = itemResult.Success,
                     Message = message,
                     SalesOrderNumber = itemResult.SalesOrderNumber,
+                    OafNumber = itemResult.OafNumber,
                     Item = itemResult,
                 });
             }
@@ -295,7 +300,8 @@ public static class QuotationToSoEndpoints
                         qtn,
                         customerCode,
                         siteCode,
-                        cancellationToken);
+                        cancellationToken,
+                        autoCreateOaf);
 
                     items.Add(item);
                     if (item.Success)
@@ -344,7 +350,8 @@ public static class QuotationToSoEndpoints
             var sweepResult = await service.ConvertAllEligibleQuotationsAsync(
                 customerCode,
                 siteCode,
-                cancellationToken);
+                cancellationToken,
+                autoCreateOaf);
 
             if (sweepResult.TotalFound == 0)
             {

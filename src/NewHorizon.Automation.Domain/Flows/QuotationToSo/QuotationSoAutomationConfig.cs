@@ -57,6 +57,12 @@ public sealed class QuotationSoAutomationConfig
     public bool DryRun { get; private set; } = false;
 
     /// <summary>
+    /// When true, automatically generates an Order Acceptance Form (OAF) for each converted Sales Order.
+    /// Defaults to true.
+    /// </summary>
+    public bool AutoCreateOaf { get; private set; } = true;
+
+    /// <summary>
     /// The date the scheduler last ran this configuration, preventing multiple runs on the same day slot.
     /// </summary>
     public DateOnly? LastScheduledRunDate { get; private set; }
@@ -85,6 +91,7 @@ public sealed class QuotationSoAutomationConfig
         {
             IsActive = true,
             RunMode = SoAutomationRunMode.Both,
+            AutoCreateOaf = true,
         };
 
     public static QuotationSoAutomationConfig FromSnapshot(
@@ -101,7 +108,8 @@ public sealed class QuotationSoAutomationConfig
         string? lastRunStatus,
         string? lastRunMessage,
         DateTimeOffset updatedAtUtc,
-        string? updatedBy) =>
+        string? updatedBy,
+        bool autoCreateOaf = true) =>
         new(id, updatedAtUtc)
         {
             IsActive = isActive,
@@ -116,6 +124,7 @@ public sealed class QuotationSoAutomationConfig
             LastRunStatus = lastRunStatus,
             LastRunMessage = lastRunMessage,
             UpdatedBy = updatedBy,
+            AutoCreateOaf = autoCreateOaf,
         };
 
     /// <summary>
@@ -140,6 +149,7 @@ public sealed class QuotationSoAutomationConfig
         RunMode = update.RunMode ?? RunMode;
         IsActive = update.IsActive ?? IsActive;
         DryRun = update.DryRun ?? DryRun;
+        AutoCreateOaf = update.AutoCreateOaf ?? AutoCreateOaf;
 
         if (update.ScheduleTime is not null)
         {

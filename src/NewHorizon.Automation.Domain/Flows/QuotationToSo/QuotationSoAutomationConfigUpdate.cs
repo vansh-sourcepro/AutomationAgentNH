@@ -26,4 +26,6 @@ public sealed class QuotationSoAutomationConfigUpdate
     public bool ClearSiteCode { get; init; }
 
     public bool? DryRun { get; init; }
+
+    public bool? AutoCreateOaf { get; init; }
 }

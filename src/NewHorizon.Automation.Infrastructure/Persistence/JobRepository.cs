@@ -210,7 +210,7 @@ public sealed class JobRepository : IJobRepository
             _dbContext.Jobs.Attach(job);
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<PagedResult<Job>> ListAsync(JobQuery query, CancellationToken cancellationToken)
