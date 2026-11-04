@@ -128,14 +128,37 @@ public sealed class QuotationSoAutomationConfig
         };
 
     /// <summary>
-    /// Checks whether the scheduled timer should run right now.
+    /// Default schedule tolerance window. The scheduler ticks every minute, so a 2-minute window
+    /// ensures the job runs on time when the slot arrives without executing if the time has already passed.
     /// </summary>
-    public bool ShouldRunOnSchedule(TimeOnly localNow, DateOnly localToday) =>
-        IsActive
-        && RunMode.Allows(TriggerSource.Timer)
-        && ScheduleTime is { } slot
-        && localNow >= slot
-        && (LastScheduledRunDate is null || LastScheduledRunDate < localToday);
+    public static readonly TimeSpan ScheduleWindow = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Checks whether the scheduled timer should run right now.
+    /// Returns true only when the current local time is at or within the schedule window of the configured slot,
+    /// and has not already run today. If the scheduled time has already passed, it will not run until
+    /// the slot arrives again.
+    /// </summary>
+    public bool ShouldRunOnSchedule(TimeOnly localNow, DateOnly localToday)
+    {
+        if (!IsActive || !RunMode.Allows(TriggerSource.Timer) || ScheduleTime is not { } slot)
+        {
+            return false;
+        }
+
+        if (LastScheduledRunDate.HasValue && LastScheduledRunDate.Value >= localToday)
+        {
+            return false;
+        }
+
+        if (localNow < slot)
+        {
+            return false;
+        }
+
+        var diff = localNow - slot;
+        return diff < ScheduleWindow;
+    }
 
     /// <summary>
     /// Applies configuration updates.

@@ -35,7 +35,31 @@ public sealed class QuotationSoAutomationConfigTests
     }
 
     [Fact]
-    public void Active_toggle_with_schedule_time_fires_at_or_after_slot()
+    public void Active_toggle_with_schedule_time_fires_only_within_schedule_window()
+    {
+        var config = QuotationSoAutomationConfig.CreateDefault(Now);
+        config.Update(new QuotationSoAutomationConfigUpdate
+        {......
+            ScheduleTime = new TimeOnly(10, 30),
+            IsActive = true
+        }, Now, "tester");
+
+        // Before the slot: does not fire
+        config.ShouldRunOnSchedule(new TimeOnly(10, 29), Today).Should().BeFalse();
+
+        // At the slot: fires
+        config.ShouldRunOnSchedule(new TimeOnly(10, 30), Today).Should().BeTrue();
+
+        // 1 minute after slot (within 2-minute window): fires
+        config.ShouldRunOnSchedule(new TimeOnly(10, 31), Today).Should().BeTrue();
+
+        // After the window has passed (e.g. 10:33 or 11:00): does not fire
+        config.ShouldRunOnSchedule(new TimeOnly(10, 33), Today).Should().BeFalse();
+        config.ShouldRunOnSchedule(new TimeOnly(11, 0), Today).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Passed_time_today_does_not_fire_today_but_fires_when_slot_comes_tomorrow()
     {
         var config = QuotationSoAutomationConfig.CreateDefault(Now);
         config.Update(new QuotationSoAutomationConfigUpdate
@@ -44,9 +68,12 @@ public sealed class QuotationSoAutomationConfigTests
             IsActive = true
         }, Now, "tester");
 
-        config.ShouldRunOnSchedule(new TimeOnly(10, 29), Today).Should().BeFalse();
-        config.ShouldRunOnSchedule(new TimeOnly(10, 30), Today).Should().BeTrue();
-        config.ShouldRunOnSchedule(new TimeOnly(11, 0), Today).Should().BeTrue();
+        // Today is 11:02, scheduled for 10:30: passed away, does not fire
+        config.ShouldRunOnSchedule(new TimeOnly(11, 2), Today).Should().BeFalse();
+
+        // Tomorrow at 10:30: slot arrives again, fires!
+        var tomorrow = Today.AddDays(1);
+        config.ShouldRunOnSchedule(new TimeOnly(10, 30), tomorrow).Should().BeTrue();
     }
 
     [Fact]

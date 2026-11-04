@@ -26,13 +26,35 @@ public sealed class IndentPoAutomationConfigTests
     // ---- the scheduler firing rule ---------------------------------------
 
     [Fact]
-    public void A_timer_row_with_a_schedule_time_fires_from_its_slot_onward()
+    public void A_timer_row_with_a_schedule_time_fires_only_within_schedule_window()
     {
         var config = Scheduled(new TimeOnly(8, 0));
 
+        // Before the slot: does not fire
         config.ShouldRunOnSchedule(new TimeOnly(7, 59), Today).Should().BeFalse();
+
+        // At the slot: fires
         config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().BeTrue();
-        config.ShouldRunOnSchedule(new TimeOnly(23, 0), Today).Should().BeTrue();
+
+        // 1 minute after slot (within 2-minute window): fires
+        config.ShouldRunOnSchedule(new TimeOnly(8, 1), Today).Should().BeTrue();
+
+        // Passed slot (e.g. 8:05 or 23:00): does not fire
+        config.ShouldRunOnSchedule(new TimeOnly(8, 5), Today).Should().BeFalse();
+        config.ShouldRunOnSchedule(new TimeOnly(23, 0), Today).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Passed_time_today_does_not_fire_today_but_fires_when_slot_comes_tomorrow()
+    {
+        var config = Scheduled(new TimeOnly(10, 30));
+
+        // Today is 13:45, scheduled for 10:30: time passed away, does not fire
+        config.ShouldRunOnSchedule(new TimeOnly(13, 45), Today).Should().BeFalse();
+
+        // Tomorrow at 10:30: slot arrives again, fires!
+        var tomorrow = Today.AddDays(1);
+        config.ShouldRunOnSchedule(new TimeOnly(10, 30), tomorrow).Should().BeTrue();
     }
 
     [Theory]

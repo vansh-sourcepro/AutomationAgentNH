@@ -93,19 +93,37 @@ public sealed class IndentPoAutomationConfig
         };
 
     /// <summary>
-    /// True when the scheduler should start a run for this type right now: PO Automation is switched
-    /// on (<see cref="IsActive"/> — the master toggle the PO Automation screen persists), the mode
-    /// admits a timer (<c>Timer</c> or <c>Both</c>), a schedule time is set, its slot has passed
-    /// today, and it has not already run today. An <c>Api</c> ("Indent-based") row never runs
-    /// automatically — only the screen's "Run" button fires it — and nothing runs while the master
-    /// toggle is off.
+    /// Default schedule tolerance window. The scheduler ticks every minute, so a 2-minute window
+    /// ensures the job runs on time when the slot arrives without executing if the time has already passed.
     /// </summary>
-    public bool ShouldRunOnSchedule(TimeOnly localNow, DateOnly localToday) =>
-        IsActive
-        && RunMode.Allows(TriggerSource.Timer)
-        && ScheduleTime is { } slot
-        && localNow >= slot
-        && (LastScheduledRunDate is null || LastScheduledRunDate < localToday);
+    public static readonly TimeSpan ScheduleWindow = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// True when the scheduler should start a run for this type right now: PO Automation is switched
+    /// on (<see cref="IsActive"/>), the mode admits a timer (<c>Timer</c> or <c>Both</c>), a schedule time
+    /// is set, and the current local time matches / is within the schedule window of that slot today.
+    /// If the time has already passed, it will not run until that slot arrives again.
+    /// </summary>
+    public bool ShouldRunOnSchedule(TimeOnly localNow, DateOnly localToday)
+    {
+        if (!IsActive || !RunMode.Allows(TriggerSource.Timer) || ScheduleTime is not { } slot)
+        {
+            return false;
+        }
+
+        if (LastScheduledRunDate.HasValue && LastScheduledRunDate.Value >= localToday)
+        {
+            return false;
+        }
+
+        if (localNow < slot)
+        {
+            return false;
+        }
+
+        var diff = localNow - slot;
+        return diff < ScheduleWindow;
+    }
 
     /// <summary>Applies a partial update, validating what the combination requires.</summary>
     public void Update(IndentPoAutomationConfigUpdate update, DateTimeOffset nowUtc, string? updatedBy)
