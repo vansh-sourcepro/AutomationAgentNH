@@ -1,4 +1,4 @@
-using NewHorizon.Automation.Application.Erp;
+﻿using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.ErpClient.Flows.SoAllocationToDC;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Contracts;
@@ -229,8 +229,10 @@ public static class SoAllocationToDcEndpoints
     private static async Task<IResult> GetPendingAllocationsAsync(
         string? customerCode,
         ISoAllocationToDcService service,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("SoAllocationToDcEndpoints");
         try
         {
             var data = await service.GetPendingAllocationsAsync(customerCode, cancellationToken);
@@ -243,17 +245,30 @@ public static class SoAllocationToDcEndpoints
         }
         catch (DcValidationException ex)
         {
-            return Results.UnprocessableEntity(new PendingAllocationsResponse(
+            logger.LogWarning(ex, "GetPendingAllocations validation warning: {Message}", ex.Message);
+            return Results.Ok(new PendingAllocationsResponse(
                 Success: false,
                 Message: null,
-                Data: null,
+                Data: Array.Empty<PendingOafSummary>(),
                 ErrorMessage: ex.Message));
         }
         catch (ErpTransientException ex)
         {
-            return Results.Problem(
-                detail: ex.LaymanMessage,
-                statusCode: StatusCodes.Status503ServiceUnavailable);
+            logger.LogWarning(ex, "GetPendingAllocations transient ERP error: {Message}", ex.Message);
+            return Results.Ok(new PendingAllocationsResponse(
+                Success: false,
+                Message: null,
+                Data: Array.Empty<PendingOafSummary>(),
+                ErrorMessage: ex.LaymanMessage));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "GetPendingAllocations unexpected error: {Message}", ex.Message);
+            return Results.Ok(new PendingAllocationsResponse(
+                Success: false,
+                Message: null,
+                Data: Array.Empty<PendingOafSummary>(),
+                ErrorMessage: ex.Message));
         }
     }
 

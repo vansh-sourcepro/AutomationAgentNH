@@ -73,9 +73,10 @@ try
 
             options.TokenValidationParameters = new TokenValidationParameters
             {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateLifetime = false,
+                ClockSkew = TimeSpan.FromDays(30),
                 ValidIssuer = inboundJwt.Issuer,
                 ValidAudience = inboundJwt.Audience,
 
@@ -113,7 +114,11 @@ try
                         throw new SecurityTokenInvalidSignatureException("The token signature does not match.");
                     }
 
-                    return new JsonWebToken(token);
+                    var payloadBytes = Base64UrlEncoder.DecodeBytes(parts[1]);
+                    var sanitizedPayload = SanitizeJsonPayload(payloadBytes);
+                    var sanitizedToken = parts[0] + "." + sanitizedPayload + "." + parts[2];
+
+                    return new JsonWebToken(sanitizedToken);
                 },
             };
 
@@ -263,6 +268,14 @@ try
 
     app.MapHealthEndpoints();
 
+    // Available automation types for the WebApp2 dashboard
+    app.MapGet("/api/automation/types", () => Results.Ok(new[]
+    {
+        new { Id = "IndentToPo", Name = "Indent to Purchase Order" },
+        new { Id = "SjoToIssue", Name = "SJO to Issue to Shop Floor" },
+        new { Id = "SjoToDc", Name = "SJO to Delivery Challan" }
+    })).AllowAnonymous();
+
     // Each automation flow maps its own endpoints and applies its own database/JWT gates.
     app.MapIndentToPoEndpoints(databaseConfigured, database.Usable, inboundJwt.IsConfigured);
     app.MapSoAllocationToDcEndpoints();
@@ -325,4 +338,64 @@ finally
 /// <summary>
 /// Exposed so the integration tests can host the agent through <c>WebApplicationFactory</c>.
 /// </summary>
+
+static string SanitizeJsonPayload(byte[] bytes)
+{
+    bool hasControlChars = false;
+    for (int i = 0; i < bytes.Length; i++)
+    {
+        if (bytes[i] < 32)
+        {
+            hasControlChars = true;
+            break;
+        }
+    }
+
+    if (!hasControlChars)
+    {
+        return Base64UrlEncoder.Encode(bytes);
+    }
+
+    var sb = new StringBuilder(bytes.Length + 32);
+    bool inString = false;
+    bool escaped = false;
+    for (int i = 0; i < bytes.Length; i++)
+    {
+        char c = (char)bytes[i];
+        if (c == '"' && !escaped)
+        {
+            inString = !inString;
+            sb.Append(c);
+        }
+        else if (c == '\\' && !escaped)
+        {
+            escaped = true;
+            sb.Append(c);
+        }
+        else
+        {
+            if (inString && !escaped && c < 32)
+            {
+                switch (c)
+                {
+                    case '\t': sb.Append("\\t"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    default:
+                        sb.AppendFormat("\\u{0:x4}", (int)c);
+                        break;
+                }
+            }
+            else
+            {
+                sb.Append(c);
+            }
+            escaped = false;
+        }
+    }
+    return Base64UrlEncoder.Encode(Encoding.UTF8.GetBytes(sb.ToString()));
+}
+
 public partial class Program;

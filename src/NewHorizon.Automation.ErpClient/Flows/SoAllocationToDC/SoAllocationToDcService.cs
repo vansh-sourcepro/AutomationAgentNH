@@ -1,3 +1,4 @@
+﻿using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text;
@@ -367,126 +368,192 @@ public sealed partial class SoAllocationToDcService : ISoAllocationToDcService
         else
         {
             var siteId = _options.SiteId;
-            var allocCustomers = await GetCustomersForAllocationAsync(siteId, cancellationToken);
-            foreach (var c in allocCustomers)
+            try
             {
-                if (!string.IsNullOrWhiteSpace(c.CustCode) &&
-                    !targetCustomers.Contains(c.CustCode, StringComparer.OrdinalIgnoreCase))
+                var allocCustomers = await GetCustomersForAllocationAsync(siteId, cancellationToken);
+                foreach (var c in allocCustomers)
                 {
-                    targetCustomers.Add(c.CustCode);
+                    if (!string.IsNullOrWhiteSpace(c.CustCode) &&
+                        !targetCustomers.Contains(c.CustCode, StringComparer.OrdinalIgnoreCase))
+                    {
+                        targetCustomers.Add(c.CustCode);
+                    }
                 }
             }
-
-            var dcCustomers = await GetCustomersForDcAsync(siteId, cancellationToken);
-            foreach (var c in dcCustomers)
+            catch (Exception ex)
             {
-                if (!string.IsNullOrWhiteSpace(c) &&
-                    !targetCustomers.Contains(c, StringComparer.OrdinalIgnoreCase))
+                _logger.LogWarning(ex, "Failed to retrieve allocation customers");
+            }
+
+            try
+            {
+                var dcCustomers = await GetCustomersForDcAsync(siteId, cancellationToken);
+                foreach (var c in dcCustomers)
                 {
-                    targetCustomers.Add(c);
+                    if (!string.IsNullOrWhiteSpace(c) &&
+                        !targetCustomers.Contains(c, StringComparer.OrdinalIgnoreCase))
+                    {
+                        targetCustomers.Add(c);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to retrieve DC customers");
             }
         }
 
-        var results = new List<PendingOafSummary>();
+        var candidateOafs = new List<(string CustomerCode, ErpShipment Shipment, ErpOafDetail Oaf)>();
 
         foreach (var effectiveCustomerCode in targetCustomers)
         {
-            var shipments = await GetShipmentsAsync(effectiveCustomerCode, cancellationToken);
+            IReadOnlyList<ErpShipment> shipments;
+            try
+            {
+                shipments = await GetShipmentsAsync(effectiveCustomerCode, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to retrieve shipments for customer {CustomerCode}", effectiveCustomerCode);
+                continue;
+            }
 
             foreach (var shipment in shipments)
             {
-                var oafList = await GetOafDetailListAsync(
-                    effectiveCustomerCode, shipment.ShipmentCode, cancellationToken);
+                IReadOnlyList<ErpOafDetail> oafList;
+                try
+                {
+                    oafList = await GetOafDetailListAsync(
+                        effectiveCustomerCode, shipment.ShipmentCode, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to retrieve OAF details for customer {CustomerCode}, shipment {ShipmentCode}",
+                        effectiveCustomerCode, shipment.ShipmentCode);
+                    continue;
+                }
 
                 foreach (var oaf in oafList)
                 {
-                    var oafItems = await GetOafItemDetailsAsync(
-                        effectiveCustomerCode,
-                        shipment.ShipmentCode,
-                        oaf.OafYear,
-                        oaf.OafGroup,
-                        oaf.OafNumber,
-                        cancellationToken);
-
-                    var shipmentInfoList = await GetShipmentInfoAsync(
-                        oaf.OafAutoId, shipment.ShipmentCode, cancellationToken);
-
-                    var itemSummaries = new List<PendingOafItemSummary>();
-                    var anyReadyItem = false;
-
-                    foreach (var item in oafItems)
-                    {
-                        var hasShipRecord = shipmentInfoList.Any(s =>
-                            string.Equals(s.SalesItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase));
-
-                        var isReady = hasShipRecord && item.MaxDcQtyIuom > 0;
-                        if (isReady)
-                        {
-                            anyReadyItem = true;
-                        }
-
-                        itemSummaries.Add(new PendingOafItemSummary(
-                            SalesItemCode: item.SalesItemCode,
-                            ItemName: item.SalesItemName,
-                            OafQty: item.OafQty,
-                            AllocatedQty: item.MaxDcQtyIuom > 0 ? item.MaxDcQtyIuom : item.OafQty,
-                            AlreadyDcQty: item.AlreadyDcQty,
-                            PendingDcQty: item.MaxDcQtyIuom,
-                            AllocationId: item.AllocationId,
-                            WarehouseCode: item.WarehouseCode,
-                            HasPendingShipmentRecord: hasShipRecord));
-                    }
-
-                    string statusMessage;
-                    bool isReadyForDc;
-
-                    if (oafItems.Count == 0)
-                    {
-                        isReadyForDc = false;
-                        statusMessage = "No dispatchable items found on OAF.";
-                    }
-                    else if (anyReadyItem)
-                    {
-                        isReadyForDc = true;
-                        statusMessage = "Ready to convert into Delivery Challan.";
-                    }
-                    else if (oafItems.All(i => i.AlreadyDcQty > 0 && i.MaxDcQtyIuom == 0))
-                    {
-                        isReadyForDc = false;
-                        statusMessage = "Already fully dispatched into Delivery Challan.";
-                    }
-                    else if (oafItems.All(i => i.AllocationId == 0))
-                    {
-                        isReadyForDc = false;
-                        statusMessage = "Sales Allocation not completed or not saved (Allocation ID is 0).";
-                    }
-                    else if (!shipmentInfoList.Any())
-                    {
-                        isReadyForDc = false;
-                        statusMessage = "No active shipment schedule / dispatch records found.";
-                    }
-                    else
-                    {
-                        isReadyForDc = false;
-                        statusMessage = "Pending allocation checks.";
-                    }
-
-                    results.Add(new PendingOafSummary(
-                        OafNo: oaf.OafNumber,
-                        IntOrdNo: oaf.IntOrderNumber,
-                        OafId: oaf.OafAutoId,
-                        CustomerCode: effectiveCustomerCode,
-                        ShipmentCode: shipment.ShipmentCode,
-                        CustomerOrderNumber: oaf.CustomerOrderNumber,
-                        IsReadyForDc: isReadyForDc,
-                        StatusMessage: statusMessage,
-                        Items: itemSummaries));
+                    candidateOafs.Add((effectiveCustomerCode, shipment, oaf));
                 }
             }
         }
 
-        return results;
+        var results = new ConcurrentBag<PendingOafSummary>();
+
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = 8,
+            CancellationToken = cancellationToken
+        };
+
+        await Parallel.ForEachAsync(candidateOafs, parallelOptions, async (candidate, ct) =>
+        {
+            var (effectiveCustomerCode, shipment, oaf) = candidate;
+            try
+            {
+                var oafItems = await GetOafItemDetailsAsync(
+                    effectiveCustomerCode,
+                    shipment.ShipmentCode,
+                    oaf.OafYear,
+                    oaf.OafGroup,
+                    oaf.OafNumber,
+                    ct);
+
+                var shipmentInfoList = await GetShipmentInfoAsync(
+                    oaf.OafAutoId, shipment.ShipmentCode, ct);
+
+                var itemSummaries = new List<PendingOafItemSummary>();
+                var anyReadyItem = false;
+
+                foreach (var item in oafItems)
+                {
+                    var hasShipRecord = shipmentInfoList.Any(s =>
+                        string.Equals(s.SalesItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase));
+
+                    var isReady = hasShipRecord && item.MaxDcQtyIuom > 0;
+                    if (isReady)
+                    {
+                        anyReadyItem = true;
+                    }
+
+                    itemSummaries.Add(new PendingOafItemSummary(
+                        SalesItemCode: item.SalesItemCode,
+                        ItemName: item.SalesItemName,
+                        OafQty: item.OafQty,
+                        AllocatedQty: item.MaxDcQtyIuom > 0 ? item.MaxDcQtyIuom : item.OafQty,
+                        AlreadyDcQty: item.AlreadyDcQty,
+                        PendingDcQty: item.MaxDcQtyIuom,
+                        AllocationId: item.AllocationId,
+                        WarehouseCode: item.WarehouseCode,
+                        HasPendingShipmentRecord: hasShipRecord));
+                }
+
+                string statusMessage;
+                bool isReadyForDc;
+
+                if (oafItems.Count == 0)
+                {
+                    isReadyForDc = false;
+                    statusMessage = "No dispatchable items found on OAF.";
+                }
+                else if (anyReadyItem)
+                {
+                    isReadyForDc = true;
+                    statusMessage = "Ready to convert into Delivery Challan.";
+                }
+                else if (oafItems.All(i => i.AlreadyDcQty > 0 && i.MaxDcQtyIuom == 0))
+                {
+                    isReadyForDc = false;
+                    statusMessage = "Already fully dispatched into Delivery Challan.";
+                }
+                else if (oafItems.All(i => i.AllocationId == 0))
+                {
+                    isReadyForDc = false;
+                    statusMessage = "Sales Allocation not completed or not saved (Allocation ID is 0).";
+                }
+                else if (!shipmentInfoList.Any())
+                {
+                    isReadyForDc = false;
+                    statusMessage = "No active shipment schedule / dispatch records found.";
+                }
+                else
+                {
+                    isReadyForDc = false;
+                    statusMessage = "Pending allocation checks.";
+                }
+
+                results.Add(new PendingOafSummary(
+                    OafNo: oaf.OafNumber,
+                    IntOrdNo: oaf.IntOrderNumber,
+                    OafId: oaf.OafAutoId,
+                    CustomerCode: effectiveCustomerCode,
+                    ShipmentCode: shipment.ShipmentCode,
+                    CustomerOrderNumber: oaf.CustomerOrderNumber,
+                    IsReadyForDc: isReadyForDc,
+                    StatusMessage: statusMessage,
+                    Items: itemSummaries));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to evaluate OAF {OafNumber} (id {OafId}) for customer {CustomerCode}",
+                    oaf.OafNumber, oaf.OafAutoId, effectiveCustomerCode);
+
+                results.Add(new PendingOafSummary(
+                    OafNo: oaf.OafNumber,
+                    IntOrdNo: oaf.IntOrderNumber,
+                    OafId: oaf.OafAutoId,
+                    CustomerCode: effectiveCustomerCode,
+                    ShipmentCode: shipment.ShipmentCode,
+                    CustomerOrderNumber: oaf.CustomerOrderNumber,
+                    IsReadyForDc: false,
+                    StatusMessage: $"Evaluation notice: {ex.Message}",
+                    Items: Array.Empty<PendingOafItemSummary>()));
+            }
+        });
+
+        return results.OrderByDescending(r => r.IsReadyForDc).ThenBy(r => r.OafNo).ToList();
     }
 
     private static bool MatchesDocNumber(string? candidate, string? requested)
