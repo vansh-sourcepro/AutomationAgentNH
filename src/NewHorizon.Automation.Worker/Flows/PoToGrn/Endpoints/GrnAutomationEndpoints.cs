@@ -36,10 +36,16 @@ public static class GrnAutomationEndpoints
             .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Inquiry);
         group.MapPut(string.Empty, UpdateAsync).WithName("UpdateGrnAutomation")
             .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Edit);
+        group.MapGet("/enabled", GetEnabledAsync).WithName("GetGrnAutomationEnabled")
+            .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Inquiry);
         group.MapPut("/enabled", SetEnabledAsync).WithName("SetGrnAutomationEnabled")
             .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Edit);
+        group.MapGet("/po-types", GetPoTypesAsync).WithName("GetGrnAutomationPoTypes")
+            .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Inquiry);
         group.MapPut("/po-types", SetPoTypesAsync).WithName("SetGrnAutomationPoTypes")
             .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Edit);
+        group.MapGet("/po-numbers", GetPoNumbersAsync).WithName("GetGrnAutomationPoNumbers")
+            .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Inquiry);
         group.MapPut("/po-numbers", SetPoNumbersAsync).WithName("SetGrnAutomationPoNumbers")
             .RequireErpFormRight(ErpFormRightFilter.PoAutomationConfigForm, ErpFormRightFilter.Edit);
 
@@ -56,6 +62,45 @@ public static class GrnAutomationEndpoints
         }
 
         return Results.Ok(ToResponse(await configs.GetAsync(cancellationToken)));
+    }
+
+    private static async Task<IResult> GetEnabledAsync(
+        IPoGrnAutomationConfigRepository configs,
+        CancellationToken cancellationToken)
+    {
+        if (!configs.IsEnabled)
+        {
+            return NoDatabase();
+        }
+
+        var config = await configs.GetAsync(cancellationToken);
+        return Results.Ok(new { enabled = config.IsActive });
+    }
+
+    private static async Task<IResult> GetPoTypesAsync(
+        IPoGrnAutomationConfigRepository configs,
+        CancellationToken cancellationToken)
+    {
+        if (!configs.IsEnabled)
+        {
+            return NoDatabase();
+        }
+
+        var config = await configs.GetAsync(cancellationToken);
+        return Results.Ok(new { poTypes = config.PoTypeList().Select(t => t.ToString()).ToArray() });
+    }
+
+    private static async Task<IResult> GetPoNumbersAsync(
+        IPoGrnAutomationConfigRepository configs,
+        CancellationToken cancellationToken)
+    {
+        if (!configs.IsEnabled)
+        {
+            return NoDatabase();
+        }
+
+        var config = await configs.GetAsync(cancellationToken);
+        return Results.Ok(new { poNumbers = config.PoNumbers ?? string.Empty });
     }
 
     /// <summary>The master switch. Off ⇒ the scheduler runs nothing and every run is refused (409).</summary>
@@ -253,6 +298,7 @@ public static class GrnAutomationEndpoints
             PoNumbers = effectivePoNumbers,
             ReceiptMode = effectiveReceiptMode,
             InvoiceNumber = savedConfig.InvoiceNumber,
+            TransporterNumber = request.TransporterNumber,
             MaxPos = savedConfig.MaxPosPerRun ?? PoToGrnEndpoints.DefaultMaxPos,
             DryRun = savedConfig.DryRun,
         };

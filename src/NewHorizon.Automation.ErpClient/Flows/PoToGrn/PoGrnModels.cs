@@ -60,6 +60,9 @@ public sealed record PoGrnSweepRequest
     /// <summary>Stamped on every GRN. Required unless <see cref="DryRun"/>.</summary>
     public string? InvoiceNumber { get; init; }
 
+    /// <summary>Transporter name/number stamped on every GRN.</summary>
+    public string? TransporterNumber { get; init; }
+
     /// <summary>How many POs this pass may examine.</summary>
     public int MaxPos { get; init; } = 25;
 

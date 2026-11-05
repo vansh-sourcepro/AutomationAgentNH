@@ -639,6 +639,7 @@ public sealed class PoToGrnService : IPoToGrnService
             PeriodStart = period.Start,
             PeriodEnd = period.End,
             InvoiceNumber = string.IsNullOrWhiteSpace(request.InvoiceNumber) ? string.Empty : request.InvoiceNumber.Trim(),
+            TransporterNumber = string.IsNullOrWhiteSpace(request.TransporterNumber) ? string.Empty : request.TransporterNumber.Trim(),
             CompanyId = _options.CompanyId,
             UserId = run.UserId,
             Remark = _options.Remark,

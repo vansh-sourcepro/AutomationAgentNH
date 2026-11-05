@@ -154,12 +154,13 @@ public sealed class PoToGrnServiceTests
     [Fact]
     public async Task A_run_that_would_create_GRNs_does_not_require_invoice_number()
     {
-        var erp = GrnFixtures.StandardErp(GrnFixtures.PoRow(101));
+        var erp = GrnFixtures.StandardErp(GrnFixtures.PoRow(101))
+            .Route("getposearchdetails", GrnFixtures.PoLines(101, [GrnFixtures.Line(101, "A", pending: 10m)]));
 
         var sweep = await GrnServiceUnderTest.Build(erp)
             .ReceiveEligibleAsync(GrnServiceUnderTest.Request() with { InvoiceNumber = null }, CancellationToken.None);
 
-        sweep.CreatedGrns.Should().Be(1);
+        sweep.GrnsCreated.Should().Be(1);
         erp.CallCount("grn/create").Should().Be(1);
     }
 

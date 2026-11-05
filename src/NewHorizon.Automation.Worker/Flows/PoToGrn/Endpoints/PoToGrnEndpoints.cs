@@ -30,7 +30,7 @@ public static class PoToGrnEndpoints
 
         endpoints.MapPost(Route, ReceiveAsync)
             .WithName("ReceiveAuthorisedPos")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints.MapGet("/api/automation/po-to-grn/history", (
             IProcessJobService processJobs,
@@ -215,6 +215,7 @@ public static class PoToGrnEndpoints
             PoNumbers = poNumbers,
             ReceiptMode = receiptMode,
             InvoiceNumber = config.InvoiceNumber,
+            TransporterNumber = request.TransporterNumber,
             MaxPos = request.MaxPos is > 0 ? request.MaxPos.Value : config.MaxPosPerRun ?? DefaultMaxPos,
             DryRun = request.DryRun,
         };

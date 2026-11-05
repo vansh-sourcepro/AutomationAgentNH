@@ -39,6 +39,8 @@ internal sealed record GrnContext
 
     public required string InvoiceNumber { get; init; }
 
+    public string? TransporterNumber { get; init; }
+
     public required int CompanyId { get; init; }
 
     public required int UserId { get; init; }
@@ -132,7 +134,7 @@ internal static class GrnPayloadBuilder
             ["gateinwardnoControl"] = string.Empty,
             ["gateinwarddateControl"] = null,
             ["lrnoControl"] = string.Empty,
-            ["transporterName"] = string.Empty,
+            ["transporterName"] = context.TransporterNumber ?? string.Empty,
             ["matlyingatControl"] = string.Empty,
             ["issucertnoControl"] = string.Empty,
             ["issucertdateControl"] = null,

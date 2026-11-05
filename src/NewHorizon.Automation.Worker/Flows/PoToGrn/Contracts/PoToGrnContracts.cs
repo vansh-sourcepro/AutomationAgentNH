@@ -55,7 +55,8 @@ public sealed record UpdateGrnAutomationRequest(
     int? MaxPosPerRun = null,
     bool ClearMaxPosPerRun = false,
     IReadOnlyList<string>? PoTypes = null,
-    string? PoNumbers = null);
+    string? PoNumbers = null,
+    string? TransporterNumber = null);
 
 /// <summary>
 /// Unified response for <c>PUT /api/automation/grn-automation</c>.
@@ -101,7 +102,8 @@ public sealed record ReceivePosRequest(
     IReadOnlyList<string>? PoTypes = null,
     string? ReceiptMode = null,
     int? MaxPos = null,
-    bool DryRun = false)
+    bool DryRun = false,
+    string? TransporterNumber = null)
 {
     // Forgiving about case, strict about names: on an endpoint that creates stock receipts, a
     // mistyped filter must be a refusal, not a silent "receive everything".
