@@ -106,12 +106,14 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 TotalQuantity: 0m,
                 Trigger: run.TriggerSource.ToString(),
                 TriggeredBy: run.TriggeredBy ?? run.TriggerSource.ToString(),
-                StartedAtUtc: run.StartedAtUtc,
-                CompletedAtUtc: run.CompletedAtUtc,
+                StartedAtUtc: ToLocal(run.StartedAtUtc),
+                CompletedAtUtc: ToLocal(run.CompletedAtUtc),
                 DurationMs: durationMs,
                 Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : null),
                 SalesOrderNumber: null,
-                QuotationNumber: null));
+                QuotationNumber: null,
+                CreatedAt: FormatLocal(run.StartedAtUtc),
+                CompletedAt: FormatLocal(run.CompletedAtUtc)));
         }
 
         var sortedRecent = jobItems.OrderByDescending(j => j.StartedAtUtc).Take(recentCount).ToList();
@@ -168,12 +170,14 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 TotalQuantity: 0m,
                 Trigger: run.TriggerSource.ToString(),
                 TriggeredBy: run.TriggeredBy ?? run.TriggerSource.ToString(),
-                StartedAtUtc: run.StartedAtUtc,
-                CompletedAtUtc: run.CompletedAtUtc,
+                StartedAtUtc: ToLocal(run.StartedAtUtc),
+                CompletedAtUtc: ToLocal(run.CompletedAtUtc),
                 DurationMs: durationMs,
                 Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : null),
                 SalesOrderNumber: null,
-                QuotationNumber: null));
+                QuotationNumber: null,
+                CreatedAt: FormatLocal(run.StartedAtUtc),
+                CompletedAt: FormatLocal(run.CompletedAtUtc)));
         }
 
         return jobItems.OrderByDescending(j => j.StartedAtUtc).Take(count).ToList();
@@ -249,12 +253,14 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 TotalQuantity: 0m,
                 Trigger: run.TriggerSource.ToString(),
                 TriggeredBy: run.TriggeredBy ?? run.TriggerSource.ToString(),
-                StartedAtUtc: run.StartedAtUtc,
-                CompletedAtUtc: run.CompletedAtUtc,
+                StartedAtUtc: ToLocal(run.StartedAtUtc),
+                CompletedAtUtc: ToLocal(run.CompletedAtUtc),
                 DurationMs: durationMs,
                 Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : null),
                 SalesOrderNumber: null,
-                QuotationNumber: null));
+                QuotationNumber: null,
+                CreatedAt: FormatLocal(run.StartedAtUtc),
+                CompletedAt: FormatLocal(run.CompletedAtUtc)));
         }
 
         var filtered = items.AsEnumerable();
@@ -433,12 +439,14 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
             TotalQuantity: totalQuantity,
             Trigger: run?.TriggerSource.ToString() ?? "Api",
             TriggeredBy: run?.TriggeredBy ?? "Api",
-            StartedAtUtc: job.StartedAtUtc ?? job.CreatedAtUtc,
-            CompletedAtUtc: job.CompletedAtUtc,
+            StartedAtUtc: ToLocal(job.StartedAtUtc ?? job.CreatedAtUtc),
+            CompletedAtUtc: ToLocal(job.CompletedAtUtc),
             DurationMs: durationMs,
             Reason: reason,
             SalesOrderNumber: soNumber,
-            QuotationNumber: documentNumber);
+            QuotationNumber: documentNumber,
+            CreatedAt: FormatLocal(job.StartedAtUtc ?? job.CreatedAtUtc),
+            CompletedAt: FormatLocal(job.CompletedAtUtc));
     }
 
     private static QuotationToSoExecutionDetail BuildExecutionDetail(JobContext ctx)
@@ -448,22 +456,24 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
             Stage: s.Stage,
             OperationName: s.OperationName,
             Status: s.Status.ToString(),
-            StartedAtUtc: s.StartedAtUtc,
-            CompletedAtUtc: s.CompletedAtUtc,
+            StartedAtUtc: ToLocal(s.StartedAtUtc),
+            CompletedAtUtc: ToLocal(s.CompletedAtUtc),
             DurationMs: s.StartedAtUtc.HasValue && s.CompletedAtUtc.HasValue
                 ? (long?)(s.CompletedAtUtc.Value - s.StartedAtUtc.Value).TotalMilliseconds
                 : null,
             Remarks: s.Remarks,
-            ErpDocumentRef: s.ErpDocumentRef)).ToList();
+            ErpDocumentRef: s.ErpDocumentRef,
+            StartedAt: FormatLocal(s.StartedAtUtc),
+            CompletedAt: FormatLocal(s.CompletedAtUtc))).ToList();
 
         if (steps.Count == 0)
         {
             steps =
             [
-                new("Discovery", "ListOpenQuotations", "Completed", item.StartedAtUtc, item.StartedAtUtc?.AddMilliseconds(120), 120, null, null),
-                new("QuotationDetail", "GetQuotationDetail", "Completed", item.StartedAtUtc?.AddMilliseconds(120), item.StartedAtUtc?.AddMilliseconds(450), 330, null, null),
-                new("Validation", "VerifyExistingSalesOrder", item.Status == "Skipped" ? "Skipped" : "Completed", item.StartedAtUtc?.AddMilliseconds(450), item.StartedAtUtc?.AddMilliseconds(750), 300, item.Reason, null),
-                new("CreateSalesOrder", "CreateSalesOrderEntry", item.Status == "Completed" ? "Completed" : (item.Status == "Skipped" ? "Skipped" : "Failed"), item.StartedAtUtc?.AddMilliseconds(750), item.CompletedAtUtc ?? item.StartedAtUtc?.AddMilliseconds(1200), item.DurationMs, item.Reason, item.IssueNumber)
+                new("Discovery", "ListOpenQuotations", "Completed", item.StartedAtUtc, item.StartedAtUtc?.AddMilliseconds(120), 120, null, null, FormatLocal(item.StartedAtUtc), FormatLocal(item.StartedAtUtc?.AddMilliseconds(120))),
+                new("QuotationDetail", "GetQuotationDetail", "Completed", item.StartedAtUtc?.AddMilliseconds(120), item.StartedAtUtc?.AddMilliseconds(450), 330, null, null, FormatLocal(item.StartedAtUtc?.AddMilliseconds(120)), FormatLocal(item.StartedAtUtc?.AddMilliseconds(450))),
+                new("Validation", "VerifyExistingSalesOrder", item.Status == "Skipped" ? "Skipped" : "Completed", item.StartedAtUtc?.AddMilliseconds(450), item.StartedAtUtc?.AddMilliseconds(750), 300, item.Reason, null, FormatLocal(item.StartedAtUtc?.AddMilliseconds(450)), FormatLocal(item.StartedAtUtc?.AddMilliseconds(750))),
+                new("CreateSalesOrder", "CreateSalesOrderEntry", item.Status == "Completed" ? "Completed" : (item.Status == "Skipped" ? "Skipped" : "Failed"), item.StartedAtUtc?.AddMilliseconds(750), item.CompletedAtUtc ?? item.StartedAtUtc?.AddMilliseconds(1200), item.DurationMs, item.Reason, item.IssueNumber, FormatLocal(item.StartedAtUtc?.AddMilliseconds(750)), FormatLocal(item.CompletedAtUtc ?? item.StartedAtUtc?.AddMilliseconds(1200)))
             ];
         }
 
@@ -489,7 +499,9 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
             Reason: item.Reason,
             Steps: steps,
             Checks: checks,
-            SalesOrderNumber: item.SalesOrderNumber);
+            SalesOrderNumber: item.SalesOrderNumber,
+            CreatedAt: item.CreatedAt,
+            CompletedAt: item.CompletedAt);
     }
 
     private static QuotationToSoDashboardSummary BuildSummary(
@@ -547,7 +559,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
         int days)
     {
         var result = new List<QuotationToSoDailyStat>(days);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now);
 
         var jobsByDate = jobs
             .Where(j => j.StartedAtUtc.HasValue)
@@ -616,7 +628,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
     private static IReadOnlyList<QuotationToSoDailyStat> BuildEmptyDailyStats(int days)
     {
         var result = new List<QuotationToSoDailyStat>(days);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now);
 
         for (int i = 0; i < days; i++)
         {
@@ -631,6 +643,10 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
 
         return result;
     }
+
+    private static DateTimeOffset? ToLocal(DateTimeOffset? dto) => dto?.ToLocalTime();
+
+    private static string? FormatLocal(DateTimeOffset? dto) => dto?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 
     private sealed record JobContext(
         Job Job,

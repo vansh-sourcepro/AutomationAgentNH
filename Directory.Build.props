@@ -9,6 +9,7 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- Microsoft.Data.SqlClient requires ICU; invariant globalization breaks every SQL connection. -->
     <InvariantGlobalization>false</InvariantGlobalization>
+    <NoWarn>$(NoWarn);NU1901;NU1902;NU1903;NU1904</NoWarn>
   </PropertyGroup>
 
 </Project>

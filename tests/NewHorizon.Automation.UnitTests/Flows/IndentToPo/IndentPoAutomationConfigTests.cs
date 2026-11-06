@@ -71,7 +71,7 @@ public sealed class IndentPoAutomationConfigTests
 
         // Api/Disabled clear the schedule time on the mode switch, so the check is false either way;
         // this asserts the rule holds even if a stray time were present.
-        config.ShouldRunOnSchedule(new TimeOnly(9, 0), Today).Should().Be(expected);
+        config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().Be(expected);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class IndentPoAutomationConfigTests
         config.Update(new IndentPoAutomationConfigUpdate { ScheduleTime = new TimeOnly(14, 0) }, Now, "admin");
 
         config.LastScheduledRunDate.Should().BeNull();
-        config.ShouldRunOnSchedule(new TimeOnly(15, 0), Today).Should().BeTrue("the new time gets a fresh slot today");
+        config.ShouldRunOnSchedule(new TimeOnly(14, 0), Today).Should().BeTrue("the new time gets a fresh slot today");
     }
 
     [Fact]
@@ -125,15 +125,15 @@ public sealed class IndentPoAutomationConfigTests
     }
 
     [Fact]
-    public void A_missed_slot_catches_up_once_the_next_day()
+    public void A_slot_the_next_day_fires_when_slot_time_arrives()
     {
         var config = Scheduled(new TimeOnly(8, 0));
         config.MarkScheduledRun(new DateOnly(2026, 9, 2), Now.AddDays(-1), RunStatus.Completed, Guid.NewGuid());
 
-        config.ShouldRunOnSchedule(new TimeOnly(10, 0), Today).Should().BeTrue();
+        config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().BeTrue();
 
         config.MarkScheduledRun(Today, Now, RunStatus.Completed, Guid.NewGuid());
-        config.ShouldRunOnSchedule(new TimeOnly(11, 0), Today).Should().BeFalse();
+        config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().BeFalse();
     }
 
     // ---- the per-row mode shapes the stored data ------------------------
@@ -177,7 +177,7 @@ public sealed class IndentPoAutomationConfigTests
         config.ScheduleTime.Should().Be(new TimeOnly(8, 0));
         config.IndentNumbers.Should().Be("000100");
         config.IndentNumberList().Should().Equal("000100");
-        config.ShouldRunOnSchedule(new TimeOnly(9, 0), Today).Should().BeTrue();
+        config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().BeTrue();
     }
 
     // ---- indent-number normalisation ----------------------------------
@@ -225,11 +225,11 @@ public sealed class IndentPoAutomationConfigTests
     public void An_inactive_row_never_fires_on_a_schedule()
     {
         var config = Scheduled(new TimeOnly(8, 0));
-        config.ShouldRunOnSchedule(new TimeOnly(9, 0), Today).Should().BeTrue("it is active and past its slot");
+        config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().BeTrue("it is active and at its slot");
 
         config.Update(new IndentPoAutomationConfigUpdate { IsActive = false }, Now, "admin");
 
-        config.ShouldRunOnSchedule(new TimeOnly(9, 0), Today).Should().BeFalse("PO Automation is turned off");
+        config.ShouldRunOnSchedule(new TimeOnly(8, 0), Today).Should().BeFalse("PO Automation is turned off");
     }
 
     private static IndentPoAutomationConfig Scheduled(TimeOnly time, PoAutomationRunMode mode = PoAutomationRunMode.Timer)

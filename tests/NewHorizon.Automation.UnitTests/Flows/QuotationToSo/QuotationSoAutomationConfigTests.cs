@@ -39,7 +39,7 @@ public sealed class QuotationSoAutomationConfigTests
     {
         var config = QuotationSoAutomationConfig.CreateDefault(Now);
         config.Update(new QuotationSoAutomationConfigUpdate
-        {......
+        {
             ScheduleTime = new TimeOnly(10, 30),
             IsActive = true
         }, Now, "tester");

@@ -25,7 +25,11 @@ public sealed record QuotationToSoJobItem(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? SalesOrderNumber = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? QuotationNumber = null);
+    string? QuotationNumber = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CreatedAt = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CompletedAt = null);
 
 /// <summary>
 /// Operational KPI totals across Quotation to Sales Order conversions for dashboard cards.
@@ -67,7 +71,11 @@ public sealed record QuotationToSoStepDetail(
     DateTimeOffset? CompletedAtUtc,
     long? DurationMs,
     string? Remarks,
-    string? ErpDocumentRef);
+    string? ErpDocumentRef,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? StartedAt = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CompletedAt = null);
 
 /// <summary>
 /// Verification / rule checks run for a conversion.
@@ -94,7 +102,11 @@ public sealed record QuotationToSoExecutionDetail(
     string? Reason,
     IReadOnlyList<QuotationToSoStepDetail> Steps,
     IReadOnlyList<QuotationToSoCheckDetail> Checks,
-    string? SalesOrderNumber = null);
+    string? SalesOrderNumber = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CreatedAt = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? CompletedAt = null);
 
 /// <summary>
 /// Complete composite dashboard payload containing summary metrics, daily timeline series,
