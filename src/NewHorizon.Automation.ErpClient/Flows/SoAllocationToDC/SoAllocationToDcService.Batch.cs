@@ -682,9 +682,9 @@ public sealed partial class SoAllocationToDcService
                 OafId: i.OafId > 0 ? i.OafId : resolvedOafId,
                 ItemCode: i.IntItemCode,
                 SalesItemCode: i.SalesItemCode,
-                AllocatedQty: i.AlreadyDcQty > 0
-                    ? (i.MaxDcQtyIuom > 0 ? i.MaxDcQtyIuom : Math.Max(0, i.OafQty - i.AlreadyDcQty))
-                    : i.OafQty,
+                AllocatedQty: i.MaxDcQtyIuom > 0
+                    ? i.MaxDcQtyIuom
+                    : (i.AlreadyDcQty > 0 ? Math.Max(0, i.OafQty - i.AlreadyDcQty) : i.OafQty),
                 OafDetailLineId: i.OafDetailLineId,
                 OafDetailLineNo: i.OafDetailLineNo,
                 SoItemLineNo: i.SoItemLineNo,
@@ -904,7 +904,7 @@ public sealed partial class SoAllocationToDcService
                     DcCreated: false,
                     DcId: null,
                     DcNumber: null,
-                    AllocatedQuantity: item.OafItem.OafQty,
+                    AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : (item.OafItem.MaxDcQtyIuom > 0 ? item.OafItem.MaxDcQtyIuom : item.OafItem.OafQty),
                     DcQuantity: item.DcQty,
                     Message: "[DRY RUN] Eligible for DC conversion. No DC created."
                 ));
@@ -947,7 +947,7 @@ public sealed partial class SoAllocationToDcService
                         DcCreated: true,
                         DcId: dcAutoId,
                         DcNumber: dcNumber,
-                        AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : item.OafItem.OafQty,
+                        AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : (item.OafItem.MaxDcQtyIuom > 0 ? item.OafItem.MaxDcQtyIuom : item.OafItem.OafQty),
                         DcQuantity: item.DcQty,
                         Message: "Delivery Challan created successfully. Pending manual authorization.",
                         Authorized: false,
@@ -972,7 +972,7 @@ public sealed partial class SoAllocationToDcService
                             DcCreated: false,
                             DcId: null,
                             DcNumber: null,
-                            AllocatedQuantity: singleItem.Allocation.AllocatedQty > 0 ? singleItem.Allocation.AllocatedQty : singleItem.OafItem.OafQty,
+                            AllocatedQuantity: singleItem.Allocation.AllocatedQty > 0 ? singleItem.Allocation.AllocatedQty : (singleItem.OafItem.MaxDcQtyIuom > 0 ? singleItem.OafItem.MaxDcQtyIuom : singleItem.OafItem.OafQty),
                             DcQuantity: null,
                             Message: cleanMessage,
                             FailedField: field,
@@ -1010,7 +1010,7 @@ public sealed partial class SoAllocationToDcService
                                 DcCreated: true,
                                 DcId: dcAutoId,
                                 DcNumber: dcNumber,
-                                AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : item.OafItem.OafQty,
+                                AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : (item.OafItem.MaxDcQtyIuom > 0 ? item.OafItem.MaxDcQtyIuom : item.OafItem.OafQty),
                                 DcQuantity: item.DcQty,
                                 Message: "Delivery Challan created successfully. Pending manual authorization.",
                                 Authorized: false,
@@ -1026,7 +1026,7 @@ public sealed partial class SoAllocationToDcService
                                 DcCreated: false,
                                 DcId: null,
                                 DcNumber: null,
-                                AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : item.OafItem.OafQty,
+                                AllocatedQuantity: item.Allocation.AllocatedQty > 0 ? item.Allocation.AllocatedQty : (item.OafItem.MaxDcQtyIuom > 0 ? item.OafItem.MaxDcQtyIuom : item.OafItem.OafQty),
                                 DcQuantity: null,
                                 Message: cleanMessage,
                                 FailedField: field,

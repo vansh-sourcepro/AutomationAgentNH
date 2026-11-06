@@ -35,6 +35,7 @@ public static class SoAllocationToDcModule
         services.AddSoAllocationToDcErp();
         
         services.AddSingleton<NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Configuration.ISoAllocationToDcConfigRepository, NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Configuration.JsonSoAllocationToDcConfigRepository>();
+        services.AddSingleton<NewHorizon.Automation.Worker.Flows.SoAllocationToDC.History.ISoAllocationToDcHistoryRepository, NewHorizon.Automation.Worker.Flows.SoAllocationToDC.History.JsonSoAllocationToDcHistoryRepository>();
         services.AddHostedService<NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Services.SoAllocationToDcSchedulerService>();
 
         return services;

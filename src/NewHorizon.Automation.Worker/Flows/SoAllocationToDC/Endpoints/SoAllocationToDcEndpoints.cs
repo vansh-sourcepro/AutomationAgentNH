@@ -1,20 +1,16 @@
-﻿using NewHorizon.Automation.Application.Erp;
+using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.ErpClient.Flows.SoAllocationToDC;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Contracts;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Configuration;
+using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.History;
 using NewHorizon.Automation.Application.Abstractions;
 
 namespace NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Endpoints;
 
 /// <summary>
-/// The one new automation endpoint: given a Sales Allocation (identified by OAF ID),
-/// create the corresponding Delivery Challan in the ERP.
+/// Automation endpoints for Sales Allocation -> Delivery Challan conversion.
 /// </summary>
-/// <remarks>
-/// Request-driven (like the Indent->PO endpoints): no database required, the caller learns
-/// the DC number directly, and the ERP's own bookkeeping prevents duplicate DCs.
-/// </remarks>
 public static class SoAllocationToDcEndpoints
 {
     public static IEndpointRouteBuilder MapSoAllocationToDcEndpoints(
@@ -22,8 +18,7 @@ public static class SoAllocationToDcEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        // API-key protected — same security model as /api/automation/indent-to-po.
-        // Master automation API: processes ALL existing Sales Order Allocations sequentially
+        // API-key / ERP token protected — same security model as /api/automation/indent-to-po.
         endpoints
             .MapPost(
                 "/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallansFromAllocations",
@@ -66,6 +61,57 @@ public static class SoAllocationToDcEndpoints
             .WithName("PutSoAutomationConfig")
             .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
+        // Dashboard & Metrics endpoints
+        endpoints
+            .MapGet(
+                "/api/v1/sales/SalesAllocationDeAllocation/Dashboard",
+                GetDashboardAsync)
+            .WithName("GetSoAllocationToDcDashboard")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapGet(
+                "/api/automation/so-allocation-to-dc/dashboard",
+                GetDashboardAsync)
+            .WithName("GetSoAllocationToDcDashboardAlt")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapGet(
+                "/api/v1/sales/SalesAllocationDeAllocation/summary",
+                GetSummaryEndpointAsync)
+            .WithName("GetSoAllocationToDcSummary")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapGet(
+                "/api/v1/sales/SalesAllocationDeAllocation/daily-summary",
+                GetDailyStatsEndpointAsync)
+            .WithName("GetSoAllocationToDcDailyStats")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        // History endpoints
+        endpoints
+            .MapGet(
+                "/api/v1/sales/SalesAllocationDeAllocation/History",
+                GetHistoryAsync)
+            .WithName("GetSoAllocationToDcHistory")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapGet(
+                "/api/automation/so-allocation-to-dc/history",
+                GetHistoryAsync)
+            .WithName("GetSoAllocationToDcHistoryAlt")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapGet(
+                "/api/v1/sales/SalesAllocationDeAllocation/History/{jobId:guid}",
+                GetExecutionDetailAsync)
+            .WithName("GetSoAllocationToDcExecutionDetail")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
         return endpoints;
     }
 
@@ -81,7 +127,13 @@ public static class SoAllocationToDcEndpoints
             OafNumber = config.OafNumbers?.FirstOrDefault(),
             AllocationNumber = config.OafNumbers?.FirstOrDefault(),
             AutomationMode = config.AutomationMode,
-            OafNumbers = config.OafNumbers
+            OafNumbers = config.OafNumbers,
+            UpdatedAtUtc = config.UpdatedAtUtc,
+            LastScheduledRunDate = config.LastScheduledRunDate?.ToString("yyyy-MM-dd"),
+            LastScheduledRunStatus = config.LastScheduledRunStatus,
+            LastCreatedDcCount = config.LastCreatedDcCount,
+            LastScheduledRunMessage = config.LastScheduledRunMessage,
+            LastScheduledRunUtc = config.LastScheduledRunUtc
         });
     }
 
@@ -89,7 +141,6 @@ public static class SoAllocationToDcEndpoints
         SoAllocationToDcAutomationConfigDto dto,
         ISoAllocationToDcConfigRepository repo,
         IClock clock,
-        IServiceProvider serviceProvider,
         CancellationToken cancellationToken)
     {
         string? normalizedTime = null;
@@ -103,7 +154,6 @@ public static class SoAllocationToDcEndpoints
             normalizedTime = parsedTime.ToString("HH:mm");
         }
 
-        // Support both single OAF number and multiple OAF numbers
         var oafList = dto.OafNumbers?
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Select(s => s.Trim())
@@ -129,13 +179,11 @@ public static class SoAllocationToDcEndpoints
         }
 
         var config = await repo.GetConfigAsync(cancellationToken);
-        
         bool timeChanged = config.AutomationTime != normalizedTime;
 
         var mode = dto.AutomationMode?.ToUpperInvariant();
         if (!dto.AutomationEnabled)
         {
-            // When Toggle is OFF, safety shutoff resets parameters to null
             mode = null;
             normalizedTime = null;
             oafList = null;
@@ -159,57 +207,36 @@ public static class SoAllocationToDcEndpoints
             }
         }
 
+        var modeChanged = config.AutomationMode != mode;
+        var enabledChanged = config.AutomationEnabled != dto.AutomationEnabled;
+
         config.AutomationEnabled = dto.AutomationEnabled;
         config.AutomationTime = normalizedTime;
         config.OafNumbers = oafList;
         config.AutomationMode = mode;
-        
         config.UpdatedAtUtc = clock.UtcNow;
-        
-        if (timeChanged)
+
+        if (timeChanged || modeChanged || enabledChanged)
         {
-            // Reset run tracker so it can run again if time is changed
-            config.LastScheduledRunDate = null;
+            if (!string.IsNullOrWhiteSpace(normalizedTime) && TimeOnly.TryParse(normalizedTime, out var slot))
+            {
+                // If the scheduled time for today has already passed, mark it as run for today so it doesn't trigger immediately
+                if (clock.LocalTimeOfDay >= slot)
+                {
+                    config.LastScheduledRunDate = clock.LocalDate;
+                }
+                else
+                {
+                    config.LastScheduledRunDate = null;
+                }
+            }
+            else
+            {
+                config.LastScheduledRunDate = null;
+            }
         }
 
         await repo.SaveConfigAsync(config, cancellationToken);
-        
-        if (config.AutomationEnabled && config.AutomationMode is "INDIVIDUAL" or "BOTH")
-        {
-            // Trigger immediately for INDIVIDUAL or BOTH mode (though BOTH also implies scheduled)
-            // But the TL explicitly asked for immediate execution for individual selection
-            
-            // Wait, if it's BOTH, does it mean we run BOTH immediately and on schedule? 
-            // The requirement says for Mode BOTH: "At the configured time, process the eligible allocations associated with the configured OAF numbers."
-            // So if it's BOTH, it should ONLY run on schedule.
-            // Wait, "Individual mode must not depend on the timer being triggered. It must support the existing main API's individual execution mechanism."
-            
-            // Let's run immediately if mode is INDIVIDUAL, OR if mode is BOTH but no time is provided
-            if (config.AutomationMode == "INDIVIDUAL" || string.IsNullOrWhiteSpace(config.AutomationTime))
-            {
-                var requestDto = new BatchDcCreationRequestDto { OafNumbers = config.OafNumbers };
-                
-                var factory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
-                _ = Task.Run(async () => 
-                {
-                    using var scope = factory.CreateScope();
-                    var service = scope.ServiceProvider.GetRequiredService<ISoAllocationToDcService>();
-                    var logger = scope.ServiceProvider.GetRequiredService<ILogger<ISoAllocationToDcService>>();
-                    try
-                    {
-                        var target = config.OafNumbers != null && config.OafNumbers.Count > 0 
-                            ? string.Join(", ", config.OafNumbers) 
-                            : "ALL";
-                        logger.LogInformation("Config API immediate run triggered (Mode: {Mode}) for OAF(s): {Target}", config.AutomationMode, target);
-                        await service.CreateDeliveryChallansFromAllocationsAsync(requestDto.ToRequest(), default);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Config API immediate run failed");
-                    }
-                });
-            }
-        }
 
         return Results.Ok(new SoAllocationToDcAutomationConfigDto
         {
@@ -218,14 +245,16 @@ public static class SoAllocationToDcEndpoints
             OafNumber = config.OafNumbers?.FirstOrDefault(),
             AllocationNumber = config.OafNumbers?.FirstOrDefault(),
             AutomationMode = config.AutomationMode,
-            OafNumbers = config.OafNumbers
+            OafNumbers = config.OafNumbers,
+            UpdatedAtUtc = config.UpdatedAtUtc,
+            LastScheduledRunDate = config.LastScheduledRunDate?.ToString("yyyy-MM-dd"),
+            LastScheduledRunStatus = config.LastScheduledRunStatus,
+            LastCreatedDcCount = config.LastCreatedDcCount,
+            LastScheduledRunMessage = config.LastScheduledRunMessage,
+            LastScheduledRunUtc = config.LastScheduledRunUtc
         });
     }
 
-    /// <summary>
-    /// Scans for OAFs under the specified customer (or default customer) and inspects
-    /// whether they are ready to be converted into a Delivery Challan.
-    /// </summary>
     private static async Task<IResult> GetPendingAllocationsAsync(
         string? customerCode,
         ISoAllocationToDcService service,
@@ -272,13 +301,12 @@ public static class SoAllocationToDcEndpoints
         }
     }
 
-    /// <summary>
-    /// Accepts an OAF ID, OAF number, or internal order number, validates the existing allocation,
-    /// and calls the ERP's own <c>createDCEntry</c> endpoint. Returns the generated DC number and DC id on success.
-    /// </summary>
     private static async Task<IResult> CreateDeliveryChallanAsync(
         CreateDcFromAllocationRequest? request,
         ISoAllocationToDcService service,
+        ISoAllocationToDcHistoryRepository historyRepo,
+        IClock clock,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
         if (request is null || !request.HasAnyIdentifier)
@@ -296,6 +324,12 @@ public static class SoAllocationToDcEndpoints
                 ErrorMessage: "Invalid request. Please provide 'oafNo' and/or 'intOrdNo' (or 'oafId')."));
         }
 
+        var startedAt = clock.UtcNow;
+        var runId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var trigger = ResolveTrigger(context);
+        var triggeredBy = ResolveTriggeredBy(context);
+
         try
         {
             var result = await service.CreateDeliveryChallanFromAllocationAsync(
@@ -304,6 +338,52 @@ public static class SoAllocationToDcEndpoints
                 request.ResolvedIntOrdNo,
                 request.CustomerCode,
                 cancellationToken);
+
+            var completedAt = clock.UtcNow;
+            var durationMs = (long)(completedAt - startedAt).TotalMilliseconds;
+
+            var execRecord = new SoAllocationToDcExecutionRecord
+            {
+                JobId = jobId,
+                RunId = runId,
+                AllocationId = request.OafId ?? 0,
+                OafId = result.OafId,
+                OafNo = result.OafNo ?? request.ResolvedOafNo,
+                IntOrdNo = result.IntOrdNo ?? request.ResolvedIntOrdNo,
+                CustomerCode = request.CustomerCode,
+                Status = "Success",
+                DcCreated = true,
+                DcNumber = result.DcNumber,
+                DcId = result.DcId,
+                DcStatus = "Open",
+                LineCount = result.DcItemCount,
+                AllocatedQty = result.TotalAllocatedQty,
+                DcQty = result.TotalDcQty,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs
+            };
+
+            var runRecord = new SoAllocationToDcRunRecord
+            {
+                RunId = runId,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs,
+                Status = "Success",
+                TotalAllocations = 1,
+                ProcessedAllocations = 1,
+                SuccessfulAllocations = 1,
+                CreatedDcCount = 1,
+                TotalAllocatedQty = result.TotalAllocatedQty,
+                TotalDcQty = result.TotalDcQty
+            };
+
+            await historyRepo.RecordRunAsync(runRecord, new List<SoAllocationToDcExecutionRecord> { execRecord }, cancellationToken);
 
             return Results.Ok(new CreateDcFromAllocationResponse(
                 Success: true,
@@ -325,8 +405,49 @@ public static class SoAllocationToDcEndpoints
         }
         catch (DcValidationException ex)
         {
-            // A known, deterministic business-rule failure. 422 Unprocessable Entity is
-            // semantically correct: the request was understood, but the ERP cannot fulfill it.
+            var completedAt = clock.UtcNow;
+            var durationMs = (long)(completedAt - startedAt).TotalMilliseconds;
+            var isDuplicate = ex.Message.Contains("already has a Delivery Challan", StringComparison.OrdinalIgnoreCase);
+            var status = isDuplicate ? "Skipped" : "Failed";
+
+            var execRecord = new SoAllocationToDcExecutionRecord
+            {
+                JobId = jobId,
+                RunId = runId,
+                AllocationId = request.OafId ?? 0,
+                OafId = request.OafId ?? 0,
+                OafNo = request.ResolvedOafNo,
+                IntOrdNo = request.ResolvedIntOrdNo,
+                CustomerCode = request.CustomerCode,
+                Status = status,
+                DcCreated = false,
+                FailureReason = ex.Message,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs
+            };
+
+            var runRecord = new SoAllocationToDcRunRecord
+            {
+                RunId = runId,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs,
+                Status = status,
+                TotalAllocations = 1,
+                ProcessedAllocations = 1,
+                SuccessfulAllocations = 0,
+                FailedAllocations = status == "Failed" ? 1 : 0,
+                SkippedAllocations = status == "Skipped" ? 1 : 0,
+                FailureReason = ex.Message
+            };
+
+            await historyRepo.RecordRunAsync(runRecord, new List<SoAllocationToDcExecutionRecord> { execRecord }, cancellationToken);
+
             return Results.UnprocessableEntity(new CreateDcFromAllocationResponse(
                 Success: false,
                 Message: null,
@@ -338,24 +459,65 @@ public static class SoAllocationToDcEndpoints
         }
         catch (ErpTransientException ex)
         {
-            // The ERP could not be reached or answered unexpectedly. 503 signals the caller
-            // to retry after the ERP recovers.
+            var completedAt = clock.UtcNow;
+            var durationMs = (long)(completedAt - startedAt).TotalMilliseconds;
+
+            var execRecord = new SoAllocationToDcExecutionRecord
+            {
+                JobId = jobId,
+                RunId = runId,
+                AllocationId = request.OafId ?? 0,
+                OafId = request.OafId ?? 0,
+                OafNo = request.ResolvedOafNo,
+                IntOrdNo = request.ResolvedIntOrdNo,
+                CustomerCode = request.CustomerCode,
+                Status = "Failed",
+                DcCreated = false,
+                FailureReason = ex.LaymanMessage,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs
+            };
+
+            var runRecord = new SoAllocationToDcRunRecord
+            {
+                RunId = runId,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs,
+                Status = "Failed",
+                TotalAllocations = 1,
+                ProcessedAllocations = 1,
+                FailedAllocations = 1,
+                FailureReason = ex.LaymanMessage
+            };
+
+            await historyRepo.RecordRunAsync(runRecord, new List<SoAllocationToDcExecutionRecord> { execRecord }, cancellationToken);
+
             return Results.Problem(
                 detail: ex.LaymanMessage,
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
     }
 
-    /// <summary>
-    /// Master automation endpoint: finds ALL existing Sales Order Allocations and processes them
-    /// sequentially using the exact ERP sequence, creating Delivery Challans for each eligible record.
-    /// </summary>
     private static async Task<IResult> CreateDeliveryChallansFromAllAllocationsAsync(
         BatchDcCreationRequestDto? requestDto,
         ISoAllocationToDcService service,
         ISoAllocationToDcConfigRepository configRepo,
+        ISoAllocationToDcHistoryRepository historyRepo,
+        IClock clock,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
+        var startedAt = clock.UtcNow;
+        var runId = Guid.NewGuid();
+        var trigger = ResolveTrigger(context);
+        var triggeredBy = ResolveTriggeredBy(context);
+
         try
         {
             var config = await configRepo.GetConfigAsync(cancellationToken);
@@ -379,20 +541,143 @@ public static class SoAllocationToDcEndpoints
             }
 
             var request = requestDto?.ToRequest() ?? new BatchDcCreationRequest();
-            
-            // Apply NULL selection parameter logic based on mode
+
             if (request.OafNumbers == null || request.OafNumbers.Count == 0)
             {
                 if (config.AutomationMode == "INDIVIDUAL" || config.AutomationMode == "TIMER" || config.AutomationMode == "BOTH")
                 {
-                    // TL Request: "If all individual-selection parameters are null or empty while automation is enabled, process all eligible allocations."
-                    // Since it's null, we just let it pass as null, and the underlying service will process ALL eligible allocations dynamically.
                     request = request with { OafNumbers = null };
                 }
             }
 
             var batchResult = await service.CreateDeliveryChallansFromAllocationsAsync(
                 request, cancellationToken);
+
+            var completedAt = clock.UtcNow;
+            var durationMs = (long)(completedAt - startedAt).TotalMilliseconds;
+
+            var executionRecords = new List<SoAllocationToDcExecutionRecord>();
+
+            if (batchResult.Data?.Results != null)
+            {
+                foreach (var item in batchResult.Data.Results)
+                {
+                    var isSuccess = item.Status == "SUCCESS" || (!string.IsNullOrEmpty(item.DcNumber) && item.Status == "PARTIAL_SUCCESS") || (item.Items != null && item.Items.Any(i => i.DcCreated));
+                    var isDuplicateOrSkipped = !isSuccess && (
+                        item.FailedField == "Duplicate" ||
+                        item.FailedField == "NotFound" ||
+                        (item.Items != null && item.Items.Any(i => i.FailedField == "Duplicate" || i.FailedField == "NotFound")) ||
+                        (item.Message != null && item.Message.Contains("already has a Delivery Challan", StringComparison.OrdinalIgnoreCase)) ||
+                        (item.Message != null && item.Message.Contains("No pending dispatchable allocation", StringComparison.OrdinalIgnoreCase)));
+
+                    string execStatus;
+                    if (isSuccess)
+                    {
+                        execStatus = "Success";
+                    }
+                    else if (isDuplicateOrSkipped)
+                    {
+                        execStatus = "Skipped";
+                    }
+                    else
+                    {
+                        execStatus = "Failed";
+                    }
+
+                    var execRecord = new SoAllocationToDcExecutionRecord
+                    {
+                        JobId = Guid.NewGuid(),
+                        RunId = runId,
+                        AllocationId = item.AllocationId,
+                        OafId = item.OafId,
+                        OafNo = item.OafNo,
+                        IntOrdNo = item.IntOrdNo,
+                        CustomerCode = item.CustomerCode,
+                        ShipmentCode = item.ShipmentCode,
+                        LineCount = item.ItemCount,
+                        AllocatedQty = item.AllocatedQuantity,
+                        DcQty = item.DcQuantity,
+                        Trigger = trigger,
+                        TriggeredBy = triggeredBy,
+                        StartedAtUtc = startedAt,
+                        CompletedAtUtc = completedAt,
+                        DurationMs = durationMs,
+                        Status = execStatus,
+                        DcCreated = isSuccess || !string.IsNullOrEmpty(item.DcNumber) || (item.Items != null && item.Items.Any(i => i.DcCreated)),
+                        DcNumber = item.DcNumber ?? item.Items?.FirstOrDefault(i => !string.IsNullOrEmpty(i.DcNumber))?.DcNumber,
+                        DcId = item.DcId ?? item.Items?.FirstOrDefault(i => i.DcId.HasValue)?.DcId,
+                        DcStatus = item.DcStatus ?? (isSuccess ? "Open" : null),
+                        FailureReason = isSuccess ? null : item.Message,
+                        FailedField = isSuccess ? null : item.FailedField,
+                        FailedApi = isSuccess ? null : item.FailedApi,
+                        Items = item.Items?.Select(i => new DcItemResultRecord
+                        {
+                            ItemCode = i.ItemCode,
+                            Status = i.Status,
+                            DcCreated = i.DcCreated,
+                            DcId = i.DcId,
+                            DcNumber = i.DcNumber,
+                            AllocatedQuantity = i.AllocatedQuantity,
+                            DcQuantity = i.DcQuantity,
+                            Message = i.Message,
+                            FailedField = i.FailedField,
+                            FailedApi = i.FailedApi
+                        }).ToList() ?? new()
+                    };
+
+                    executionRecords.Add(execRecord);
+                }
+            }
+
+            var totalAlloc = Math.Max(batchResult.Data?.TotalAllocations ?? 0, executionRecords.Count);
+            var successAlloc = executionRecords.Count(e => e.Status == "Success" || e.DcCreated);
+            var skippedAlloc = executionRecords.Count(e => e.Status == "Skipped");
+            var failedAlloc = executionRecords.Count(e => e.Status == "Failed" && !e.DcCreated);
+            var createdDcCount = executionRecords.Count(e => e.DcCreated);
+
+            string runStatus;
+            if (successAlloc > 0 && failedAlloc == 0)
+            {
+                runStatus = "Success";
+            }
+            else if (successAlloc > 0 && failedAlloc > 0)
+            {
+                runStatus = "Partial";
+            }
+            else if (skippedAlloc > 0 && failedAlloc == 0)
+            {
+                runStatus = "Skipped";
+            }
+            else if (failedAlloc > 0)
+            {
+                runStatus = "Failed";
+            }
+            else
+            {
+                runStatus = batchResult.Success ? "Success" : "Failed";
+            }
+
+            var runRecord = new SoAllocationToDcRunRecord
+            {
+                RunId = runId,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs,
+                Status = runStatus,
+                TotalAllocations = totalAlloc,
+                ProcessedAllocations = executionRecords.Count,
+                SuccessfulAllocations = successAlloc,
+                SkippedAllocations = skippedAlloc,
+                FailedAllocations = failedAlloc,
+                CreatedDcCount = createdDcCount,
+                TotalAllocatedQty = executionRecords.Sum(e => e.AllocatedQty),
+                TotalDcQty = executionRecords.Sum(e => e.DcQty),
+                FailureReason = runStatus == "Success" ? null : batchResult.Message
+            };
+
+            await historyRepo.RecordRunAsync(runRecord, executionRecords, cancellationToken);
 
             return Results.Ok(new BatchDcCreationResponse(
                 Success: batchResult.Success,
@@ -402,6 +687,25 @@ public static class SoAllocationToDcEndpoints
         }
         catch (DcValidationException ex)
         {
+            var completedAt = clock.UtcNow;
+            var durationMs = (long)(completedAt - startedAt).TotalMilliseconds;
+            var isDuplicate = ex.Message.Contains("already has a Delivery Challan", StringComparison.OrdinalIgnoreCase);
+            var status = isDuplicate ? "Skipped" : "Failed";
+            var failedRun = new SoAllocationToDcRunRecord
+            {
+                RunId = runId,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs,
+                Status = status,
+                FailedAllocations = status == "Failed" ? 1 : 0,
+                SkippedAllocations = status == "Skipped" ? 1 : 0,
+                FailureReason = ex.Message
+            };
+            await historyRepo.RecordRunAsync(failedRun, new List<SoAllocationToDcExecutionRecord>(), cancellationToken);
+
             return Results.UnprocessableEntity(new BatchDcCreationResponse(
                 Success: false,
                 Message: ex.Message,
@@ -410,10 +714,90 @@ public static class SoAllocationToDcEndpoints
         }
         catch (ErpTransientException ex)
         {
+            var completedAt = clock.UtcNow;
+            var durationMs = (long)(completedAt - startedAt).TotalMilliseconds;
+            var failedRun = new SoAllocationToDcRunRecord
+            {
+                RunId = runId,
+                Trigger = trigger,
+                TriggeredBy = triggeredBy,
+                StartedAtUtc = startedAt,
+                CompletedAtUtc = completedAt,
+                DurationMs = durationMs,
+                Status = "Failed",
+                FailureReason = ex.LaymanMessage
+            };
+            await historyRepo.RecordRunAsync(failedRun, new List<SoAllocationToDcExecutionRecord>(), cancellationToken);
+
             return Results.Problem(
                 detail: ex.LaymanMessage,
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
     }
-}
 
+    private static async Task<IResult> GetDashboardAsync(
+        int? days,
+        int? recentCount,
+        ISoAllocationToDcHistoryRepository historyRepo,
+        CancellationToken cancellationToken)
+    {
+        var dashboard = await historyRepo.GetDashboardAsync(days ?? 30, recentCount ?? 10, cancellationToken);
+        return Results.Ok(dashboard);
+    }
+
+    private static async Task<IResult> GetHistoryAsync(
+        int page = 1,
+        int pageSize = 50,
+        string? search = null,
+        string? status = null,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        ISoAllocationToDcHistoryRepository historyRepo = null!,
+        CancellationToken cancellationToken = default)
+    {
+        var history = await historyRepo.GetHistoryAsync(page, pageSize, search, status, from, to, cancellationToken);
+        return Results.Ok(history);
+    }
+
+    private static async Task<IResult> GetExecutionDetailAsync(
+        Guid jobId,
+        ISoAllocationToDcHistoryRepository historyRepo,
+        CancellationToken cancellationToken)
+    {
+        var record = await historyRepo.GetExecutionByIdAsync(jobId, cancellationToken);
+        return record != null ? Results.Ok(record) : Results.NotFound();
+    }
+
+    private static async Task<IResult> GetSummaryEndpointAsync(
+        ISoAllocationToDcHistoryRepository historyRepo,
+        CancellationToken cancellationToken)
+    {
+        var summary = await historyRepo.GetSummaryAsync(cancellationToken);
+        return Results.Ok(summary);
+    }
+
+    private static async Task<IResult> GetDailyStatsEndpointAsync(
+        int days = 30,
+        ISoAllocationToDcHistoryRepository historyRepo = null!,
+        CancellationToken cancellationToken = default)
+    {
+        var stats = await historyRepo.GetDailyStatsAsync(days, cancellationToken);
+        return Results.Ok(stats);
+    }
+
+    private static string ResolveTrigger(HttpContext? context)
+    {
+        if (context == null) return "Manual";
+        var triggerParam = context.Request.Query["trigger"].ToString();
+        if (string.IsNullOrWhiteSpace(triggerParam))
+        {
+            return "Manual";
+        }
+        return char.ToUpperInvariant(triggerParam[0]) + triggerParam[1..].ToLowerInvariant();
+    }
+
+    private static string ResolveTriggeredBy(HttpContext? context)
+    {
+        return context?.User?.Identity?.Name ?? "system";
+    }
+}

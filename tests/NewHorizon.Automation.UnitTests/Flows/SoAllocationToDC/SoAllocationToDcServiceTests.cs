@@ -702,7 +702,7 @@ public sealed class SoAllocationToDcServiceTests
     }
 
     [Fact]
-    public async Task Quantity_exceeding_maxDCQtyIUOM_fails_validation_without_silent_adjustment()
+    public async Task Partial_quantity_allocation_converts_successfully_to_dc_with_exact_partial_quantity()
     {
         _fakeErp.On("getCustomerForAllocationDeAllocation", JsonNode.Parse("""
         {
@@ -735,7 +735,7 @@ public sealed class SoAllocationToDcServiceTests
         }
         """)!);
 
-        // Allocated Qty = 20, but Max allowable DC Qty = 10
+        // Ordered Qty = 20, but Allocated DC Qty = 10 (valid partial allocation)
         _fakeErp.On("getOAFItemDetailsForDC", JsonNode.Parse("""
         {
             "success": true,
@@ -781,11 +781,104 @@ public sealed class SoAllocationToDcServiceTests
         var service = CreateService();
         var result = await service.CreateDeliveryChallansFromAllocationsAsync();
 
-        // Must NOT silently adjust quantity to 10. Must fail with clear error.
-        result.Data.SuccessfulAllocations.Should().Be(0);
-        result.Data.FailedAllocations.Should().Be(1);
-        result.Data.Results[0].Success.Should().BeFalse();
-        result.Data.Results[0].Message.Should().Contain("exceeds");
+        // Partial quantity allocation must convert successfully with exact allocated quantity (10)
+        result.Success.Should().BeTrue();
+        result.Data.SuccessfulAllocations.Should().Be(1);
+        result.Data.FailedAllocations.Should().Be(0);
+        result.Data.CreatedDCCount.Should().Be(1);
+        result.Data.Results[0].Success.Should().BeTrue();
+        result.Data.Results[0].DcNumber.Should().Be("26-27/DS/CT2/000107");
+        result.Data.Results[0].AllocatedQuantity.Should().Be(10.0m);
+        result.Data.Results[0].DcQuantity.Should().Be(10.0m);
+    }
+
+    [Fact]
+    public async Task Subsequent_partial_quantity_allocation_with_alreadyDCQty_converts_successfully()
+    {
+        _fakeErp.On("getCustomerForAllocationDeAllocation", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [{ "custCode": "A001", "custName": "Akzo Nobel India Ltd." }]
+        }
+        """)!);
+
+        _fakeErp.On("getShipmentForDC/A001/L", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [{ "shipmentCode": "CADD", "shipmentName": "Plant" }]
+        }
+        """)!);
+
+        _fakeErp.On("getOAFDetailListForDC", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "oafYear": "26-27",
+                    "oafGroup": "OA",
+                    "locationCode": "CT2",
+                    "oafNumber": "000501",
+                    "oafAutoId": 501,
+                    "intOrderNumber": "000501",
+                    "customerOrderNumber": "PO-501"
+                }
+            ]
+        }
+        """)!);
+
+        // Ordered = 20, Previously Converted (alreadyDCQty) = 10, Current Pending Allocation = 10
+        _fakeErp.On("getOAFItemDetailsForDC", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "salesItemCode": "ITEM01",
+                    "salesItemName": "Item 01",
+                    "intItemCode": "ITEM01",
+                    "intItemName": "Item 01",
+                    "oafQty": 20.0,
+                    "alreadyDCQty": 10.0,
+                    "maxDCQtyIUOM": 10.0,
+                    "allocationID": 6002,
+                    "oafDetailLineId": 1,
+                    "oafDetailLineNo": 1,
+                    "soitemlineno": 1,
+                    "wareHouseId": 8,
+                    "warehouseCode": "GST2",
+                    "suom": "NOS",
+                    "oafid": 501
+                }
+            ]
+        }
+        """)!);
+
+        _fakeErp.On("getShipmentInfo", JsonNode.Parse("""
+        {
+            "success": true,
+            "data": [
+                {
+                    "salesItemCode": "ITEM01",
+                    "shipCode": "CADD",
+                    "rateStructureCode": "SR001",
+                    "recordId": 902,
+                    "oafDetailRefLineId": 1,
+                    "oafQtyOfLineId": 1,
+                    "oafRefId": 501
+                }
+            ]
+        }
+        """)!);
+
+        var service = CreateService();
+        var result = await service.CreateDeliveryChallansFromAllocationsAsync();
+
+        result.Success.Should().BeTrue();
+        result.Data.SuccessfulAllocations.Should().Be(1);
+        result.Data.FailedAllocations.Should().Be(0);
+        result.Data.CreatedDCCount.Should().Be(1);
+        result.Data.Results[0].Success.Should().BeTrue();
+        result.Data.Results[0].AllocatedQuantity.Should().Be(10.0m);
+        result.Data.Results[0].DcQuantity.Should().Be(10.0m);
     }
 
     [Fact]
@@ -863,7 +956,7 @@ public sealed class SoAllocationToDcServiceTests
                 """);
             }
 
-            // 000602: quantity exceeds limit
+            // 000602: already dispatched (duplicate DC prevented)
             return JsonNode.Parse("""
             {
                 "success": true,
@@ -874,8 +967,8 @@ public sealed class SoAllocationToDcServiceTests
                         "intItemCode": "ITEM02",
                         "intItemName": "Item 02",
                         "oafQty": 50.0,
-                        "alreadyDCQty": 0.0,
-                        "maxDCQtyIUOM": 20.0,
+                        "alreadyDCQty": 50.0,
+                        "maxDCQtyIUOM": 0.0,
                         "allocationID": 7002,
                         "oafDetailLineId": 1,
                         "oafDetailLineNo": 1,

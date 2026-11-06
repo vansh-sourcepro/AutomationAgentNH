@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -131,7 +132,7 @@ public sealed class SoAllocationToDcSchedulerService : BackgroundService
         }
         // No else block needed since OafNumbers handles all OAFs now
 
-        var endpoint = $"http://127.0.0.1:{_options.Host.ManagementApiPort}/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallansFromAllocations";
+        var endpoint = $"http://127.0.0.1:{_options.Host.ManagementApiPort}/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallansFromAllocations?trigger=timer";
 
         try
         {
@@ -154,10 +155,48 @@ public sealed class SoAllocationToDcSchedulerService : BackgroundService
             if (response.IsSuccessStatusCode)
             {
                 _logger.LogInformation("SoAllocationToDC Automation Run Completed Successfully: {Payload}", payload);
+                try
+                {
+                    var batchResponse = JsonSerializer.Deserialize<BatchDcCreationResponse>(payload, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    var createdCount = batchResponse?.Data?.CreatedDCCount ?? 0;
+                    var successCount = batchResponse?.Data?.SuccessfulAllocations ?? 0;
+                    var processedCount = batchResponse?.Data?.ProcessedAllocations ?? 0;
+                    var isSuccess = (batchResponse?.Success == true && (createdCount > 0 || successCount > 0 || processedCount > 0)) || createdCount > 0 || successCount > 0;
+
+                    using var updateScope = _scopeFactory.CreateScope();
+                    var configRepo = updateScope.ServiceProvider.GetRequiredService<ISoAllocationToDcConfigRepository>();
+                    var latestConfig = await configRepo.GetConfigAsync(cancellationToken);
+
+                    latestConfig.LastScheduledRunStatus = isSuccess ? "Success" : "Failed";
+                    latestConfig.LastCreatedDcCount = createdCount;
+                    latestConfig.LastScheduledRunMessage = createdCount > 0
+                        ? $"Created {createdCount} Delivery Challan(s) successfully at {config.AutomationTime} across {processedCount} allocation(s)."
+                        : (batchResponse?.Message ?? "Scheduled DC creation completed.");
+                    latestConfig.LastScheduledRunUtc = DateTimeOffset.UtcNow;
+                    await configRepo.SaveConfigAsync(latestConfig, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse scheduled batch DC creation response");
+                }
             }
             else
             {
                 _logger.LogWarning("SoAllocationToDC Automation Run Failed ({StatusCode}): {Payload}", (int)response.StatusCode, payload);
+                try
+                {
+                    using var updateScope = _scopeFactory.CreateScope();
+                    var configRepo = updateScope.ServiceProvider.GetRequiredService<ISoAllocationToDcConfigRepository>();
+                    var latestConfig = await configRepo.GetConfigAsync(cancellationToken);
+                    latestConfig.LastScheduledRunStatus = "Failed";
+                    latestConfig.LastScheduledRunMessage = $"Scheduled DC creation failed ({response.StatusCode}).";
+                    latestConfig.LastScheduledRunUtc = DateTimeOffset.UtcNow;
+                    await configRepo.SaveConfigAsync(latestConfig, cancellationToken);
+                }
+                catch
+                {
+                    // Ignore config update failure
+                }
             }
         }
         catch (Exception ex)

@@ -17,6 +17,11 @@ public class SoAllocationToDcAutomationConfig
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public DateOnly? LastScheduledRunDate { get; set; }
+
+    public string? LastScheduledRunStatus { get; set; }
+    public int? LastCreatedDcCount { get; set; }
+    public string? LastScheduledRunMessage { get; set; }
+    public DateTimeOffset? LastScheduledRunUtc { get; set; }
 }
 
 public class SoAllocationToDcAutomationConfigDto
@@ -32,4 +37,11 @@ public class SoAllocationToDcAutomationConfigDto
     // New fields
     public string? AutomationMode { get; set; }
     public List<string>? OafNumbers { get; set; }
+
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public string? LastScheduledRunDate { get; set; }
+    public string? LastScheduledRunStatus { get; set; }
+    public int? LastCreatedDcCount { get; set; }
+    public string? LastScheduledRunMessage { get; set; }
+    public DateTimeOffset? LastScheduledRunUtc { get; set; }
 }
