@@ -11,7 +11,7 @@ This automation does that job **automatically**:
 * It checks warehouse stock.
 * It creates the Delivery Challan in ERP automatically without any manual typing.
 
----
+--- 
 
 ## 2. What Problems Did We Fix?
 
@@ -72,6 +72,8 @@ When you turn the automation ON (`automationEnabled: true`), you can choose **1 
 
 ### API 1: Setting Up the Automation (`AutomationConfig`)
 
+> **Note:** The Config API returns the **exact same detailed response structure as the Main API**, itemized per Delivery Challan!
+
 #### Example A: Turn the Master Switch OFF (Safety Shutoff)
 * **URL:** `POST http://localhost:5080/api/v1/sales/SalesAllocationDeAllocation/AutomationConfig`
 * **Header:** `X-Automation-Api-Key: dev-local-key`
@@ -81,9 +83,9 @@ When you turn the automation ON (`automationEnabled: true`), you can choose **1 
     "automationEnabled": false
   }
   ```
-* **What happens:** The system turns OFF and clears all timers and order numbers to `null`.
+* **What happens:** The system turns OFF and returns confirmation with 0 allocations processed.
 
-#### Example B: Set Daily Timer to 12:30 PM
+#### Example B: Set Daily Timer to 12:30 PM (`TIMER` Mode)
 * **Send this Body:**
   ```json
   {
@@ -92,7 +94,120 @@ When you turn the automation ON (`automationEnabled: true`), you can choose **1 
     "automationTime": "12:30"
   }
   ```
-* **What happens:** The system will automatically run every day at 12:30 PM for all ready orders.
+* **What You Get Back:**  
+  Scans all ERP allocations and returns **full item details** for every candidate scheduled:
+  ```json
+  {
+    "success": true,
+    "message": "Delivery Challan automation configuration saved in TIMER mode (scheduled daily at 12:30). Found 5 allocation candidate(s) in ERP (5 scheduled, 0 already have DC, 0 with issues).",
+    "data": {
+      "totalAllocations": 5,
+      "processedAllocations": 5,
+      "successfulAllocations": 5,
+      "results": [
+        {
+          "oafNo": "000029",
+          "intOrdNo": "000003",
+          "customerCode": "A001",
+          "status": "SCHEDULED",
+          "items": [
+            {
+              "itemCode": "AAHPLAPTOP_HANDI0326",
+              "allocatedQuantity": 10.0,
+              "dcQuantity": 10.0,
+              "status": "SCHEDULED",
+              "message": "Allocation verified and scheduled for automatic Delivery Challan creation daily at 12:30."
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+#### Example C: Process Specific Orders Immediately (`INDIVIDUAL` Mode)
+* **Send this Body:**
+  ```json
+  {
+    "automationEnabled": true,
+    "automationMode": "INDIVIDUAL",
+    "oafNumbers": ["000060", "000061"]
+  }
+  ```
+* **What You Get Back:**  
+  Converts orders immediately and gives **per-item details with created DC numbers or duplicate prevention reasons**:
+  ```json
+  {
+    "success": true,
+    "message": "Delivery Challan created successfully. Authorization is pending.",
+    "data": {
+      "totalAllocations": 2,
+      "results": [
+        {
+          "oafNo": "000060",
+          "items": [
+            {
+              "itemCode": "LAPTOPBAG_HANDI4513",
+              "dcCreated": true,
+              "dcNumber": "000093",
+              "dcStatus": "Open",
+              "authorized": false,
+              "message": "Delivery Challan created successfully. Pending manual authorization."
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+#### Example D: Schedule Specific Orders for a Fixed Time (`BOTH` Mode)
+* **Send this Body:**
+  ```json
+  {
+    "automationEnabled": true,
+    "automationMode": "BOTH",
+    "automationTime": "14:30",
+    "oafNumbers": ["000060", "000061"]
+  }
+  ```
+* **What You Get Back:**  
+  Saves the schedule and checks each order in ERP. If an order **already has a Delivery Challan**, it reports the existing DC number and reason:
+  ```json
+  {
+    "success": true,
+    "message": "Delivery Challan automation configuration saved in BOTH mode (scheduled daily at 14:30 for 2 configured OAF(s)). Found 2 allocation(s) (0 scheduled, 2 already have DC, 0 with issues).",
+    "data": {
+      "totalAllocations": 2,
+      "results": [
+        {
+          "oafNo": "000060",
+          "status": "FAILED",
+          "items": [
+            {
+              "dcCreated": false,
+              "dcNumber": "000093",
+              "failedField": "Duplicate",
+              "message": "Allocation already has a Delivery Challan (000093). Duplicate DC prevented."
+            }
+          ]
+        },
+        {
+          "oafNo": "000061",
+          "status": "FAILED",
+          "items": [
+            {
+              "dcCreated": false,
+              "dcNumber": "000107",
+              "failedField": "Duplicate",
+              "message": "Allocation already has a Delivery Challan (000107). Duplicate DC prevented."
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
 
 ---
 

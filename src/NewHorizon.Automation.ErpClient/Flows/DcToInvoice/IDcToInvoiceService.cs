@@ -37,4 +37,34 @@ public interface IDcToInvoiceService
     Task<BatchInvoiceCreationResult> CreateInvoicesFromDeliveryChallansAsync(
         BatchInvoiceCreationRequest? request = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Queries the conversion history of Delivery Challans to Sales Invoices with optional
+    /// search, status filter, date range, and pagination.
+    /// </summary>
+    Task<DcToInvoiceHistoryPagedResult> GetHistoryAsync(
+        DcToInvoiceHistoryQuery query,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the conversion history for a specific Delivery Challan by DC number or DC ID.
+    /// </summary>
+    Task<DcSpecificHistoryResult> GetDcHistoryAsync(
+        string? dcNo = null,
+        long? dcId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Aggregates KPI metrics for the Delivery Challan to Sales Invoice automation dashboard.
+    /// </summary>
+    Task<DcToInvoiceDashboardSummary> GetDashboardSummaryAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Calculates daily conversion activity over the trailing <paramref name="days"/> (default 30)
+    /// with continuous zero-filled dates for charting.
+    /// </summary>
+    Task<IReadOnlyList<DcToInvoiceDailyStat>> GetDailyStatsAsync(
+        int days = 30,
+        CancellationToken cancellationToken = default);
 }

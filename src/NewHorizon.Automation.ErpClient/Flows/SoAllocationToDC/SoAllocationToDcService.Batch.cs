@@ -682,9 +682,7 @@ public sealed partial class SoAllocationToDcService
                 OafId: i.OafId > 0 ? i.OafId : resolvedOafId,
                 ItemCode: i.IntItemCode,
                 SalesItemCode: i.SalesItemCode,
-                AllocatedQty: i.AlreadyDcQty > 0
-                    ? (i.MaxDcQtyIuom > 0 ? i.MaxDcQtyIuom : Math.Max(0, i.OafQty - i.AlreadyDcQty))
-                    : i.OafQty,
+                AllocatedQty: i.MaxDcQtyIuom > 0 ? i.MaxDcQtyIuom : i.OafQty,
                 OafDetailLineId: i.OafDetailLineId,
                 OafDetailLineNo: i.OafDetailLineNo,
                 SoItemLineNo: i.SoItemLineNo,

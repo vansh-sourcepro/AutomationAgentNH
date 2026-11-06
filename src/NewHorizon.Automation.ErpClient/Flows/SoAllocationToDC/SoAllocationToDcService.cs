@@ -803,9 +803,9 @@ public sealed partial class SoAllocationToDcService : ISoAllocationToDcService
                 continue;
             }
 
-            var itemDcQty = alloc.AllocatedQty > 0
-                ? alloc.AllocatedQty
-                : (match.MaxDcQtyIuom > 0 ? match.MaxDcQtyIuom : match.OafQty);
+            var maxAllowed = match.MaxDcQtyIuom > 0 ? match.MaxDcQtyIuom : match.OafQty;
+            var requestedQty = alloc.AllocatedQty > 0 ? alloc.AllocatedQty : maxAllowed;
+            var itemDcQty = match.MaxDcQtyIuom > 0 ? Math.Min(requestedQty, match.MaxDcQtyIuom) : requestedQty;
 
             if (itemDcQty > 0)
             {

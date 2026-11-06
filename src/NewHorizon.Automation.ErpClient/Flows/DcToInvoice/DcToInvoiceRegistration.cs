@@ -13,6 +13,7 @@ public static class DcToInvoiceRegistration
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddSingleton<IConvertedDcTracker, ConvertedDcTracker>();
         services.AddScoped<IDcToInvoiceService, DcToInvoiceService>();
 
         return services;

@@ -82,7 +82,7 @@ public static class SoAllocationToDcEndpoints
         SoAllocationToDcAutomationConfigDto dto,
         ISoAllocationToDcConfigRepository repo,
         IClock clock,
-        IServiceProvider serviceProvider,
+        ISoAllocationToDcService service,
         CancellationToken cancellationToken)
     {
         string? normalizedTime = null;
@@ -124,8 +124,18 @@ public static class SoAllocationToDcEndpoints
         {
             if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
             {
-                // Default based on whether time is provided if mode is not specified
-                mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+                // If mode not explicitly provided, preserve the existing saved mode.
+                // Only fall back to auto-detection if there is no existing mode in config.
+                var existingMode = config.AutomationMode?.ToUpperInvariant();
+                if (existingMode == "INDIVIDUAL" || existingMode == "TIMER" || existingMode == "BOTH")
+                {
+                    mode = existingMode; // Keep what was already set - do NOT silently switch modes
+                }
+                else
+                {
+                    // Brand-new config: infer mode from presence of time
+                    mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+                }
             }
 
             // Enforce strict mode-based restrictions:
@@ -157,52 +167,193 @@ public static class SoAllocationToDcEndpoints
 
         await repo.SaveConfigAsync(config, cancellationToken);
         
-        if (config.AutomationEnabled && config.AutomationMode is "INDIVIDUAL" or "BOTH")
+        if (!config.AutomationEnabled)
         {
-            // Trigger immediately for INDIVIDUAL or BOTH mode (though BOTH also implies scheduled)
-            // But the TL explicitly asked for immediate execution for individual selection
-            
-            // Wait, if it's BOTH, does it mean we run BOTH immediately and on schedule? 
-            // The requirement says for Mode BOTH: "At the configured time, process the eligible allocations associated with the configured OAF numbers."
-            // So if it's BOTH, it should ONLY run on schedule.
-            // Wait, "Individual mode must not depend on the timer being triggered. It must support the existing main API's individual execution mechanism."
-            
-            // Let's run immediately if mode is INDIVIDUAL, OR if mode is BOTH but no time is provided
-            if (config.AutomationMode == "INDIVIDUAL" || string.IsNullOrWhiteSpace(config.AutomationTime))
+            return Results.Ok(new BatchDcCreationResponse(
+                Success: true,
+                Message: "Automation is disabled. Configuration saved successfully. No allocations were processed.",
+                Data: new BatchDcCreationData(
+                    TotalAllocations: 0,
+                    ProcessedAllocations: 0,
+                    SuccessfulAllocations: 0,
+                    PartialAllocations: 0,
+                    FailedAllocations: 0,
+                    TotalItems: 0,
+                    SuccessfulItems: 0,
+                    FailedItems: 0,
+                    CreatedDCCount: 0,
+                    Results: new List<AllocationDcItemResult>()),
+                ErrorMessage: null));
+        }
+
+        if (config.AutomationMode == "TIMER")
+        {
+            try
             {
-                var requestDto = new BatchDcCreationRequestDto { OafNumbers = config.OafNumbers };
-                
-                var factory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
-                _ = Task.Run(async () => 
+                var dryRunRequest = new BatchDcCreationRequest
                 {
-                    using var scope = factory.CreateScope();
-                    var service = scope.ServiceProvider.GetRequiredService<ISoAllocationToDcService>();
-                    var logger = scope.ServiceProvider.GetRequiredService<ILogger<ISoAllocationToDcService>>();
-                    try
+                    DryRun = true
+                };
+                var previewResult = await service.CreateDeliveryChallansFromAllocationsAsync(dryRunRequest, cancellationToken);
+                
+                var scheduledResults = previewResult.Data.Results.Select(r =>
+                {
+                    if (r.Status == "SUCCESS")
                     {
-                        var target = config.OafNumbers != null && config.OafNumbers.Count > 0 
-                            ? string.Join(", ", config.OafNumbers) 
-                            : "ALL";
-                        logger.LogInformation("Config API immediate run triggered (Mode: {Mode}) for OAF(s): {Target}", config.AutomationMode, target);
-                        await service.CreateDeliveryChallansFromAllocationsAsync(requestDto.ToRequest(), default);
+                        var updatedItems = r.Items.Select(item => item with
+                        {
+                            Status = "SCHEDULED",
+                            Message = $"Allocation verified and scheduled for automatic Delivery Challan creation daily at {config.AutomationTime}."
+                        }).ToList();
+                        return r with { Status = "SCHEDULED", Items = updatedItems };
                     }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Config API immediate run failed");
-                    }
-                });
+                    return r;
+                }).ToList();
+
+                var scheduledCount = scheduledResults.Count(r => r.Status == "SCHEDULED");
+                var alreadyDcCount = scheduledResults.Count(r => r.Items.Any(i => i.FailedField == "Duplicate"));
+                var issuesCount = scheduledResults.Count(r => r.Status != "SCHEDULED" && !r.Items.Any(i => i.FailedField == "Duplicate"));
+
+                string timerMessage = scheduledResults.Count > 0
+                    ? $"Delivery Challan automation configuration saved in TIMER mode (scheduled daily at {config.AutomationTime}). Found {scheduledResults.Count} allocation candidate(s) in ERP ({scheduledCount} scheduled, {alreadyDcCount} already have DC, {issuesCount} with issues)."
+                    : $"Delivery Challan automation configuration saved in TIMER mode (scheduled daily at {config.AutomationTime}). Currently 0 pending allocation candidates found in ERP.";
+
+                return Results.Ok(new BatchDcCreationResponse(
+                    Success: true,
+                    Message: timerMessage,
+                    Data: new BatchDcCreationData(
+                        TotalAllocations: previewResult.Data.TotalAllocations,
+                        ProcessedAllocations: scheduledResults.Count,
+                        SuccessfulAllocations: scheduledCount,
+                        PartialAllocations: previewResult.Data.PartialAllocations,
+                        FailedAllocations: previewResult.Data.FailedAllocations,
+                        TotalItems: previewResult.Data.TotalItems,
+                        SuccessfulItems: scheduledResults.Where(r => r.Status == "SCHEDULED").Sum(r => r.Items.Count),
+                        FailedItems: scheduledResults.Where(r => r.Status != "SCHEDULED").Sum(r => r.Items.Count),
+                        CreatedDCCount: 0,
+                        Results: scheduledResults),
+                    ErrorMessage: null));
+            }
+            catch (Exception)
+            {
+                // Fallback if preview scan cannot reach ERP
+                return Results.Ok(new BatchDcCreationResponse(
+                    Success: true,
+                    Message: $"Delivery Challan automation configuration saved successfully in TIMER mode (scheduled daily at {config.AutomationTime}).",
+                    Data: new BatchDcCreationData(
+                        TotalAllocations: 0,
+                        ProcessedAllocations: 0,
+                        SuccessfulAllocations: 0,
+                        PartialAllocations: 0,
+                        FailedAllocations: 0,
+                        TotalItems: 0,
+                        SuccessfulItems: 0,
+                        FailedItems: 0,
+                        CreatedDCCount: 0,
+                        Results: new List<AllocationDcItemResult>()),
+                    ErrorMessage: null));
             }
         }
 
-        return Results.Ok(new SoAllocationToDcAutomationConfigDto
+        if (config.AutomationMode == "BOTH" && !string.IsNullOrWhiteSpace(config.AutomationTime))
         {
-            AutomationEnabled = config.AutomationEnabled,
-            AutomationTime = config.AutomationTime,
-            OafNumber = config.OafNumbers?.FirstOrDefault(),
-            AllocationNumber = config.OafNumbers?.FirstOrDefault(),
-            AutomationMode = config.AutomationMode,
-            OafNumbers = config.OafNumbers
-        });
+            try
+            {
+                var dryRunRequest = new BatchDcCreationRequest
+                {
+                    DryRun = true,
+                    OafNumbers = config.OafNumbers
+                };
+                var previewResult = await service.CreateDeliveryChallansFromAllocationsAsync(dryRunRequest, cancellationToken);
+                
+                var scheduledResults = previewResult.Data.Results.Select(r =>
+                {
+                    if (r.Status == "SUCCESS")
+                    {
+                        var updatedItems = r.Items.Select(item => item with
+                        {
+                            Status = "SCHEDULED",
+                            Message = $"Allocation verified and scheduled for automatic Delivery Challan creation daily at {config.AutomationTime}."
+                        }).ToList();
+                        return r with { Status = "SCHEDULED", Items = updatedItems };
+                    }
+                    return r;
+                }).ToList();
+
+                var scheduledCount = scheduledResults.Count(r => r.Status == "SCHEDULED");
+                var alreadyDcCount = scheduledResults.Count(r => r.Items.Any(i => i.FailedField == "Duplicate"));
+                var issuesCount = scheduledResults.Count(r => r.Status != "SCHEDULED" && !r.Items.Any(i => i.FailedField == "Duplicate"));
+
+                string bothMessage = $"Delivery Challan automation configuration saved in BOTH mode (scheduled daily at {config.AutomationTime} for {config.OafNumbers?.Count ?? 0} configured OAF(s)). Found {scheduledResults.Count} allocation(s) ({scheduledCount} scheduled, {alreadyDcCount} already have DC, {issuesCount} with issues).";
+
+                return Results.Ok(new BatchDcCreationResponse(
+                    Success: true,
+                    Message: bothMessage,
+                    Data: new BatchDcCreationData(
+                        TotalAllocations: previewResult.Data.TotalAllocations,
+                        ProcessedAllocations: scheduledResults.Count,
+                        SuccessfulAllocations: scheduledCount,
+                        PartialAllocations: previewResult.Data.PartialAllocations,
+                        FailedAllocations: previewResult.Data.FailedAllocations,
+                        TotalItems: previewResult.Data.TotalItems,
+                        SuccessfulItems: scheduledResults.Where(r => r.Status == "SCHEDULED").Sum(r => r.Items.Count),
+                        FailedItems: scheduledResults.Where(r => r.Status != "SCHEDULED").Sum(r => r.Items.Count),
+                        CreatedDCCount: 0,
+                        Results: scheduledResults),
+                    ErrorMessage: null));
+            }
+            catch (Exception)
+            {
+                // Fallback if preview scan cannot reach ERP
+                return Results.Ok(new BatchDcCreationResponse(
+                    Success: true,
+                    Message: $"Delivery Challan automation configuration saved successfully in BOTH mode (scheduled daily at {config.AutomationTime} for {config.OafNumbers?.Count ?? 0} configured OAF(s)).",
+                    Data: new BatchDcCreationData(
+                        TotalAllocations: config.OafNumbers?.Count ?? 0,
+                        ProcessedAllocations: 0,
+                        SuccessfulAllocations: 0,
+                        PartialAllocations: 0,
+                        FailedAllocations: 0,
+                        TotalItems: 0,
+                        SuccessfulItems: 0,
+                        FailedItems: 0,
+                        CreatedDCCount: 0,
+                        Results: new List<AllocationDcItemResult>()),
+                    ErrorMessage: null));
+            }
+        }
+
+        // For INDIVIDUAL mode (or BOTH mode without scheduled time):
+        // Execute conversion immediately and return detailed itemized DC results matching the Main API structure.
+        try
+        {
+            var batchRequest = new BatchDcCreationRequest
+            {
+                OafNumbers = config.OafNumbers
+            };
+
+            var batchResult = await service.CreateDeliveryChallansFromAllocationsAsync(batchRequest, cancellationToken);
+
+            return Results.Ok(new BatchDcCreationResponse(
+                Success: batchResult.Success,
+                Message: batchResult.Message,
+                Data: batchResult.Data,
+                ErrorMessage: null));
+        }
+        catch (DcValidationException ex)
+        {
+            return Results.UnprocessableEntity(new BatchDcCreationResponse(
+                Success: false,
+                Message: ex.Message,
+                Data: null,
+                ErrorMessage: ex.Message));
+        }
+        catch (ErpTransientException ex)
+        {
+            return Results.Problem(
+                detail: ex.LaymanMessage,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
     }
 
     /// <summary>

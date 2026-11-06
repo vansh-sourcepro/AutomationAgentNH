@@ -41,7 +41,8 @@ public sealed class DcToInvoiceServiceTests
             _clientFactory,
             _tokenProvider,
             options ?? _options,
-            NullLogger<DcToInvoiceService>.Instance);
+            NullLogger<DcToInvoiceService>.Instance,
+            new InMemoryConvertedDcTracker());
 
     private void SetupDefaultRoutes(bool enableLineLevelRateStructure = false)
     {
@@ -465,6 +466,7 @@ public sealed class DcToInvoiceServiceTests
                 "orderdtlListModel": [
                     {
                         "salesItemCode": "ITEM01",
+                        "intItmCode": "ITEM01",
                         "salesItemName": "Test Item",
                         "dcQty": 10.0,
                         "invoiceQty": 10.0,
@@ -482,7 +484,7 @@ public sealed class DcToInvoiceServiceTests
         }
         """)!);
 
-        var service = CreateService();
+        var service = CreateService(new DcToInvoiceOptions { DefaultRateStructureCode = "" });
 
         // Act & Assert
         Func<Task> act = async () => await service.CreateInvoiceFromDeliveryChallanAsync(dcId: 110530);
@@ -604,6 +606,101 @@ public sealed class DcToInvoiceServiceTests
 
         // Verify create endpoint was strictly NEVER called
         _fakeErp.Requests.Any(r => r.Path.Contains("salesinvoice/create")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetHistory_and_Dashboard_and_DailyStats_return_expected_metrics()
+    {
+        var tracker = new InMemoryConvertedDcTracker();
+        tracker.RecordConversion(new ConvertedDcRecord(
+            DcId: 101,
+            DcNo: "000001",
+            CustomerCode: "CUST1",
+            InvoiceNumber: "INV001",
+            InvoiceId: 501,
+            ItemCount: 2,
+            TotalQuantity: 10m,
+            TotalAmount: 5000m,
+            RateStructureCode: "S0001",
+            ConvertedAtUtc: DateTime.UtcNow.Date.AddHours(2),
+            Status: "SUCCESS",
+            CustomerName: "Customer 1"));
+
+        tracker.RecordConversion(new ConvertedDcRecord(
+            DcId: 102,
+            DcNo: "000002",
+            CustomerCode: "CUST2",
+            InvoiceNumber: "INV002",
+            InvoiceId: 502,
+            ItemCount: 1,
+            TotalQuantity: 5m,
+            TotalAmount: 2500m,
+            RateStructureCode: "S0002",
+            ConvertedAtUtc: DateTime.UtcNow.Date.AddDays(-1).AddHours(4),
+            Status: "SUCCESS",
+            CustomerName: "Customer 2"));
+
+        tracker.RecordHistory(new ConvertedDcRecord(
+            DcId: 103,
+            DcNo: "000003",
+            CustomerCode: "CUST1",
+            InvoiceNumber: null!,
+            InvoiceId: 0,
+            ItemCount: 0,
+            TotalQuantity: 0m,
+            TotalAmount: 0m,
+            RateStructureCode: null,
+            ConvertedAtUtc: DateTime.UtcNow.Date.AddHours(5),
+            Status: "FAILED",
+            FailureReason: "No items pending for invoice."));
+
+        var service = new DcToInvoiceService(
+            _clientFactory,
+            _tokenProvider,
+            _options,
+            NullLogger<DcToInvoiceService>.Instance,
+            tracker);
+
+        // 1. History test
+        var history = await service.GetHistoryAsync(new DcToInvoiceHistoryQuery());
+        history.TotalCount.Should().Be(3);
+        history.Items.Should().HaveCount(3);
+        history.Items[0].ConvertedAtUtc.Should().BeOnOrAfter(history.Items[1].ConvertedAtUtc);
+
+        // Search test
+        var filtered = await service.GetHistoryAsync(new DcToInvoiceHistoryQuery { Search = "000001" });
+        filtered.TotalCount.Should().Be(1);
+        filtered.Items[0].InvoiceNumber.Should().Be("INV001");
+
+        // Status test
+        var failedOnly = await service.GetHistoryAsync(new DcToInvoiceHistoryQuery { Status = "FAILED" });
+        failedOnly.TotalCount.Should().Be(1);
+        failedOnly.Items[0].DcNo.Should().Be("000003");
+
+        // 2. Single DC History test
+        var dcHistory = await service.GetDcHistoryAsync(dcNo: "000002");
+        dcHistory.IsConverted.Should().BeTrue();
+        dcHistory.LatestRecord.Should().NotBeNull();
+        dcHistory.LatestRecord!.InvoiceNumber.Should().Be("INV002");
+
+        // 3. Dashboard test
+        var dashboard = await service.GetDashboardSummaryAsync();
+        dashboard.TotalProcessed.Should().Be(3);
+        dashboard.InvoicesCreated.Should().Be(2);
+        dashboard.FailedCount.Should().Be(1);
+        dashboard.TotalInvoiceAmount.Should().Be(7500m);
+        dashboard.TotalQuantity.Should().Be(15m);
+        dashboard.TopCustomers.Should().HaveCount(2);
+        dashboard.TopCustomers[0].CustomerCode.Should().Be("CUST1");
+        dashboard.TopCustomers[0].TotalAmount.Should().Be(5000m);
+
+        // 4. Daily Stats test
+        var daily = await service.GetDailyStatsAsync(days: 7);
+        daily.Should().HaveCount(7);
+        var todayStat = daily.Last();
+        todayStat.Date.Should().Be(DateTime.UtcNow.ToString("yyyy-MM-dd"));
+        todayStat.InvoicesCreated.Should().Be(1);
+        todayStat.Failures.Should().Be(1);
     }
 }
 

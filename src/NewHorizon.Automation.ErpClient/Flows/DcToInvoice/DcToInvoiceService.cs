@@ -29,12 +29,14 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
     private readonly IErpTokenProvider _tokenProvider;
     private readonly DcToInvoiceOptions _options;
     private readonly ILogger<DcToInvoiceService> _logger;
+    private readonly IConvertedDcTracker _tracker;
 
     public DcToInvoiceService(
         IHttpClientFactory httpClientFactory,
         IErpTokenProvider tokenProvider,
         DcToInvoiceOptions options,
-        ILogger<DcToInvoiceService> logger)
+        ILogger<DcToInvoiceService> logger,
+        IConvertedDcTracker? tracker = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(tokenProvider);
@@ -45,6 +47,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         _tokenProvider = tokenProvider;
         _options = options;
         _logger = logger;
+        _tracker = tracker ?? new ConvertedDcTracker();
     }
 
     /// <inheritdoc />
@@ -63,6 +66,28 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             throw new InvoiceValidationException(
                 "DeliveryChallanIdentifier",
                 "Either DcId or DcNo must be provided to create a Sales Invoice.");
+        }
+
+        // ── Idempotency Check: Prevent duplicate invoice creation ──
+        if (_tracker.IsDcConverted(dcId, dcNo, out var existingRecord) && existingRecord != null)
+        {
+            _logger.LogInformation(
+                "DcToInvoice: Delivery Challan {DcNo} (Id: {DcId}) was already converted into Sales Invoice {InvNo}. Skipping duplicate invoice creation.",
+                dcNo ?? existingRecord.DcNo, dcId ?? existingRecord.DcId, existingRecord.InvoiceNumber);
+
+            return new InvoiceCreationResult(
+                InvoiceNumber: existingRecord.InvoiceNumber,
+                InvoiceId: existingRecord.InvoiceId,
+                DcId: existingRecord.DcId,
+                DcNo: existingRecord.DcNo,
+                CustomerCode: existingRecord.CustomerCode,
+                ItemCount: existingRecord.ItemCount,
+                TotalInvoiceQty: existingRecord.TotalQuantity,
+                TotalInvoiceAmount: existingRecord.TotalAmount,
+                Status: "AlreadyCreated",
+                Authorized: false,
+                RateStructureCode: existingRecord.RateStructureCode,
+                LineLevelRateStructureApplied: false);
         }
 
         // ── Step 1: Customer resolution ──
@@ -154,27 +179,33 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
 
         // ── Step 7: Rate Structure Resolution (Respecting MSCENABLELINELEVELRTSTR) ──
         string headerRateStructureCode = string.Empty;
+        IReadOnlyList<ErpRateStructureOption> availableRateStructures = Array.Empty<ErpRateStructureOption>();
+
         if (!isLineLevelRateStructure)
         {
             // Case A: MSCENABLELINELEVELRTSTR = 0 -> Rate Structure is at Invoice Header level.
-            // Fetch available rate structure options and select the first/top valid option.
-            var availableRateStructures = await FetchDcRateStructuresAsync(
+            // Fetch available rate structure options for this Delivery Challan.
+            availableRateStructures = await FetchDcRateStructuresAsync(
                 effectiveDcId, effectiveSiteCode, effectiveCustomerCode, cancellationToken);
 
-            if (availableRateStructures.Count > 0)
+            if (!string.IsNullOrWhiteSpace(matchedDc.DcRateStructureCode))
+            {
+                headerRateStructureCode = matchedDc.DcRateStructureCode;
+            }
+            else if (availableRateStructures.Count > 0)
             {
                 // Select first/top valid option in the order returned by the application
                 headerRateStructureCode = availableRateStructures[0].RateStructureCode;
             }
-            else if (!string.IsNullOrWhiteSpace(matchedDc.DcRateStructureCode))
+            else if (!string.IsNullOrWhiteSpace(_options.DefaultRateStructureCode))
             {
-                headerRateStructureCode = matchedDc.DcRateStructureCode;
+                headerRateStructureCode = _options.DefaultRateStructureCode;
             }
             else
             {
                 throw new InvoiceValidationException(
                     "RateStructure",
-                    $"No valid Rate Structure could be resolved for Delivery Challan {effectiveDcId} at header level.");
+                    $"No valid Rate Structure could be resolved for Delivery Challan {effectiveDcNo} (Id: {effectiveDcId}).");
             }
 
             _logger.LogInformation(
@@ -197,6 +228,37 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             effectiveSiteCode,
             matchedDc.OafId,
             cancellationToken);
+
+        // If items are 0, try remaining available rate structures discovered for this DC
+        if (items.Count == 0 && availableRateStructures.Count > 1)
+        {
+            foreach (var altRate in availableRateStructures)
+            {
+                if (string.Equals(altRate.RateStructureCode, headerRateStructureCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                _logger.LogInformation("DcToInvoice: Retrying FetchInvoiceItemsAndTaxesAsync with alternative rate structure {AltRate}", altRate.RateStructureCode);
+                var (altItems, altTaxes) = await FetchInvoiceItemsAndTaxesAsync(
+                    altRate.RateStructureCode,
+                    effectiveDcId,
+                    matchedDc.CurrencyCode,
+                    matchedDc.OrderId,
+                    effectiveSiteCode,
+                    matchedDc.OafId,
+                    cancellationToken);
+
+                if (altItems.Count > 0)
+                {
+                    items = altItems;
+                    taxLines = altTaxes;
+                    headerRateStructureCode = altRate.RateStructureCode;
+                    _logger.LogInformation("DcToInvoice: Successfully found {Count} item(s) using rate structure {Rate}", altItems.Count, altRate.RateStructureCode);
+                    break;
+                }
+            }
+        }
 
         if (items.Count == 0)
         {
@@ -305,7 +367,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             "DcToInvoice: Invoice successfully created. InvoiceNumber={InvoiceNo}, InvoiceId={InvoiceId}, DC={DcNo}",
             createResponse.InvoiceNumber, createResponse.InvoiceId, effectiveDcNo);
 
-        return new InvoiceCreationResult(
+        var invoiceResult = new InvoiceCreationResult(
             InvoiceNumber: createResponse.InvoiceNumber,
             InvoiceId: createResponse.InvoiceId,
             DcId: effectiveDcId,
@@ -315,9 +377,23 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             TotalInvoiceQty: validItems.Sum(i => i.InvoiceQty),
             TotalInvoiceAmount: validItems.Sum(i => i.AmountWithTax),
             Status: "Created",
-            Authorized: string.Equals(docControl.AuthorisationRequired, "N", StringComparison.OrdinalIgnoreCase),
+            Authorized: false, // Invoices require 100% manual authorization inside ERP UI per business rule
             RateStructureCode: headerRateStructureCode,
             LineLevelRateStructureApplied: isLineLevelRateStructure);
+
+        _tracker.RecordConversion(new ConvertedDcRecord(
+            DcId: effectiveDcId,
+            DcNo: effectiveDcNo,
+            CustomerCode: effectiveCustomerCode,
+            InvoiceNumber: createResponse.InvoiceNumber,
+            InvoiceId: createResponse.InvoiceId,
+            ItemCount: validItems.Count,
+            TotalQuantity: validItems.Sum(i => i.InvoiceQty),
+            TotalAmount: validItems.Sum(i => i.AmountWithTax),
+            RateStructureCode: headerRateStructureCode,
+            ConvertedAtUtc: DateTime.UtcNow));
+
+        return invoiceResult;
     }
 
     /// <summary>
@@ -495,8 +571,8 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 ["XIHBILLTO"] = dc.BillTo,
                 ["XIHINVLVLDISPER"] = 0.00m,
                 ["XIHINVLVLDISAMT"] = 0.00m,
-                ["XIHDISCTYP"] = "",
-                ["STRAUTHREQ"] = docControl.AuthorisationRequired ?? "Y",
+                ["XIHDISCTYP"] = "N",
+                ["STRAUTHREQ"] = "Y",
                 ["LOTQuantyBasedDCIds"] = dc.DcId.ToString()
             }
         };
@@ -511,6 +587,13 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             var appliedRateStru = isLineLevelRateStructure
                 ? (item.RateStructureCode ?? headerRateStructureCode)
                 : headerRateStructureCode;
+
+            string discountType = item.DiscountType switch
+            {
+                "Percentage" or "P" => "P",
+                "Value" or "V" => "V",
+                _ => "N"
+            };
 
             dtInvDtl.Add(new JsonObject
             {
@@ -545,7 +628,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 ["XIDRTSCD"] = appliedRateStru,
                 ["xdcsoitmlineno"] = item.SoItmLineNo,
                 ["XIDSOCNGRATE"] = 0.00m,
-                ["XIDDISCTYP"] = item.DiscountType ?? "",
+                ["XIDDISCTYP"] = discountType,
                 ["XIDDISCVAL"] = item.DiscountVal,
                 ["XIDDISCAMT"] = item.DiscountAmt,
                 ["dcoaflineno"] = item.DcoafLineNo,
@@ -567,30 +650,56 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             });
         }
 
-        // Rate structure / Tax lines
+        // Rate structure / Tax lines linked per item line
         var rateDtl = new JsonArray();
-        for (int i = 0; i < taxLines.Count; i++)
+        for (int i = 0; i < items.Count; i++)
         {
-            var tax = taxLines[i];
-            rateDtl.Add(new JsonObject
+            var item = items[i];
+            var lineNo = (i + 1).ToString();
+            var appliedRateStru = isLineLevelRateStructure
+                ? (item.RateStructureCode ?? headerRateStructureCode)
+                : headerRateStructureCode;
+
+            var applicableTaxes = taxLines.Where(t =>
+                string.IsNullOrWhiteSpace(t.ItemCode) ||
+                string.Equals(t.ItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            if (applicableTaxes.Count == 0 && taxLines.Count > 0)
             {
-                ["XDTDCATTYPE"] = docControl.DocType,
-                ["XDTDSUBTYPE"] = docControl.DocSubType,
-                ["XDTFRLOC"] = siteId,
-                ["XDTDTMCD"] = !string.IsNullOrWhiteSpace(tax.ItemCode) ? tax.ItemCode : (items.Count > 0 ? items[0].SalesItemCode : ""),
-                ["XDTDRATECD"] = tax.RateCode,
-                ["RateDesc"] = tax.RateDesc,
-                ["XDTDRATEAMT"] = tax.RateAmount,
-                ["XDTDPERCVAL"] = tax.TaxValue,
-                ["XDTDINCEXC"] = tax.Ie,
-                ["XDTDPERVAL"] = tax.Pv,
-                ["XDTDAPPON"] = tax.AppOnDisplay,
-                ["XDTDPNYN"] = tax.PostNonPost != 0,
-                ["XDTDRTSTRCD"] = tax.RateStructureCode ?? headerRateStructureCode,
-                ["XDTDSEQNO"] = tax.SeqNo > 0 ? tax.SeqNo : (i + 1),
-                ["MPRTAXTYP"] = tax.MprTaxTyp,
-                ["XDTDCURCODE"] = dc.CurrencyCode ?? "INR"
-            });
+                applicableTaxes = taxLines.ToList();
+            }
+
+            for (int tIdx = 0; tIdx < applicableTaxes.Count; tIdx++)
+            {
+                var tax = applicableTaxes[tIdx];
+                decimal rateAmt = tax.RateAmount;
+                if (rateAmt <= 0 && tax.TaxValue > 0 && item.Amount > 0)
+                {
+                    rateAmt = Math.Round(item.Amount * (tax.TaxValue / 100m), 2);
+                }
+
+                rateDtl.Add(new JsonObject
+                {
+                    ["XDTDCATTYPE"] = docControl.DocType,
+                    ["XDTDSUBTYPE"] = docControl.DocSubType,
+                    ["XDTFRLOC"] = siteId.ToString(),
+                    ["XDTDTMCD"] = item.SalesItemCode,
+                    ["XDTDRATECD"] = tax.RateCode,
+                    ["RateDesc"] = tax.RateDesc,
+                    ["XDTDRATEAMT"] = rateAmt,
+                    ["XDTDPERCVAL"] = tax.TaxValue,
+                    ["XDTDINCEXC"] = tax.Ie,
+                    ["XDTDPERVAL"] = tax.Pv,
+                    ["XDTDAPPON"] = tax.AppOnDisplay,
+                    ["XDTDPNYN"] = tax.PostNonPost != 0,
+                    ["XDTDRTSTRCD"] = appliedRateStru,
+                    ["XDTDSEQNO"] = tax.SeqNo > 0 ? tax.SeqNo : (tIdx + 1),
+                    ["MPRTAXTYP"] = tax.MprTaxTyp,
+                    ["XDTDCURCODE"] = dc.CurrencyCode ?? "INR",
+                    ["XDTDREFID"] = lineNo,
+                    ["XDTDREFLINE"] = lineNo
+                });
+            }
         }
 
         // Miscellaneous Details node required by ERP validator and CSP_XINVMISCDTL_INSERT
@@ -837,43 +946,43 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         var results = new List<ErpSalInvDcRow>();
         foreach (var obj in envelope.Data)
         {
-            var dcIdVal = obj["dcid"] ?? obj["DCID"];
+            var dcIdVal = obj["dcid"] ?? obj["DCID"] ?? obj["dcId"];
             if (dcIdVal == null) continue;
 
             long id = Convert.ToInt64(dcIdVal.ToString(), CultureInfo.InvariantCulture);
             results.Add(new ErpSalInvDcRow(
                 DcId: id,
-                DcNo: obj["dcNo"]?.ToString() ?? string.Empty,
-                DcDate: obj["dcDate"] != null ? DateTime.Parse(obj["dcDate"]!.ToString()) : DateTime.Today,
-                DcYear: (obj["dcYear"] ?? obj["dcyear"] ?? obj["year"])?.ToString() ?? string.Empty,
-                DcGroup: (obj["dcGroup"] ?? obj["dcgroup"] ?? obj["group"])?.ToString() ?? string.Empty,
-                DcSite: (obj["dcSite"] ?? obj["dcsite"] ?? obj["site"] ?? obj["siteCode"] ?? obj["locationCode"])?.ToString() ?? string.Empty,
-                OafNo: (obj["oafNo"] ?? obj["oafno"])?.ToString() ?? string.Empty,
-                OafYear: (obj["oafYear"] ?? obj["oafyear"])?.ToString() ?? string.Empty,
-                OafGroup: (obj["oafGroup"] ?? obj["oafgroup"])?.ToString() ?? string.Empty,
-                OafSite: (obj["oafSite"] ?? obj["oafsite"])?.ToString() ?? string.Empty,
-                OafId: int.TryParse((obj["xoafhautoid"] ?? obj["oafId"] ?? obj["oafid"])?.ToString(), out var oId) ? oId : 0,
-                OrderId: long.TryParse((obj["ordid"] ?? obj["orderId"] ?? obj["ordId"])?.ToString(), out var ordId) ? ordId : 0,
-                IntOdrNo: (obj["intOdrNo"] ?? obj["intodrno"])?.ToString() ?? string.Empty,
-                IntOdrYear: (obj["intOdrYear"] ?? obj["intodryear"])?.ToString() ?? string.Empty,
-                IntOdrGroup: (obj["intOdrGroup"] ?? obj["intodrgroup"])?.ToString() ?? string.Empty,
-                IntOdrSite: (obj["intOdrSite"] ?? obj["intodrsite"])?.ToString() ?? string.Empty,
-                CustPoNo: (obj["custPOno"] ?? obj["custPoNo"] ?? obj["custpono"])?.ToString() ?? string.Empty,
-                CustPoDate: (obj["custPOdate"] ?? obj["custPoDate"]) != null ? DateTime.Parse((obj["custPOdate"] ?? obj["custPoDate"])!.ToString()) : null,
-                ShipCode: (obj["shipCode"] ?? obj["shipcode"])?.ToString() ?? string.Empty,
-                BillTo: (obj["billTo"] ?? obj["billto"] ?? obj["customerCode"])?.ToString() ?? customerCode,
-                BillToName: (obj["billToName"] ?? obj["billtoname"] ?? obj["customerName"])?.ToString() ?? string.Empty,
-                CurrencyCode: (obj["xobcurrcd"] ?? obj["currencyCode"] ?? obj["currency"])?.ToString() ?? currency,
-                ExchangeRate: (obj["exchangeRate"] ?? obj["exchangerate"]) != null ? Convert.ToDecimal((obj["exchangeRate"] ?? obj["exchangerate"])!.ToString(), CultureInfo.InvariantCulture) : 1.0m,
+                DcNo: (obj["dcNo"] ?? obj["XDCHDCNO"] ?? obj["dcno"])?.ToString() ?? string.Empty,
+                DcDate: (obj["dcDate"] ?? obj["XDCHDATE"]) != null ? DateTime.Parse((obj["dcDate"] ?? obj["XDCHDATE"])!.ToString()) : DateTime.Today,
+                DcYear: (obj["dcYear"] ?? obj["dcyear"] ?? obj["XDCHYEAR"] ?? obj["year"])?.ToString() ?? string.Empty,
+                DcGroup: (obj["dcGroup"] ?? obj["dcgroup"] ?? obj["XDCHGRPCD"] ?? obj["group"])?.ToString() ?? string.Empty,
+                DcSite: (obj["dcSite"] ?? obj["dcsite"] ?? obj["DC SITECD"] ?? obj["site"] ?? obj["siteCode"] ?? obj["locationCode"])?.ToString() ?? string.Empty,
+                OafNo: (obj["oafNo"] ?? obj["XOAFHNO"] ?? obj["oafno"])?.ToString() ?? string.Empty,
+                OafYear: (obj["oafYear"] ?? obj["XOAFHYEAR"] ?? obj["oafyear"])?.ToString() ?? string.Empty,
+                OafGroup: (obj["oafGroup"] ?? obj["XOAFHGRPCD"] ?? obj["oafgroup"])?.ToString() ?? string.Empty,
+                OafSite: (obj["oafSite"] ?? obj["OAF SITECD"] ?? obj["oafsite"])?.ToString() ?? string.Empty,
+                OafId: int.TryParse((obj["XOAFHAUTOID"] ?? obj["xoafhautoid"] ?? obj["oafId"] ?? obj["oafid"])?.ToString(), out var oId) ? oId : 0,
+                OrderId: long.TryParse((obj["ORDID"] ?? obj["ordid"] ?? obj["orderId"] ?? obj["ordId"])?.ToString(), out var ordId) ? ordId : 0,
+                IntOdrNo: (obj["intOdrNo"] ?? obj["XOBINTORDNO"] ?? obj["intodrno"])?.ToString() ?? string.Empty,
+                IntOdrYear: (obj["intOdrYear"] ?? obj["XOBINTORDYR"] ?? obj["intodryear"])?.ToString() ?? string.Empty,
+                IntOdrGroup: (obj["intOdrGroup"] ?? obj["XOBINTORDGRP"] ?? obj["intodrgroup"])?.ToString() ?? string.Empty,
+                IntOdrSite: (obj["intOdrSite"] ?? obj["ORD SITECD"] ?? obj["intodrsite"])?.ToString() ?? string.Empty,
+                CustPoNo: (obj["custPOno"] ?? obj["XOBORDNO"] ?? obj["custPoNo"] ?? obj["custpono"])?.ToString() ?? string.Empty,
+                CustPoDate: (obj["custPOdate"] ?? obj["XOBORDDT"] ?? obj["custPoDate"]) != null ? DateTime.Parse((obj["custPOdate"] ?? obj["XOBORDDT"] ?? obj["custPoDate"])!.ToString()) : null,
+                ShipCode: (obj["shipCode"] ?? obj["MFMFACTCD"] ?? obj["shipcode"])?.ToString() ?? string.Empty,
+                BillTo: (obj["billTo"] ?? obj["XOBBILLTO"] ?? obj["billto"] ?? obj["customerCode"])?.ToString() ?? customerCode,
+                BillToName: (obj["billToName"] ?? obj["MCMCUSTNM"] ?? obj["billtoname"] ?? obj["customerName"])?.ToString() ?? string.Empty,
+                CurrencyCode: (obj["XOBCURRCD"] ?? obj["xobcurrcd"] ?? obj["currencyCode"] ?? obj["currency"])?.ToString() ?? currency,
+                ExchangeRate: (obj["XOBEXRATE"] ?? obj["exchangeRate"] ?? obj["exchangerate"]) != null ? Convert.ToDecimal((obj["XOBEXRATE"] ?? obj["exchangeRate"] ?? obj["exchangerate"])!.ToString(), CultureInfo.InvariantCulture) : 1.0m,
                 DcRateStructureCode: (obj["xdcrtstrcd"] ?? obj["ratestructurecd"] ?? obj["rateStructureCode"] ?? obj["dcRateStructureCode"])?.ToString(),
-                DeliveryName: (obj["deliveryName"] ?? obj["deliveryname"])?.ToString(),
-                DeliveryCityCode: (obj["deliveryCityCode"] ?? obj["deliverycitycode"])?.ToString(),
-                DeliveryCityName: (obj["deliveryCityName"] ?? obj["deliverycityname"])?.ToString(),
-                CreditDays: obj["creditDays"] != null ? Convert.ToInt32(obj["creditDays"]!.ToString()) : 30,
-                CreditLimit: obj["creditLimit"] != null ? Convert.ToDecimal(obj["creditLimit"]!.ToString(), CultureInfo.InvariantCulture) : 0m,
-                CrLimitInvFlg: obj["crLimitInvflg"]?.ToString() ?? "W",
-                CreditLimitFlag: obj["creditLimitflag"]?.ToString() ?? "A",
-                CreditLimitDays: obj["creditLimitdays"] != null ? Convert.ToInt32(obj["creditLimitdays"]!.ToString()) : 0
+                DeliveryName: (obj["DeliveryName"] ?? obj["deliveryName"] ?? obj["deliveryname"])?.ToString(),
+                DeliveryCityCode: (obj["DeliveryCityCode"] ?? obj["deliveryCityCode"] ?? obj["deliverycitycode"])?.ToString(),
+                DeliveryCityName: (obj["DeliveryCityName"] ?? obj["deliveryCityName"] ?? obj["deliverycityname"])?.ToString(),
+                CreditDays: (obj["XOBORDCRDAYS"] ?? obj["creditDays"]) != null ? Convert.ToInt32((obj["XOBORDCRDAYS"] ?? obj["creditDays"])!.ToString()) : 30,
+                CreditLimit: (obj["MCMCREDITLMT"] ?? obj["creditLimit"]) != null ? Convert.ToDecimal((obj["MCMCREDITLMT"] ?? obj["creditLimit"])!.ToString(), CultureInfo.InvariantCulture) : 0m,
+                CrLimitInvFlg: (obj["MCMCreditInvoiceFlg"] ?? obj["crLimitInvflg"])?.ToString() ?? "W",
+                CreditLimitFlag: (obj["MCMCREDITLMTFLAG"] ?? obj["creditLimitflag"])?.ToString() ?? "A",
+                CreditLimitDays: (obj["MCMCREDITLMTDAYS"] ?? obj["creditLimitdays"]) != null ? Convert.ToInt32((obj["MCMCREDITLMTDAYS"] ?? obj["creditLimitdays"])!.ToString()) : 0
             ));
         }
 
@@ -954,7 +1063,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 ["strDCId"] = dcId.ToString(CultureInfo.InvariantCulture),
                 ["strRtStruCd"] = "",
                 ["strExNonEx"] = "E",
-                ["strInvOf"] = "P",
+                ["strInvOf"] = !string.IsNullOrWhiteSpace(_options.InvoiceOf) ? _options.InvoiceOf : "ProductSpare",
                 ["IsGSTApplicable"] = true,
                 ["site"] = trySite,
                 ["custcode"] = custCode,
@@ -1007,6 +1116,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
     {
         var effectiveOafId = oafId > 0 ? oafId : orderId;
         var effectiveOrdId = effectiveOafId > 0 ? effectiveOafId : orderId;
+        var effectiveSite = !string.IsNullOrWhiteSpace(siteCode) ? siteCode.Trim() : (!string.IsNullOrWhiteSpace(_options.SiteCode) ? _options.SiteCode : "NF1");
         HttpResponseMessage? response = null;
         string? urlUsed = null;
         string? rawJson = null;
@@ -1025,7 +1135,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 strordid = effectiveOrdId.ToString(CultureInfo.InvariantCulture),
                 empt = string.Empty,
                 isDiffCustBillTo = false,
-                siteCode = siteCode,
+                siteCode = effectiveSite,
                 stroafid = effectiveOafId.ToString(CultureInfo.InvariantCulture)
             };
 
@@ -1057,7 +1167,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         {
             var encodedRate = string.IsNullOrWhiteSpace(rateStructureCode) ? "%20" : Uri.EscapeDataString(rateStructureCode.Trim());
             var encodedCurr = string.IsNullOrWhiteSpace(currency) ? "%20" : Uri.EscapeDataString(currency.Trim());
-            var getUrl = $"/api/v1/sales/salesinvoice/FetchItemDtls/{encodedRate}/{dcId}/{encodedCurr}/E/true/{effectiveOrdId}/%20/false/{Uri.EscapeDataString(siteCode)}?strOAFID={effectiveOafId}";
+            var getUrl = $"/api/v1/sales/salesinvoice/FetchItemDtls/{encodedRate}/{dcId}/{encodedCurr}/E/true/{effectiveOrdId}/%20/false/{Uri.EscapeDataString(effectiveSite)}?strOAFID={effectiveOafId}";
 
             response = await _httpClient.GetAsync(getUrl, cancellationToken);
             EnsureSuccess(response, getUrl);
@@ -1090,16 +1200,25 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 decimal effectiveInvQty = rawInvQty > 0 ? rawInvQty : (maxInvQty > 0 ? maxInvQty : 0m);
 
                 decimal ordRateDis = decimal.TryParse(itemNode["ordRateDis"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedOrdRateDis) ? parsedOrdRateDis : 0m;
+                if (ordRateDis <= 0)
+                {
+                    ordRateDis = decimal.TryParse(itemNode["itemRate"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedItemRate) ? parsedItemRate : 0m;
+                }
+                if (ordRateDis <= 0)
+                {
+                    ordRateDis = decimal.TryParse(itemNode["soBasicPrice"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedSoRate) ? parsedSoRate : 0m;
+                }
+
                 decimal convFact = decimal.TryParse(itemNode["convFact"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedConvFact) ? parsedConvFact : 1.0m;
                 decimal amount = decimal.TryParse(itemNode["amount"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedAmount) ? parsedAmount : 0m;
                 if (amount <= 0 && effectiveInvQty > 0 && ordRateDis > 0)
                 {
-                    amount = effectiveInvQty * (convFact > 0 ? convFact : 1.0m) * ordRateDis;
+                    amount = Math.Round(effectiveInvQty * (convFact > 0 ? convFact : 1.0m) * ordRateDis, 2);
                 }
 
-                decimal orderRate = decimal.TryParse(itemNode["orderRate"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedOrderRate) ? parsedOrderRate : 0m;
-                decimal assessableRate = decimal.TryParse(itemNode["assessableRate"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedAssessableRate) ? parsedAssessableRate : 0m;
-                decimal amountWithTax = decimal.TryParse(itemNode["amountWithTax"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedAmountWithTax) ? parsedAmountWithTax : 0m;
+                decimal orderRate = decimal.TryParse(itemNode["orderRate"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedOrderRate) ? parsedOrderRate : ordRateDis;
+                decimal assessableRate = decimal.TryParse(itemNode["assessableRate"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedAssessableRate) ? parsedAssessableRate : ordRateDis;
+                decimal amountWithTax = decimal.TryParse(itemNode["amountWithTax"]?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedAmountWithTax) ? parsedAmountWithTax : amount;
                 int itemOafId = int.TryParse(itemNode["oafId"]?.ToString(), out var parsedOafId) ? parsedOafId : oafId;
                 int oafDetailLineNo = int.TryParse((itemNode["oafDetailLineNo"] ?? itemNode["oaflineid"])?.ToString(), out var parsedOafDetailLineNo) ? parsedOafDetailLineNo : 1;
                 int dcoafLineNo = int.TryParse(itemNode["dcoaflineno"]?.ToString(), out var parsedDcoafLineNo) ? parsedDcoafLineNo : 1;
@@ -1119,7 +1238,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                     dcAutoId = parsedAutoId;
                 }
 
-                // In ERP, lines are linked by DCId (XDCDHID). dcautoid defaults to "0" exactly as in ERP frontend WebApp2.
+                // In ERP, lines are linked by DCId (XDCDHID) and surrogate dcautoid (or "0" if null/0 per WebApp2).
                 string resolvedDcRndNo = dcAutoId > 0 ? dcAutoId.ToString(CultureInfo.InvariantCulture) : "0";
 
                 itemsList.Add(new ErpInvoiceItemDetail(
@@ -1210,6 +1329,18 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                     SeqNo: taxNode["seqNo"] != null ? Convert.ToInt32(taxNode["seqNo"]!.ToString()) : seq++,
                     RateStructureCode: taxNode["ratestructurecd"]?.ToString() ?? rateStructureCode
                 ));
+            }
+        }
+
+        // Update AmountWithTax for all items once taxes are resolved
+        var totalTaxRate = taxesList.Where(t => t.TaxValue > 0).Sum(t => t.TaxValue);
+        for (int i = 0; i < itemsList.Count; i++)
+        {
+            var item = itemsList[i];
+            if ((item.AmountWithTax <= item.Amount) && item.Amount > 0 && totalTaxRate > 0)
+            {
+                var lineTax = Math.Round(item.Amount * (totalTaxRate / 100m), 2);
+                itemsList[i] = item with { AmountWithTax = item.Amount + lineTax };
             }
         }
 

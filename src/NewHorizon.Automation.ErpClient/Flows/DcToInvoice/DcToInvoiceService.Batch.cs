@@ -60,6 +60,29 @@ public sealed partial class DcToInvoiceService
                     dc.OafId,
                     cancellationToken);
 
+                if (items.Count == 0)
+                {
+                    var available = await FetchDcRateStructuresAsync(dc.DcId, dc.DcSite, dc.BillTo, cancellationToken);
+                    foreach (var alt in available)
+                    {
+                        if (string.Equals(alt.RateStructureCode, resolvedRateStru, StringComparison.OrdinalIgnoreCase)) continue;
+                        var (altItems, _) = await FetchInvoiceItemsAndTaxesAsync(
+                            alt.RateStructureCode,
+                            dc.DcId,
+                            dc.CurrencyCode,
+                            dc.OrderId,
+                            dc.DcSite,
+                            dc.OafId,
+                            cancellationToken);
+                        if (altItems.Count > 0)
+                        {
+                            items = altItems;
+                            resolvedRateStru = alt.RateStructureCode;
+                            break;
+                        }
+                    }
+                }
+
                 foreach (var itm in items)
                 {
                     itemsSummary.Add(new PendingDcItemSummary(
@@ -165,10 +188,33 @@ public sealed partial class DcToInvoiceService
                         customerCode: request?.CustomerCode,
                         cancellationToken: cancellationToken);
 
+                    bool isAlreadyCreated = string.Equals(invoiceResult.Status, "AlreadyCreated", StringComparison.OrdinalIgnoreCase);
+
+                    if (!isAlreadyCreated)
+                    {
+                        specificCreatedInvoices++;
+                    }
                     specificSuccess++;
-                    specificCreatedInvoices++;
                     specificTotalItems += invoiceResult.ItemCount;
                     specificSuccessItems += invoiceResult.ItemCount;
+
+                    decimal targetAvgRate = invoiceResult.TotalInvoiceQty > 0
+                        ? Math.Round(invoiceResult.TotalInvoiceAmount / invoiceResult.TotalInvoiceQty, 2)
+                        : 0m;
+
+                    string itemStatus = isAlreadyCreated ? "ALREADY_CREATED" : "SUCCESS";
+                    string itemMessage = isAlreadyCreated
+                        ? (string.Equals(invoiceResult.InvoiceNumber, "ALREADY_INVOICED", StringComparison.OrdinalIgnoreCase)
+                            ? $"Delivery Challan {invoiceResult.DcNo} has already been invoiced or has 0 pending items."
+                            : $"Delivery Challan {invoiceResult.DcNo} is already converted into Sales Invoice {invoiceResult.InvoiceNumber}.")
+                        : $"Invoice {invoiceResult.InvoiceNumber} created successfully.";
+
+                    string dcStatus = isAlreadyCreated ? "ALREADY_CREATED" : "SUCCESS";
+                    string dcMessage = isAlreadyCreated
+                        ? (string.Equals(invoiceResult.InvoiceNumber, "ALREADY_INVOICED", StringComparison.OrdinalIgnoreCase)
+                            ? $"Delivery Challan {invoiceResult.DcNo} was already invoiced in ERP. Duplicate creation skipped."
+                            : $"Delivery Challan {invoiceResult.DcNo} is already converted into Sales Invoice {invoiceResult.InvoiceNumber}. Duplicate invoice creation skipped.")
+                        : $"Invoice {invoiceResult.InvoiceNumber} created successfully.";
 
                     var itemResults = new List<InvoiceItemResult>
                     {
@@ -177,14 +223,14 @@ public sealed partial class DcToInvoiceService
                             ItemName: "All Dispatched Items",
                             DcQuantity: invoiceResult.TotalInvoiceQty,
                             InvoiceQuantity: invoiceResult.TotalInvoiceQty,
-                            Rate: 0m,
+                            Rate: targetAvgRate,
                             Amount: invoiceResult.TotalInvoiceAmount,
                             RateStructureCode: invoiceResult.RateStructureCode ?? "",
-                            Status: "SUCCESS",
-                            InvoiceCreated: true,
+                            Status: itemStatus,
+                            InvoiceCreated: !isAlreadyCreated,
                             InvoiceId: invoiceResult.InvoiceId,
                             InvoiceNumber: invoiceResult.InvoiceNumber,
-                            Message: $"Invoice {invoiceResult.InvoiceNumber} created successfully.")
+                            Message: itemMessage)
                     };
 
                     specificResults.Add(new DcInvoiceResult(
@@ -192,13 +238,13 @@ public sealed partial class DcToInvoiceService
                         DcNo: invoiceResult.DcNo,
                         CustomerCode: invoiceResult.CustomerCode ?? request?.CustomerCode ?? "",
                         ShipmentCode: "",
-                        Status: "SUCCESS",
+                        Status: dcStatus,
                         InvoiceNumber: invoiceResult.InvoiceNumber,
                         InvoiceId: invoiceResult.InvoiceId,
                         Items: itemResults,
                         TotalAmount: invoiceResult.TotalInvoiceAmount,
                         TotalQuantity: invoiceResult.TotalInvoiceQty,
-                        Message: $"Invoice {invoiceResult.InvoiceNumber} created successfully.",
+                        Message: dcMessage,
                         Authorized: invoiceResult.Authorized,
                         RateStructureCode: invoiceResult.RateStructureCode,
                         LineLevelRateStructureApplied: invoiceResult.LineLevelRateStructureApplied));
@@ -224,11 +270,33 @@ public sealed partial class DcToInvoiceService
                 }
             }
 
+            int createdCount = specificResults.Count(r => r.Status == "SUCCESS");
+            int alreadyCount = specificResults.Count(r => r.Status == "ALREADY_CREATED");
+
+            string summaryMsg;
+            if (specificFailed == 0)
+            {
+                if (alreadyCount > 0 && createdCount == 0)
+                {
+                    summaryMsg = $"Processed {specificResults.Count} Delivery Challan(s): all {alreadyCount} are already converted into Sales Invoices.";
+                }
+                else if (alreadyCount > 0)
+                {
+                    summaryMsg = $"Processed {specificResults.Count} Delivery Challan(s): {createdCount} new invoice(s) created, {alreadyCount} already converted.";
+                }
+                else
+                {
+                    summaryMsg = $"Successfully processed {specificSuccess} Delivery Challan(s): {createdCount} invoice(s) created.";
+                }
+            }
+            else
+            {
+                summaryMsg = $"Processed {specificResults.Count} Delivery Challan(s) with {specificFailed} failure(s).";
+            }
+
             return new BatchInvoiceCreationResult(
                 Success: specificFailed == 0,
-                Message: specificFailed == 0
-                    ? $"Successfully processed {specificSuccess} Delivery Challan(s)."
-                    : $"Processed {specificResults.Count} Delivery Challan(s) with {specificFailed} failure(s).",
+                Message: summaryMsg,
                 Data: new BatchInvoiceCreationData(
                     TotalDeliveryChallans: targets.Count,
                     ProcessedDeliveryChallans: targets.Count,
@@ -346,6 +414,15 @@ public sealed partial class DcToInvoiceService
                         continue;
                     }
 
+                    // Idempotency: Skip Delivery Challans that have already been converted into invoices
+                    if (_tracker.IsDcConverted(dc.DcId, dc.DcNo, out var alreadyConverted) && alreadyConverted != null)
+                    {
+                        _logger.LogInformation(
+                            "DcToInvoice: DC {DcNo} (Id: {DcId}) already has Invoice {InvNo}. Skipping duplicate.",
+                            dc.DcNo, dc.DcId, alreadyConverted.InvoiceNumber);
+                        continue;
+                    }
+
                     if (!candidateDcs.Any(d => d.DcId == dc.DcId))
                     {
                         candidateDcs.Add(dc);
@@ -359,6 +436,25 @@ public sealed partial class DcToInvoiceService
         }
 
         _logger.LogInformation("DcToInvoice: Discovered {Count} eligible Delivery Challans to process", candidateDcs.Count);
+
+        if (candidateDcs.Count == 0)
+        {
+            var emptyMessage = "No pending authorized Delivery Challans found to convert. All eligible Delivery Challans are already converted into Sales Invoices or have 0 pending quantity.";
+            _logger.LogInformation("DcToInvoice: {Message}", emptyMessage);
+            return new BatchInvoiceCreationResult(
+                Success: true,
+                Message: emptyMessage,
+                Data: new BatchInvoiceCreationData(
+                    TotalDeliveryChallans: 0,
+                    ProcessedDeliveryChallans: 0,
+                    SuccessfulDeliveryChallans: 0,
+                    FailedDeliveryChallans: 0,
+                    TotalItems: 0,
+                    SuccessfulItems: 0,
+                    FailedItems: 0,
+                    CreatedInvoiceCount: 0,
+                    Results: Array.Empty<DcInvoiceResult>()));
+        }
 
         var results = new List<DcInvoiceResult>();
         int successfulCount = 0;
@@ -386,6 +482,10 @@ public sealed partial class DcToInvoiceService
                 totalItemsCount += invoiceResult.ItemCount;
                 successfulItemsCount += invoiceResult.ItemCount;
 
+                decimal batchAvgRate = invoiceResult.TotalInvoiceQty > 0
+                    ? Math.Round(invoiceResult.TotalInvoiceAmount / invoiceResult.TotalInvoiceQty, 2)
+                    : 0m;
+
                 var itemResults = new List<InvoiceItemResult>
                 {
                     new(
@@ -393,7 +493,7 @@ public sealed partial class DcToInvoiceService
                         ItemName: "All Dispatched Items",
                         DcQuantity: invoiceResult.TotalInvoiceQty,
                         InvoiceQuantity: invoiceResult.TotalInvoiceQty,
-                        Rate: 0m,
+                        Rate: batchAvgRate,
                         Amount: invoiceResult.TotalInvoiceAmount,
                         RateStructureCode: invoiceResult.RateStructureCode ?? dc.DcRateStructureCode ?? "",
                         Status: "SUCCESS",
@@ -421,6 +521,23 @@ public sealed partial class DcToInvoiceService
             }
             catch (InvoiceValidationException ex)
             {
+                if (string.Equals(ex.Field, "InvoiceItems", StringComparison.OrdinalIgnoreCase))
+                {
+                    // DC has 0 pending items because its items were already invoiced in ERP.
+                    // Record in tracker so future batch runs immediately recognize it as completed.
+                    _tracker.RecordConversion(new ConvertedDcRecord(
+                        DcId: dc.DcId,
+                        DcNo: dc.DcNo,
+                        CustomerCode: dc.BillTo,
+                        InvoiceNumber: "ALREADY_INVOICED",
+                        InvoiceId: 0,
+                        ItemCount: 0,
+                        TotalQuantity: 0m,
+                        TotalAmount: 0m,
+                        RateStructureCode: dc.DcRateStructureCode,
+                        ConvertedAtUtc: DateTime.UtcNow));
+                }
+
                 failedCount++;
                 totalItemsCount++;
                 failedItemsCount++;

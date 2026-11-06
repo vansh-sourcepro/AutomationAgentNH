@@ -128,7 +128,7 @@ public sealed record DcInvoiceResult(
     string? DcNo,
     string? CustomerCode,
     string? ShipmentCode,
-    string Status, // "SUCCESS", "FAILED", "WOULD_CREATE"
+    string Status, // "SUCCESS", "FAILED", "WOULD_CREATE", "ALREADY_CREATED"
     string? InvoiceNumber,
     long? InvoiceId,
     IReadOnlyList<InvoiceItemResult> Items,
@@ -141,7 +141,7 @@ public sealed record DcInvoiceResult(
     string? RateStructureCode = null,
     bool LineLevelRateStructureApplied = false)
 {
-    public bool Success => Status == "SUCCESS";
+    public bool Success => Status == "SUCCESS" || Status == "ALREADY_CREATED";
     public int ItemCount => Items.Count;
 }
 
@@ -304,3 +304,82 @@ internal sealed record ErpDispatchFromAddress(
     string? CountryName,
     string? PinCode,
     string? GstNo);
+
+// ─────────────────────────────────────────────────────────────────
+//  History & Dashboard Models
+// ─────────────────────────────────────────────────────────────────
+
+public sealed record DcToInvoiceHistoryItem(
+    long DcId,
+    string DcNo,
+    string CustomerCode,
+    string? CustomerName,
+    string? InvoiceNumber,
+    long? InvoiceId,
+    int ItemCount,
+    decimal TotalQuantity,
+    decimal TotalAmount,
+    string? RateStructureCode,
+    DateTime ConvertedAtUtc,
+    string Status, // "SUCCESS", "ALREADY_CONVERTED", "FAILED"
+    string TriggerSource = "Api", // "Api", "Timer", "Config", "Manual"
+    string? Message = null,
+    string? FailureReason = null);
+
+public sealed record DcToInvoiceHistoryQuery
+{
+    public string? Search { get; init; }
+    public string? Status { get; init; }
+    public string? CustomerCode { get; init; }
+    public DateTimeOffset? FromUtc { get; init; }
+    public DateTimeOffset? ToUtc { get; init; }
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = 50;
+}
+
+public sealed record DcToInvoiceHistoryPagedResult(
+    IReadOnlyList<DcToInvoiceHistoryItem> Items,
+    int TotalCount,
+    int Page,
+    int PageSize)
+{
+    public int TotalPages => PageSize > 0 ? (int)Math.Ceiling((double)TotalCount / PageSize) : 0;
+    public bool HasNextPage => Page < TotalPages;
+    public bool HasPreviousPage => Page > 1;
+}
+
+public sealed record DcSpecificHistoryResult(
+    string DcNo,
+    long? DcId,
+    bool IsConverted,
+    DcToInvoiceHistoryItem? LatestRecord,
+    IReadOnlyList<DcToInvoiceHistoryItem> History);
+
+public sealed record CustomerConversionMetric(
+    string CustomerCode,
+    string? CustomerName,
+    int InvoiceCount,
+    decimal TotalAmount,
+    decimal TotalQuantity);
+
+public sealed record DcToInvoiceDashboardSummary(
+    int TotalProcessed,
+    int InvoicesCreated,
+    int AlreadyConvertedCount,
+    int FailedCount,
+    decimal TotalInvoiceAmount,
+    decimal TotalQuantity,
+    double SuccessRate,
+    int PendingDcCount,
+    IReadOnlyDictionary<string, int> CountsByStatus,
+    IReadOnlyList<CustomerConversionMetric> TopCustomers,
+    IReadOnlyList<DcToInvoiceHistoryItem> RecentConversions);
+
+public sealed record DcToInvoiceDailyStat(
+    string Date, // "yyyy-MM-dd"
+    int InvoicesCreated,
+    int DeliveryChallansConverted,
+    decimal TotalAmount,
+    decimal TotalQuantity,
+    int Failures);
+

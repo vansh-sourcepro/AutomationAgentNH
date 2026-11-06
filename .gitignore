@@ -55,3 +55,8 @@ desktop.ini
 
 # ---- Generated documentation artifacts ----
 doc/__pycache__/
+
+# Temporary logs and runtime tracker
+*.binlog
+*.log
+ConvertedDeliveryChallans.json

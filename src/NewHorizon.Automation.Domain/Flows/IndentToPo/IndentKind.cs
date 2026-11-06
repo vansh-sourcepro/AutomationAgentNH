@@ -14,6 +14,7 @@ public enum IndentKind
     Regular = 0,
     Capital = 1,
     Service = 2,
+    Quotation = 3,
 }
 
 /// <summary>

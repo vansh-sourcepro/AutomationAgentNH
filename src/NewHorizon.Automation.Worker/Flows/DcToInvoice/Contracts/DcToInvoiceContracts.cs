@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using NewHorizon.Automation.ErpClient.Flows.DcToInvoice;
@@ -67,8 +68,12 @@ public sealed record BatchInvoiceCreationRequestDto(
     string? DcYear = null,
     long? DcId = null,
     IReadOnlyList<long>? DcIds = null,
-    IReadOnlyList<string>? DcNumbers = null)
+    IReadOnlyList<string>? DcNumbers = null,
+    bool? All = null,
+    bool? ProcessAll = null)
 {
+    public bool IsExplicitAll => All == true || ProcessAll == true;
+
     public BatchInvoiceCreationRequest ToRequest()
     {
         var resolvedDcNumbers = DcNumbers?
@@ -105,3 +110,63 @@ public sealed record BatchInvoiceCreationResponse(
     string Message,
     BatchInvoiceCreationData? Data,
     string? ErrorMessage = null);
+
+/// <summary>
+/// Detailed data structure for Delivery Challan to Sales Invoice automation configuration.
+/// </summary>
+public sealed record DcToInvoiceAutomationConfigData(
+    bool AutomationEnabled,
+    string? AutomationTime,
+    string? AutomationMode,
+    IReadOnlyList<string>? DcNumbers,
+    int ConfiguredDcCount,
+    string StatusDescription,
+    DateTimeOffset? UpdatedAtUtc,
+    string? LastScheduledRunDate);
+
+/// <summary>
+/// Standardized envelope response returned by GET / POST /api/v1/sales/salesinvoice/AutomationConfig,
+/// matching the structure of the main conversion API.
+/// </summary>
+public sealed record DcToInvoiceAutomationConfigResponse(
+    bool Success,
+    string Message,
+    DcToInvoiceAutomationConfigData? Data,
+    string? ErrorMessage = null);
+
+/// <summary>
+/// Envelope response returned by GET /api/v1/sales/salesinvoice/History.
+/// </summary>
+public sealed record DcToInvoiceHistoryResponse(
+    bool Success,
+    string Message,
+    DcToInvoiceHistoryPagedResult? Data,
+    string? ErrorMessage = null);
+
+/// <summary>
+/// Envelope response returned by GET /api/v1/sales/salesinvoice/History/dc/{dcNo}.
+/// </summary>
+public sealed record DcSpecificHistoryResponse(
+    bool Success,
+    string Message,
+    DcSpecificHistoryResult? Data,
+    string? ErrorMessage = null);
+
+/// <summary>
+/// Envelope response returned by GET /api/v1/sales/salesinvoice/Dashboard (or /Summary).
+/// </summary>
+public sealed record DcToInvoiceDashboardResponse(
+    bool Success,
+    string Message,
+    DcToInvoiceDashboardSummary? Data,
+    string? ErrorMessage = null);
+
+/// <summary>
+/// Envelope response returned by GET /api/v1/sales/salesinvoice/DailySummary (or /DailyStats).
+/// </summary>
+public sealed record DcToInvoiceDailyStatsResponse(
+    bool Success,
+    string Message,
+    IReadOnlyList<DcToInvoiceDailyStat>? Data,
+    string? ErrorMessage = null);
+
