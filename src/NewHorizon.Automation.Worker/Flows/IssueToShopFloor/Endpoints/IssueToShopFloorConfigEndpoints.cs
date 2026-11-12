@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Flows.IssueToShopFloor;
 using NewHorizon.Automation.Domain;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
 using NewHorizon.Automation.Domain.Flows.IssueToShopFloor;
+using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IssueToShopFloor.Contracts;
 
@@ -88,6 +90,7 @@ public static class IssueToShopFloorConfigEndpoints
         string issueSource,
         [FromBody] UpdateIssueToShopFloorConfigRequest? request,
         IIssueToShopFloorAutomationConfigRepository configs,
+        IClock clock,
         ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
@@ -143,6 +146,15 @@ public static class IssueToShopFloorConfigEndpoints
         try
         {
             var saved = await configs.UpsertAsync(source, update, ActorOf(user), cancellationToken);
+
+            // If a schedule time is set or updated to a time that has already passed today,
+            // mark today's scheduled run as complete so the background scheduler does not immediately fire.
+            if (scheduleTime is { } slot && clock.LocalTimeOfDay >= slot && (saved.RunMode == PoAutomationRunMode.Both || saved.RunMode == PoAutomationRunMode.Timer))
+            {
+                saved.MarkScheduledRun(clock.LocalDate, clock.UtcNow, RunStatus.Completed, runId: null);
+                await configs.SaveAsync(saved, cancellationToken);
+            }
+
             return Results.Ok(ToResponse(saved));
         }
         catch (DomainException ex)
