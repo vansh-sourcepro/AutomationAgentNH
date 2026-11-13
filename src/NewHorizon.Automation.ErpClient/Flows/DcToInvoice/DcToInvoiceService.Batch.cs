@@ -17,16 +17,59 @@ public sealed partial class DcToInvoiceService
         string? customerCode = null,
         CancellationToken cancellationToken = default)
     {
-        var effectiveCustomerCode = !string.IsNullOrWhiteSpace(customerCode)
-            ? customerCode.Trim()
-            : _options.CustomerCode;
-
+        var effectiveSiteId = _options.SiteId;
         var today = DateTime.Today;
         var formattedDate = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var effectiveSiteId = _options.SiteId;
 
-        var pendingDcs = await FetchPendingDcsAsync(
-            effectiveCustomerCode, _options.Currency, _options.ExNonEx, formattedDate, effectiveSiteId, cancellationToken);
+        var customerCodes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(customerCode) && !string.Equals(customerCode.Trim(), "All", StringComparison.OrdinalIgnoreCase))
+        {
+            customerCodes.Add(customerCode.Trim());
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(_options.CustomerCode) && !string.Equals(_options.CustomerCode.Trim(), "All", StringComparison.OrdinalIgnoreCase))
+            {
+                customerCodes.Add(_options.CustomerCode.Trim());
+            }
+
+            try
+            {
+                var dcCusts = await GetCustomersForDcAsync(effectiveSiteId, cancellationToken);
+                foreach (var c in dcCusts)
+                {
+                    if (!string.IsNullOrWhiteSpace(c) && !customerCodes.Contains(c, StringComparer.OrdinalIgnoreCase))
+                    {
+                        customerCodes.Add(c);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query DC customer list for pending DC discovery");
+            }
+        }
+
+        var pendingDcs = new List<ErpSalInvDcRow>();
+        foreach (var cust in customerCodes)
+        {
+            try
+            {
+                var dcs = await FetchPendingDcsAsync(
+                    cust, _options.Currency, _options.ExNonEx, formattedDate, effectiveSiteId, cancellationToken);
+                foreach (var d in dcs)
+                {
+                    if (!pendingDcs.Any(x => x.DcId == d.DcId))
+                    {
+                        pendingDcs.Add(d);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch pending DCs for customer {Cust}", cust);
+            }
+        }
 
         var summaries = new List<PendingDcSummary>();
         foreach (var dc in pendingDcs)
@@ -110,6 +153,12 @@ public sealed partial class DcToInvoiceService
             string statusMsg = isReady
                 ? "Ready for Invoicing"
                 : (itemsSummary.Count == 0 ? "No pending items" : "All quantities already invoiced");
+
+            if (_tracker.IsDcConverted(dc.DcId, dc.DcNo, out var alreadyConverted) && alreadyConverted != null)
+            {
+                isReady = false;
+                statusMsg = $"Already converted into Sales Invoice {alreadyConverted.InvoiceNumber}";
+            }
 
             summaries.Add(new PendingDcSummary(
                 DcId: dc.DcId,

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Configuration;
+using NewHorizon.Automation.ErpClient.Flows.DcToInvoice;
 using NewHorizon.Automation.Worker.Flows.DcToInvoice.Configuration;
 using NewHorizon.Automation.Worker.Flows.DcToInvoice.Contracts;
 
@@ -16,11 +18,11 @@ namespace NewHorizon.Automation.Worker.Flows.DcToInvoice.Services;
 
 /// <summary>
 /// Background timer scheduler for Delivery Challan to Sales Invoice automation.
-/// Runs once per day at the configured AutomationTime.
+/// Runs once per day at the configured AutomationTime for TIMER and BOTH modes.
 /// </summary>
 public sealed class DcToInvoiceSchedulerService : BackgroundService
 {
-    private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(30);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AutomationAgentOptions _options;
@@ -41,7 +43,7 @@ public sealed class DcToInvoiceSchedulerService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("DcToInvoice automation scheduler started");
+        _logger.LogInformation("DcToInvoice automation scheduler started (tick interval: {Interval}s)", TickInterval.TotalSeconds);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -76,6 +78,7 @@ public sealed class DcToInvoiceSchedulerService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var configs = scope.ServiceProvider.GetRequiredService<IDcToInvoiceConfigRepository>();
         var clock = scope.ServiceProvider.GetRequiredService<IClock>();
+        var service = scope.ServiceProvider.GetRequiredService<IDcToInvoiceService>();
 
         var config = await configs.GetConfigAsync(cancellationToken);
 
@@ -84,8 +87,9 @@ public sealed class DcToInvoiceSchedulerService : BackgroundService
             return;
         }
 
-        // Mode INDIVIDUAL does not execute on timer
-        if (config.AutomationMode == "INDIVIDUAL")
+        // Mode INDIVIDUAL does not execute on timer — it runs on demand
+        var mode = config.AutomationMode?.ToUpperInvariant();
+        if (mode == "INDIVIDUAL" || mode == "NONE" || mode == "DISABLED")
         {
             return;
         }
@@ -98,69 +102,86 @@ public sealed class DcToInvoiceSchedulerService : BackgroundService
         var localNow = clock.LocalTimeOfDay;
         var localToday = clock.LocalDate;
 
-        // Check if scheduled time has arrived today
+        // If today's scheduled time has not yet arrived, clear any stale claim for today
         if (localNow < scheduledTime)
         {
+            if (config.LastScheduledRunDate.HasValue && config.LastScheduledRunDate.Value >= localToday)
+            {
+                config.LastScheduledRunDate = null;
+                await configs.SaveConfigAsync(config, cancellationToken);
+            }
             return;
         }
 
-        // Check if already run today
+        // Check if already executed today
         if (config.LastScheduledRunDate.HasValue && config.LastScheduledRunDate.Value >= localToday)
         {
             return;
         }
 
-        // Mark as run BEFORE triggering to prevent duplicate execution
+        // Claim slot for today BEFORE execution to prevent duplicate triggers
         config.LastScheduledRunDate = localToday;
         config.UpdatedAtUtc = clock.UtcNow;
         await configs.SaveConfigAsync(config, cancellationToken);
 
-        _logger.LogInformation("DcToInvoice scheduler triggered automation run for {Time}", config.AutomationTime);
-
-        await RunMainApiAsync(config, cancellationToken);
-    }
-
-    private async Task RunMainApiAsync(DcToInvoiceAutomationConfig config, CancellationToken cancellationToken)
-    {
-        var requestPayload = new BatchInvoiceCreationRequestDto();
-
-        if (config.AutomationMode != "TIMER" && config.DcNumbers != null && config.DcNumbers.Count > 0)
-        {
-            requestPayload = requestPayload with { DcNumbers = config.DcNumbers.Select(x => x.Trim()).ToList() };
-        }
-
-        var endpoint = $"http://127.0.0.1:{_options.Host.ManagementApiPort}/api/v1/sales/salesinvoice/CreateInvoiceFromDeliveryChallan";
+        _logger.LogInformation("DcToInvoice scheduler triggered automation run for {Time} (Mode: {Mode})", config.AutomationTime, mode);
 
         try
         {
-            using var client = _httpClientFactory.CreateClient("AgentLoopback");
-            client.Timeout = TimeSpan.FromMinutes(30);
-
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint)
-            {
-                Content = JsonContent.Create(requestPayload)
-            };
-
-            if (!string.IsNullOrEmpty(_options.Host.InboundApiKey))
-            {
-                httpRequest.Headers.Add("X-Automation-Api-Key", _options.Host.InboundApiKey);
-            }
-
-            var response = await client.SendAsync(httpRequest, cancellationToken);
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                _logger.LogInformation("DcToInvoice Automation Run Completed Successfully: {Payload}", payload);
-            }
-            else
-            {
-                _logger.LogWarning("DcToInvoice Automation Run Failed ({StatusCode}): {Payload}", (int)response.StatusCode, payload);
-            }
+            await RunScheduledConversionAsync(config, service, configs, clock, cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to call existing Main Automation API CreateInvoicesFromDeliveryChallans");
+            _logger.LogError(ex, "DcToInvoice scheduled conversion failed with unhandled exception");
+            config.StatusDescription = $"Scheduled run error at {clock.LocalTimeOfDay:HH:mm}: {ex.Message}";
+            config.LastScheduledRunUtc = clock.UtcNow;
+            await configs.SaveConfigAsync(config, cancellationToken);
         }
+    }
+
+    private async Task RunScheduledConversionAsync(
+        DcToInvoiceAutomationConfig config,
+        IDcToInvoiceService service,
+        IDcToInvoiceConfigRepository configs,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string>? targetDcs = null;
+        var mode = config.AutomationMode?.ToUpperInvariant();
+
+        // In BOTH mode, use configured target DCs if specified; otherwise process all eligible
+        if (mode == "BOTH" && config.DcNumbers != null && config.DcNumbers.Count > 0)
+        {
+            targetDcs = config.DcNumbers.Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        var batchRequest = new BatchInvoiceCreationRequest(
+            DcNumbers: targetDcs,
+            DryRun: false
+        );
+
+        _logger.LogInformation(
+            "DcToInvoice scheduler executing conversion. Mode={Mode}, ScheduledTime={Time}, TargetDcs={Targets}",
+            mode,
+            config.AutomationTime,
+            targetDcs != null && targetDcs.Count > 0 ? string.Join(", ", targetDcs) : "ALL eligible Delivery Challans");
+
+        var result = await service.CreateInvoicesFromDeliveryChallansAsync(batchRequest, cancellationToken);
+
+        string statusMsg = $"Scheduled run completed at {clock.LocalTimeOfDay:HH:mm}.";
+        if (result.Data != null)
+        {
+            statusMsg = $"Scheduled run at {clock.LocalTimeOfDay:HH:mm}: {result.Data.CreatedInvoiceCount} invoice(s) created from {result.Data.TotalDeliveryChallans} candidate DC(s).";
+        }
+        else if (!string.IsNullOrWhiteSpace(result.Message))
+        {
+            statusMsg = $"Scheduled run at {clock.LocalTimeOfDay:HH:mm}: {result.Message}";
+        }
+
+        config.StatusDescription = statusMsg;
+        config.LastScheduledRunUtc = clock.UtcNow;
+        await configs.SaveConfigAsync(config, cancellationToken);
+
+        _logger.LogInformation("DcToInvoice scheduler finished: {Message}", result.Message);
     }
 }

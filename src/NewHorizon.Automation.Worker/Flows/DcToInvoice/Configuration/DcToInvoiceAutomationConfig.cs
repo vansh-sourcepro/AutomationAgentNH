@@ -19,6 +19,8 @@ public class DcToInvoiceAutomationConfig
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public DateOnly? LastScheduledRunDate { get; set; }
+    public DateTimeOffset? LastScheduledRunUtc { get; set; }
+    public string? StatusDescription { get; set; }
 }
 
 public class DcToInvoiceAutomationConfigDto

@@ -33,16 +33,16 @@ public static class DcToInvoiceEndpoints
         endpoints
             .MapPost(
                 "/api/v1/sales/salesinvoice/CreateInvoiceFromDeliveryChallan",
-                CreateInvoicesFromAllDeliveryChallansAsync)
+                CreateInvoiceFromSingleDcAsync)
             .WithName("CreateInvoiceFromDeliveryChallan")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapPost(
                 "/api/v1/sales/salesinvoice/CreateInvoicesFromDeliveryChallans",
                 CreateInvoicesFromAllDeliveryChallansAsync)
             .WithName("CreateInvoicesFromDeliveryChallans")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         // Query pending / eligible Delivery Challans
         endpoints
@@ -50,7 +50,7 @@ public static class DcToInvoiceEndpoints
                 "/api/v1/sales/salesinvoice/PendingDeliveryChallans",
                 GetPendingDeliveryChallansAsync)
             .WithName("GetPendingDeliveryChallansForInvoice")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         // Configuration endpoints
         endpoints
@@ -58,14 +58,14 @@ public static class DcToInvoiceEndpoints
                 "/api/v1/sales/salesinvoice/AutomationConfig",
                 GetAutomationConfigAsync)
             .WithName("GetInvoiceAutomationConfig")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapPost(
                 "/api/v1/sales/salesinvoice/AutomationConfig",
                 UpdateAutomationConfigAsync)
             .WithName("UpdateInvoiceAutomationConfig")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         // ── History & Dashboard Endpoints ──
         endpoints
@@ -111,6 +111,41 @@ public static class DcToInvoiceEndpoints
             .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         // Browser / UI friendly aliases
+        endpoints
+            .MapGet(
+                "/api/automation/dc-to-invoice/config",
+                GetAutomationConfigAsync)
+            .WithName("GetAutomationDcToInvoiceConfig")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapPost(
+                "/api/automation/dc-to-invoice/config",
+                UpdateAutomationConfigAsync)
+            .WithName("UpdateAutomationDcToInvoiceConfig")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapGet(
+                "/api/automation/dc-to-invoice/pending",
+                GetPendingDeliveryChallansAsync)
+            .WithName("GetAutomationDcToInvoicePending")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapPost(
+                "/api/automation/dc-to-invoice/convert",
+                CreateInvoicesFromAllDeliveryChallansAsync)
+            .WithName("PostAutomationDcToInvoiceConvert")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
+        endpoints
+            .MapPost(
+                "/api/automation/dc-to-invoice/convert-single",
+                CreateInvoiceFromSingleDcAsync)
+            .WithName("PostAutomationDcToInvoiceConvertSingle")
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+
         endpoints
             .MapGet(
                 "/api/automation/dc-to-invoice/history",
@@ -203,8 +238,15 @@ public static class DcToInvoiceEndpoints
             config.AutomationEnabled = true;
             if (mode != "INDIVIDUAL" && mode != "TIMER" && mode != "BOTH")
             {
-                // Default based on whether time is provided if mode is not specified
-                mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+                var existingMode = config.AutomationMode?.ToUpperInvariant();
+                if (existingMode == "INDIVIDUAL" || existingMode == "TIMER" || existingMode == "BOTH")
+                {
+                    mode = existingMode;
+                }
+                else
+                {
+                    mode = string.IsNullOrWhiteSpace(dto.AutomationTime) ? "INDIVIDUAL" : "TIMER";
+                }
             }
 
             // Enforce strict mode-based restrictions:
@@ -226,10 +268,8 @@ public static class DcToInvoiceEndpoints
         config.AutomationMode = mode;
         config.UpdatedAtUtc = clock.UtcNow;
 
-        if (timeChanged)
-        {
-            config.LastScheduledRunDate = null;
-        }
+        // Reset LastScheduledRunDate so the new or updated schedule is freshly armed to run today
+        config.LastScheduledRunDate = null;
 
         await repo.SaveConfigAsync(config, cancellationToken);
 
@@ -252,8 +292,8 @@ public static class DcToInvoiceEndpoints
                 ErrorMessage: null));
         }
 
-        // Case 2: INDIVIDUAL mode (or BOTH mode without scheduled time) -> Execute conversion directly & return itemized results
-        if (config.AutomationMode == "INDIVIDUAL" || (config.AutomationMode == "BOTH" && string.IsNullOrWhiteSpace(config.AutomationTime)))
+        // Case 2: INDIVIDUAL mode -> Execute on-demand conversion directly & return itemized results
+        if (config.AutomationMode == "INDIVIDUAL")
         {
             if (config.DcNumbers == null || config.DcNumbers.Count == 0)
             {
@@ -469,6 +509,10 @@ public static class DcToInvoiceEndpoints
         if (!config.AutomationEnabled)
         {
             statusDesc = "Automation is DISABLED. Background timer and automated conversions will not run.";
+        }
+        else if (!string.IsNullOrWhiteSpace(config.StatusDescription))
+        {
+            statusDesc = config.StatusDescription;
         }
         else
         {

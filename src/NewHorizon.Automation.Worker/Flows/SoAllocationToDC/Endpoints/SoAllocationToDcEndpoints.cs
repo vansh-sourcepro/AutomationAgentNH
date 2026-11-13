@@ -22,42 +22,42 @@ public static class SoAllocationToDcEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        // API-key protected — same security model as /api/automation/indent-to-po.
+        // API-key protected or ERP User bearer authenticated
         // Master automation API: processes ALL existing Sales Order Allocations sequentially
         endpoints
             .MapPost(
                 "/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallansFromAllocations",
                 CreateDeliveryChallansFromAllAllocationsAsync)
             .WithName("CreateDeliveryChallansFromAllocations")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapPost(
                 "/api/v1/sales/SalesAllocationDeAllocation/CreateDeliveryChallanFromAllocation",
                 CreateDeliveryChallanAsync)
             .WithName("CreateDeliveryChallanFromAllocation")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapGet(
                 "/api/v1/sales/SalesAllocationDeAllocation/PendingAllocations",
                 GetPendingAllocationsAsync)
             .WithName("GetPendingAllocationsForDc")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapGet(
                 "/api/v1/sales/SalesAllocationDeAllocation/AutomationConfig",
                 GetAutomationConfigAsync)
             .WithName("GetSoAutomationConfig")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         endpoints
             .MapPost(
                 "/api/v1/sales/SalesAllocationDeAllocation/AutomationConfig",
                 UpdateAutomationConfigAsync)
             .WithName("UpdateSoAutomationConfig")
-            .AddEndpointFilter<ApiKeyFilter>();
+            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
 
         return endpoints;
     }
