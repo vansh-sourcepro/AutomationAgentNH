@@ -210,6 +210,16 @@ public sealed class IndentPoAutomationConfigTests
         config.ShouldRunOnSchedule(new TimeOnly(9, 0), Today).Should().BeFalse("PO Automation is turned off");
     }
 
+    [Fact]
+    public void Quotation_config_can_be_created_and_updated()
+    {
+        var config = IndentPoAutomationConfig.CreateDefault(IndentKind.Quotation, Now);
+        config.IndentKind.Should().Be(IndentKind.Quotation);
+        config.Update(new IndentPoAutomationConfigUpdate { IsActive = true, RunMode = PoAutomationRunMode.Both }, Now, "admin");
+        config.IsActive.Should().BeTrue();
+        config.RunMode.Should().Be(PoAutomationRunMode.Both);
+    }
+
     private static IndentPoAutomationConfig Scheduled(TimeOnly time, PoAutomationRunMode mode = PoAutomationRunMode.Timer)
     {
         var config = IndentPoAutomationConfig.CreateDefault(IndentKind.Regular, Now);

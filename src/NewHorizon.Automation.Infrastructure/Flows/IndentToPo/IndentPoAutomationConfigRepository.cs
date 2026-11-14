@@ -30,6 +30,7 @@ public sealed class IndentPoAutomationConfigRepository : IIndentPoAutomationConf
     {
         var stored = await _dbContext.IndentPoAutomationConfigs
             .AsNoTracking()
+            .Where(config => AllKinds.Contains(config.IndentKind))
             .ToDictionaryAsync(config => config.IndentKind, cancellationToken);
 
         // The migration seeds all three, but a defensive fill keeps the read total even if a row
@@ -79,6 +80,7 @@ public sealed class IndentPoAutomationConfigRepository : IIndentPoAutomationConf
         CancellationToken cancellationToken)
     {
         var stored = await _dbContext.IndentPoAutomationConfigs
+            .Where(row => AllKinds.Contains(row.IndentKind))
             .ToDictionaryAsync(row => row.IndentKind, cancellationToken);
 
         var rows = new List<IndentPoAutomationConfig>(AllKinds.Count);
