@@ -409,20 +409,31 @@ public static class QuotationToSoEndpoints
     }
 
     private static async Task<IResult> GetOpenQuotationsAsync(
-        string customerCode,
-        string siteCode,
         IQuotationToSoService service,
-        CancellationToken cancellationToken)
+        IQuotationSoAutomationConfigRepository configRepo,
+        CancellationToken cancellationToken,
+        string? customerCode = null,
+        string? siteCode = null)
     {
-        if (string.IsNullOrWhiteSpace(customerCode) || string.IsNullOrWhiteSpace(siteCode))
+        var cust = customerCode?.Trim();
+        var site = siteCode?.Trim();
+
+        if (string.IsNullOrWhiteSpace(cust))
         {
-            return Results.Problem(
-                title: "Missing parameters.",
-                detail: "Query parameters 'customerCode' and 'siteCode' are required.",
-                statusCode: StatusCodes.Status400BadRequest);
+            var config = await configRepo.GetAsync(cancellationToken);
+            cust = config.CustomerCode?.Trim();
+            if (string.IsNullOrWhiteSpace(site))
+            {
+                site = config.SiteCode?.Trim();
+            }
         }
 
-        var list = await service.GetOpenAuthorisedQuotationsAsync(customerCode, siteCode, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cust))
+        {
+            return Results.Ok(new { success = true, count = 0, data = Array.Empty<OpenQuotationSummary>() });
+        }
+
+        var list = await service.GetOpenAuthorisedQuotationsAsync(cust, site ?? string.Empty, cancellationToken);
         return Results.Ok(new { success = true, count = list.Count, data = list });
     }
 
