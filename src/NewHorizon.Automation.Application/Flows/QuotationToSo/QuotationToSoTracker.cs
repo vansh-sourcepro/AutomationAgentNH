@@ -240,8 +240,11 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
             pending.Skip(now, reason);
         }
 
-        _execution.Skip(now);
-        await _jobs.SaveAsync(_execution, cancellationToken);
+        if (_execution.Status is not (JobStatus.Completed or JobStatus.Failed or JobStatus.Skipped))
+        {
+            _execution.Skip(now);
+            await _jobs.SaveAsync(_execution, cancellationToken);
+        }
 
         var outcome = IndentPoOutcome.Skipped(
             _execution.Id,
@@ -273,16 +276,19 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
         var running = _execution.Steps.FirstOrDefault(s => s.Status is StepStatus.Running);
         running?.Fail(now, null, null);
 
-        if (transient)
+        if (_execution.Status is not (JobStatus.Completed or JobStatus.Failed or JobStatus.Skipped))
         {
-            _execution.Fail(now);
-        }
-        else
-        {
-            _execution.Skip(now);
-        }
+            if (transient)
+            {
+                _execution.Fail(now);
+            }
+            else
+            {
+                _execution.Skip(now);
+            }
 
-        await _jobs.SaveAsync(_execution, cancellationToken);
+            await _jobs.SaveAsync(_execution, cancellationToken);
+        }
 
         await _jobs.AddErrorAsync(
             AutomationError.Create(
@@ -305,6 +311,58 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
 
         _execution = null;
         _currentQuotation = null;
+    }
+
+    public async Task<string?> GetExistingSalesOrderNumberAsync(long quotationId, CancellationToken cancellationToken)
+    {
+        if (quotationId <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var conversion = await _tracking.FindConversionAsync(quotationId, IndentKind.Regular, cancellationToken);
+            if (conversion is null)
+            {
+                return null;
+            }
+
+            var executions = await _tracking.GetExecutionsAsync(conversion.Id, cancellationToken);
+            var successfulJobIds = executions
+                .Where(j => j.Status is JobStatus.Completed)
+                .Select(j => j.Id)
+                .ToList();
+
+            if (successfulJobIds.Count == 0)
+            {
+                return null;
+            }
+
+            var outcomesDict = await _tracking.GetOutcomesAsync(successfulJobIds, cancellationToken);
+            foreach (var outcomes in outcomesDict.Values)
+            {
+                foreach (var outcome in outcomes)
+                {
+                    if (!string.IsNullOrWhiteSpace(outcome.PoNumber))
+                    {
+                        var raw = outcome.PoNumber.Trim();
+                        var parenIdx = raw.IndexOf('(');
+                        var cleanSo = parenIdx > 0 ? raw[..parenIdx].Trim() : raw;
+                        if (!string.IsNullOrWhiteSpace(cleanSo))
+                        {
+                            return cleanSo;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check local tracking database for existing Sales Order for Quotation {QuotationId}", quotationId);
+        }
+
+        return null;
     }
 
     public async Task CompleteRunAsync(int quotationsExamined, CancellationToken cancellationToken)

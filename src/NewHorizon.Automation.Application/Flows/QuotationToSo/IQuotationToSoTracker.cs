@@ -56,6 +56,8 @@ public interface IQuotationToSoTracker
         bool transient,
         CancellationToken cancellationToken);
 
+    Task<string?> GetExistingSalesOrderNumberAsync(long quotationId, CancellationToken cancellationToken);
+
     Task CompleteRunAsync(int quotationsExamined, CancellationToken cancellationToken);
 
     Task FailRunAsync(string reason, int quotationsExamined, CancellationToken cancellationToken);

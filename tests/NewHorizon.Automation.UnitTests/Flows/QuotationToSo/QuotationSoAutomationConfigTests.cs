@@ -272,4 +272,15 @@ public sealed class QuotationSoAutomationConfigTests
 
         config.AutoCreateOaf.Should().BeTrue();
     }
+
+    [Fact]
+    public void RecordScheduled_updates_status_and_message()
+    {
+        var config = QuotationSoAutomationConfig.CreateDefault(Now);
+        config.RecordScheduled("Quotation '40' is ready to be converted at the scheduled time (11:47:00).", Now);
+
+        config.LastRunStatus.Should().Be("Scheduled");
+        config.LastRunMessage.Should().Be("Quotation '40' is ready to be converted at the scheduled time (11:47:00).");
+        config.UpdatedAtUtc.Should().Be(Now);
+    }
 }

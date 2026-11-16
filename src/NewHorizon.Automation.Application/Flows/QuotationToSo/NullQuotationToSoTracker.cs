@@ -46,6 +46,8 @@ public sealed class NullQuotationToSoTracker : IQuotationToSoTracker
         bool transient,
         CancellationToken cancellationToken) => Task.CompletedTask;
 
+    public Task<string?> GetExistingSalesOrderNumberAsync(long quotationId, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+
     public Task CompleteRunAsync(int quotationsExamined, CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task FailRunAsync(string reason, int quotationsExamined, CancellationToken cancellationToken) => Task.CompletedTask;

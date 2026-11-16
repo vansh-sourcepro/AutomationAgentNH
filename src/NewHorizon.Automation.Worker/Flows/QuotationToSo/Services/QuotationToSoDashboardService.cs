@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NewHorizon.Automation.Application.Jobs;
@@ -99,7 +100,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 RunId: run.Id,
                 IssueSource: "Quotation",
                 DocumentNumber: !string.IsNullOrWhiteSpace(run.RequestedIndentTypes) ? run.RequestedIndentTypes : "Quotation Automation",
-                Status: runStatus == "Running" ? "Running" : (runStatus == "Completed" ? "Completed" : "Failed"),
+                Status: runStatus == "Running" ? "Running" : (run.PurchaseOrdersCreated == 0 && run.IndentsExamined > 0 ? "Skipped" : (runStatus == "Completed" ? "Completed" : "Failed")),
                 CurrentStage: "Discovery",
                 IssueNumber: null,
                 LineCount: 0,
@@ -109,7 +110,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 StartedAtUtc: ToLocal(run.StartedAtUtc),
                 CompletedAtUtc: ToLocal(run.CompletedAtUtc),
                 DurationMs: durationMs,
-                Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : null),
+                Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : $"All {run.IndentsExamined} examined quotation(s) were already converted or closed."),
                 SalesOrderNumber: null,
                 QuotationNumber: null,
                 CreatedAt: FormatLocal(run.StartedAtUtc),
@@ -163,7 +164,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 RunId: run.Id,
                 IssueSource: "Quotation",
                 DocumentNumber: !string.IsNullOrWhiteSpace(run.RequestedIndentTypes) ? run.RequestedIndentTypes : "Quotation Automation",
-                Status: runStatus == "Running" ? "Running" : (runStatus == "Completed" ? "Completed" : "Failed"),
+                Status: runStatus == "Running" ? "Running" : (run.PurchaseOrdersCreated == 0 && run.IndentsExamined > 0 ? "Skipped" : (runStatus == "Completed" ? "Completed" : "Failed")),
                 CurrentStage: "Discovery",
                 IssueNumber: null,
                 LineCount: 0,
@@ -173,7 +174,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 StartedAtUtc: ToLocal(run.StartedAtUtc),
                 CompletedAtUtc: ToLocal(run.CompletedAtUtc),
                 DurationMs: durationMs,
-                Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : null),
+                Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : $"All {run.IndentsExamined} examined quotation(s) were already converted or closed."),
                 SalesOrderNumber: null,
                 QuotationNumber: null,
                 CreatedAt: FormatLocal(run.StartedAtUtc),
@@ -246,7 +247,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 RunId: run.Id,
                 IssueSource: "Quotation",
                 DocumentNumber: !string.IsNullOrWhiteSpace(run.RequestedIndentTypes) ? run.RequestedIndentTypes : "Quotation Automation",
-                Status: runStatus == "Running" ? "Running" : (runStatus == "Completed" ? "Completed" : "Failed"),
+                Status: runStatus == "Running" ? "Running" : (run.PurchaseOrdersCreated == 0 && run.IndentsExamined > 0 ? "Skipped" : (runStatus == "Completed" ? "Completed" : "Failed")),
                 CurrentStage: "Discovery",
                 IssueNumber: null,
                 LineCount: 0,
@@ -256,7 +257,7 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
                 StartedAtUtc: ToLocal(run.StartedAtUtc),
                 CompletedAtUtc: ToLocal(run.CompletedAtUtc),
                 DurationMs: durationMs,
-                Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : null),
+                Reason: run.FailureReason ?? (run.IndentsExamined == 0 ? "No eligible open authorised quotations found." : $"All {run.IndentsExamined} examined quotation(s) were already converted or closed."),
                 SalesOrderNumber: null,
                 QuotationNumber: null,
                 CreatedAt: FormatLocal(run.StartedAtUtc),
@@ -413,6 +414,15 @@ public sealed class QuotationToSoDashboardService : IQuotationToSoDashboardServi
         string status = job.Status.ToString();
         string documentNumber = conversion?.IndentNumber ?? job.DocumentId ?? "Quotation";
         string? soNumber = createdOutcome?.PoNumber;
+
+        if (string.IsNullOrWhiteSpace(soNumber) && !string.IsNullOrWhiteSpace(skippedOutcome?.Reason))
+        {
+            var match = Regex.Match(skippedOutcome.Reason, @"Sales Order '([^']+)'", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                soNumber = match.Groups[1].Value;
+            }
+        }
 
         string? reason = createdOutcome is not null
             ? null
