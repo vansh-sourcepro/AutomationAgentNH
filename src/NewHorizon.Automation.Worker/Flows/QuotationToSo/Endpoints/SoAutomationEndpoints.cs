@@ -253,9 +253,23 @@ public static class SoAutomationEndpoints
             {
                 logger.LogError(ex, "Automatic conversion execution failed during configuration update.");
                 saved.RecordRunCompleted("Failed", ex.Message, clock.UtcNow);
-                await configs.SaveAsync(saved, cancellationToken);
+                try
+                {
+                    await configs.SaveAsync(saved, cancellationToken);
+                }
+                catch (Exception saveEx)
+                {
+                    logger.LogWarning(saveEx, "Failed to persist failure status to config; continuing.");
+                }
 
-                await tracker.FailRunAsync(ex.Message, 0, cancellationToken);
+                try
+                {
+                    await tracker.FailRunAsync(ex.Message, 0, cancellationToken);
+                }
+                catch (Exception runEx)
+                {
+                    logger.LogWarning(runEx, "Failed to fail tracker run; continuing.");
+                }
             }
         }
         else if (saved.IsActive && saved.ScheduleTime.HasValue && saved.RunMode.Allows(TriggerSource.Timer))
