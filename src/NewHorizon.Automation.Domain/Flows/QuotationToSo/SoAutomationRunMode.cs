@@ -29,7 +29,8 @@ public static class SoAutomationRunModeExtensions
     public static bool Allows(this SoAutomationRunMode mode, TriggerSource trigger) => trigger switch
     {
         TriggerSource.Timer => mode is SoAutomationRunMode.Timer or SoAutomationRunMode.Both,
-        TriggerSource.Api or TriggerSource.Manual or TriggerSource.UserPrompt => mode is SoAutomationRunMode.Api or SoAutomationRunMode.Both,
+        TriggerSource.Api => mode is SoAutomationRunMode.Api or SoAutomationRunMode.Both,
+        TriggerSource.Manual or TriggerSource.UserPrompt => mode is not SoAutomationRunMode.Disabled,
         _ => true,
     };
 }

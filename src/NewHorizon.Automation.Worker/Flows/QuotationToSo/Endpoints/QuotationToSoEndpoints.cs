@@ -433,12 +433,7 @@ public static class QuotationToSoEndpoints
             }
         }
 
-        if (string.IsNullOrWhiteSpace(cust))
-        {
-            return Results.Ok(new { success = true, count = 0, data = Array.Empty<OpenQuotationSummary>() });
-        }
-
-        var list = await service.GetOpenAuthorisedQuotationsAsync(cust, site ?? string.Empty, cancellationToken);
+        var list = await service.GetOpenAuthorisedQuotationsAsync(cust, site ?? "NF1", cancellationToken);
         return Results.Ok(new { success = true, count = list.Count, data = list });
     }
 
@@ -682,6 +677,17 @@ public static class QuotationToSoEndpoints
         {
             parsed = result;
             return true;
+        }
+
+        if (typeof(TEnum) == typeof(JobStatus))
+        {
+            var trimmed = value.Trim();
+            if (string.Equals(trimmed, "Success", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "PartialSuccess", StringComparison.OrdinalIgnoreCase))
+            {
+                parsed = (TEnum)(object)JobStatus.Completed;
+                return true;
+            }
         }
 
         error = Results.Problem(

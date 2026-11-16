@@ -8,10 +8,11 @@ public interface IQuotationToSoService
 {
     /// <summary>
     /// Discovers all open, authorised quotations for the given customer and site.
+    /// When customerCode is null or empty, discovers all open quotations across customers.
     /// </summary>
     Task<IReadOnlyList<OpenQuotationSummary>> GetOpenAuthorisedQuotationsAsync(
-        string customerCode,
-        string siteCode,
+        string? customerCode,
+        string? siteCode,
         CancellationToken cancellationToken);
 
     /// <summary>

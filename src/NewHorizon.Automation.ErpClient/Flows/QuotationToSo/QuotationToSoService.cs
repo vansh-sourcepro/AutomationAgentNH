@@ -46,14 +46,17 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<OpenQuotationSummary>> GetOpenAuthorisedQuotationsAsync(
-        string customerCode,
-        string siteCode,
+        string? customerCode,
+        string? siteCode,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(customerCode))
+        if (string.IsNullOrWhiteSpace(customerCode) || string.Equals(customerCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("GetOpenAuthorisedQuotationsAsync called with empty customerCode.");
-            return [];
+            var trimmedSiteFilter = !string.IsNullOrWhiteSpace(siteCode) && !string.Equals(siteCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+                ? siteCode.Trim()
+                : "NF1";
+            _logger.LogInformation("GetOpenAuthorisedQuotationsAsync: discovering quotations across all customers for site {SiteCode}", trimmedSiteFilter);
+            return await DiscoverQuotationsFromEntryListAsync(null, trimmedSiteFilter, cancellationToken);
         }
 
         var trimmedCust = customerCode.Trim();
