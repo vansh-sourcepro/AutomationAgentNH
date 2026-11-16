@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NewHorizon.Automation.Worker.Flows.QuotationToSo.Contracts;
 
 /// <summary>
@@ -19,7 +21,9 @@ public sealed record SoAutomationConfigResponse(
     string? UpdatedBy,
     string? SalesOrderNumber = null,
     bool AutoCreateOaf = true,
-    string? OafNumber = null);
+    string? OafNumber = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Message = null);
 
 /// <summary>
 /// Update payload for Quotation to Sales Order automation configuration.

@@ -256,6 +256,16 @@ public sealed class QuotationSoAutomationConfig
         UpdatedAtUtc = nowUtc;
     }
 
+    /// <summary>
+    /// Records that the automation is scheduled and waiting for its timer slot.
+    /// </summary>
+    public void RecordScheduled(string message, DateTimeOffset nowUtc, string status = "Scheduled")
+    {
+        LastRunStatus = status;
+        LastRunMessage = message;
+        UpdatedAtUtc = nowUtc;
+    }
+
     private static string? NormaliseList(string? input)
     {
         if (string.IsNullOrWhiteSpace(input))

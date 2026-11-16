@@ -16,7 +16,8 @@ public static class QuotationToSoPayloadBuilder
         string companyCode,
         string domesticCurrency,
         DateTime orderDate,
-        string soGroup = "SW")
+        string soGroup = "SW",
+        JsonArray? explicitTechnicalSpecs = null)
     {
         ArgumentNullException.ThrowIfNull(summary);
 
@@ -144,8 +145,12 @@ public static class QuotationToSoPayloadBuilder
             ["loginUser"] = 1,
         };
 
-        // Root payload: Populates only mandatory details (salesOrderDetails, modelDetails, deliveryDetails, rateStructureDetails)
-        // Skips all optional non-mandatory collections (termDetails, paymentDetails, textDetails, notes, specs, etc.)
+        // Build technical specifications (either from explicit fallback or from quotation data)
+        var technicalSpecs = BuildTechnicalSpecifications(qtnData, explicitTechnicalSpecs);
+        var hasTechSpecs = technicalSpecs.Count > 0;
+
+        // Root payload: Populates mandatory details (salesOrderDetails, modelDetails, deliveryDetails, rateStructureDetails)
+        // and technical specifications when present (required by ERP for items configured with technical specifications)
         var payload = new JsonObject
         {
             ["authorizationRequired"] = "Y",
@@ -162,7 +167,7 @@ public static class QuotationToSoPayloadBuilder
             ["amdSrNo"] = 0,
             ["userId"] = 1,
             ["loginUser"] = 1,
-            ["msctechspecifications"] = false,
+            ["msctechspecifications"] = hasTechSpecs,
             ["salesOrderDetails"] = salesOrderDetails,
             ["modelDetails"] = BuildModelDetails(qtnData, orderDate),
             ["discountDetails"] = CopyArrayProperty(qtnData, "discountDetails"),
@@ -181,11 +186,66 @@ public static class QuotationToSoPayloadBuilder
             ["projectLotDetails"] = new JsonArray(),
             ["equipmentAttributeDetails"] = new JsonArray(),
             ["deletedSalesItemsDetails"] = new JsonArray(),
-            ["technicalspec"] = new JsonArray(),
+            ["technicalspec"] = technicalSpecs,
             ["agentcommisiondata"] = new JsonArray(),
         };
 
         return payload;
+    }
+
+    private static JsonArray BuildTechnicalSpecifications(
+        JsonElement qtnData,
+        JsonArray? explicitTechnicalSpecs = null,
+        int userId = 1)
+    {
+        var result = new JsonArray();
+
+        // 1. If explicit technical specifications were provided (e.g. from Item Master fallback), use them
+        if (explicitTechnicalSpecs != null && explicitTechnicalSpecs.Count > 0)
+        {
+            foreach (var node in explicitTechnicalSpecs)
+            {
+                if (node is JsonObject obj)
+                {
+                    var copy = JsonNode.Parse(obj.ToJsonString())?.AsObject() ?? new JsonObject();
+                    copy["xtstrantype"] = "OITEM";
+                    if (!copy.ContainsKey("xtscreuserid") || copy["xtscreuserid"] == null)
+                    {
+                        copy["xtscreuserid"] = userId;
+                    }
+                    result.Add(copy);
+                }
+            }
+            return result;
+        }
+
+        // 2. Otherwise extract from quotationDetails / qtnData
+        if (qtnData.TryGetProperty("technicalspec", out var specArray) && specArray.ValueKind == JsonValueKind.Array && specArray.GetArrayLength() > 0)
+        {
+            foreach (var item in specArray.EnumerateArray())
+            {
+                var itmRefNo = GetInt(item, "itmModelRefNo");
+                var specObj = new JsonObject
+                {
+                    ["xtstrantype"] = "OITEM",
+                    ["xtstscode"] = GetString(item, "xtstscode") ?? string.Empty,
+                    ["xtsitemcode"] = GetString(item, "xtsitemcode") ?? string.Empty,
+                    ["xtstssubcode"] = GetString(item, "xtstssubcode") ?? string.Empty,
+                    ["xtstssubdesc"] = GetString(item, "xtstssubdesc") ?? string.Empty,
+                    ["xtsvariable"] = GetBool(item, "xtsvariable"),
+                    ["xtsprintseq"] = GetInt(item, "xtsprintseq"),
+                    ["termgroupcode"] = GetString(item, "termgroupcode") ?? string.Empty,
+                    ["termgroupdesc"] = GetString(item, "termgroupdesc") ?? string.Empty,
+                    ["checkoptional"] = GetBool(item, "checkoptional"),
+                    ["optional"] = GetString(item, "optional") ?? string.Empty,
+                    ["itmModelRefNo"] = itmRefNo > 0 ? itmRefNo : 1,
+                    ["xtscreuserid"] = userId,
+                };
+                result.Add(specObj);
+            }
+        }
+
+        return result;
     }
 
     private static JsonArray BuildModelDetails(JsonElement qtnData, DateTime orderDate)
@@ -328,18 +388,48 @@ public static class QuotationToSoPayloadBuilder
         return null;
     }
 
+    private static bool TryFindProperty(JsonElement? elem, string propName, out JsonElement result)
+    {
+        if (elem.HasValue && elem.Value.ValueKind == JsonValueKind.Object)
+        {
+            if (elem.Value.TryGetProperty(propName, out result))
+            {
+                return true;
+            }
+
+            foreach (var prop in elem.Value.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, propName, StringComparison.OrdinalIgnoreCase))
+                {
+                    result = prop.Value;
+                    return true;
+                }
+            }
+        }
+
+        result = default;
+        return false;
+    }
+
     private static string? GetString(JsonElement? elem, string propName)
     {
-        if (elem.HasValue && elem.Value.TryGetProperty(propName, out var p) && p.ValueKind == JsonValueKind.String)
+        if (TryFindProperty(elem, propName, out var p))
         {
-            return p.GetString()?.Trim();
+            if (p.ValueKind == JsonValueKind.String)
+            {
+                return p.GetString()?.Trim();
+            }
+            if (p.ValueKind == JsonValueKind.Number)
+            {
+                return p.ToString();
+            }
         }
         return null;
     }
 
     private static decimal GetDecimal(JsonElement? elem, string propName)
     {
-        if (elem.HasValue && elem.Value.TryGetProperty(propName, out var p))
+        if (TryFindProperty(elem, propName, out var p))
         {
             if (p.ValueKind == JsonValueKind.Number && p.TryGetDecimal(out var d))
             {
@@ -355,7 +445,7 @@ public static class QuotationToSoPayloadBuilder
 
     private static int GetInt(JsonElement? elem, string propName)
     {
-        if (elem.HasValue && elem.Value.TryGetProperty(propName, out var p))
+        if (TryFindProperty(elem, propName, out var p))
         {
             if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var i))
             {
@@ -371,7 +461,7 @@ public static class QuotationToSoPayloadBuilder
 
     private static bool GetBool(JsonElement? elem, string propName)
     {
-        if (elem.HasValue && elem.Value.TryGetProperty(propName, out var p))
+        if (TryFindProperty(elem, propName, out var p))
         {
             if (p.ValueKind is JsonValueKind.True) return true;
             if (p.ValueKind is JsonValueKind.False) return false;
@@ -381,6 +471,10 @@ public static class QuotationToSoPayloadBuilder
                 return string.Equals(s, "true", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(s, "1", StringComparison.Ordinal);
+            }
+            if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var num))
+            {
+                return num > 0;
             }
         }
         return false;

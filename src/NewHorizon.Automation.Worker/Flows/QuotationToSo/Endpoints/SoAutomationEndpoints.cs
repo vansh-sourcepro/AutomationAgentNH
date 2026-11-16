@@ -160,11 +160,13 @@ public static class SoAutomationEndpoints
                         saved.AutoCreateOaf);
 
                     var status = itemResult.Success ? "Success" : "Failed";
-                    var message = itemResult.Success
-                        ? (!string.IsNullOrWhiteSpace(itemResult.OafNumber)
-                            ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}' and OAF '{itemResult.OafNumber}'."
-                            : $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'.")
-                        : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.";
+                    var message = !string.IsNullOrWhiteSpace(itemResult.ErrorMessage) && itemResult.ErrorMessage.Contains("already converted", StringComparison.OrdinalIgnoreCase)
+                        ? itemResult.ErrorMessage
+                        : (itemResult.Success
+                            ? (!string.IsNullOrWhiteSpace(itemResult.OafNumber)
+                                ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}' and OAF '{itemResult.OafNumber}'."
+                                : $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'.")
+                            : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.");
 
                     createdSoNumber = itemResult.SalesOrderNumber;
                     createdOafNumber = itemResult.OafNumber;
@@ -226,8 +228,8 @@ public static class SoAutomationEndpoints
                 else
                 {
                     var sweepResult = await service.ConvertAllEligibleQuotationsAsync(
-                        saved.CustomerCode,
-                        saved.SiteCode,
+                        null,
+                        saved.SiteCode ?? "NF1",
                         cancellationToken,
                         saved.AutoCreateOaf);
 
@@ -256,6 +258,29 @@ public static class SoAutomationEndpoints
                 await tracker.FailRunAsync(ex.Message, 0, cancellationToken);
             }
         }
+        else if (saved.IsActive && saved.ScheduleTime.HasValue && saved.RunMode.Allows(TriggerSource.Timer))
+        {
+            var targetDesc = !string.IsNullOrWhiteSpace(saved.QuotationNumbers)
+                ? $"Quotation '{saved.QuotationNumbers}'"
+                : "All eligible quotations";
+
+            var scheduledMessage = $"{targetDesc} is ready to be converted at the scheduled time ({saved.ScheduleTime.Value:HH:mm:ss}).";
+
+            saved.RecordScheduled(scheduledMessage, clock.UtcNow);
+            await configs.SaveAsync(saved, cancellationToken);
+        }
+        else if (!saved.IsActive)
+        {
+            var inactiveMessage = "Quotation automation is currently inactive (disabled).";
+            saved.RecordScheduled(inactiveMessage, clock.UtcNow, status: "Inactive");
+            await configs.SaveAsync(saved, cancellationToken);
+        }
+        else if (saved.ScheduleTime is null && saved.RunMode == SoAutomationRunMode.Timer)
+        {
+            var noTimeMessage = "Timer mode is configured, but no schedule time is set.";
+            saved.RecordScheduled(noTimeMessage, clock.UtcNow, status: "NoScheduleTime");
+            await configs.SaveAsync(saved, cancellationToken);
+        }
 
         return Results.Ok(ToResponse(saved, createdSoNumber, createdOafNumber));
     }
@@ -263,6 +288,7 @@ public static class SoAutomationEndpoints
     private static async Task<IResult> SetEnabledAsync(
         SetSoAutomationEnabledRequest? request,
         IQuotationSoAutomationConfigRepository configs,
+        IClock clock,
         ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
@@ -272,6 +298,21 @@ public static class SoAutomationEndpoints
         }
 
         var saved = await configs.SetActiveAsync(request.Enabled, ActorOf(user), cancellationToken);
+        if (saved.IsActive && saved.ScheduleTime.HasValue && saved.RunMode.Allows(TriggerSource.Timer))
+        {
+            var targetDesc = !string.IsNullOrWhiteSpace(saved.QuotationNumbers)
+                ? $"Quotation '{saved.QuotationNumbers}'"
+                : "All eligible quotations";
+            var scheduledMessage = $"{targetDesc} is ready to be converted at the scheduled time ({saved.ScheduleTime.Value:HH:mm:ss}).";
+            saved.RecordScheduled(scheduledMessage, clock.UtcNow);
+            await configs.SaveAsync(saved, cancellationToken);
+        }
+        else if (!saved.IsActive)
+        {
+            saved.RecordScheduled("Quotation automation is currently inactive (disabled).", clock.UtcNow, status: "Inactive");
+            await configs.SaveAsync(saved, cancellationToken);
+        }
+
         return Results.Ok(ToResponse(saved));
     }
 
@@ -287,14 +328,15 @@ public static class SoAutomationEndpoints
         config.SiteCode,
         config.DryRun,
         config.LastScheduledRunDate,
-        config.LastTriggeredAtUtc,
+        config.LastTriggeredAtUtc?.ToLocalTime(),
         config.LastRunStatus,
         config.LastRunMessage,
-        config.UpdatedAtUtc,
+        config.UpdatedAtUtc.ToLocalTime(),
         config.UpdatedBy,
         salesOrderNumber,
         config.AutoCreateOaf,
-        oafNumber);
+        oafNumber,
+        config.LastRunMessage);
 
     private static bool TryParseTime(string? value, out TimeOnly? time, out IResult? error)
     {

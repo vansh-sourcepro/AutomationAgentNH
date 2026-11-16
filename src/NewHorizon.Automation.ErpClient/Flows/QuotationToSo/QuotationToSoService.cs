@@ -159,6 +159,86 @@ public sealed class QuotationToSoService : IQuotationToSoService
     {
         ArgumentNullException.ThrowIfNull(quotation);
 
+        // Only convert if quotation financial year matches current financial year
+        var currentFy = GetCurrentFinancialYear();
+        if (!IsSameFinancialYear(quotation.QtnYear, currentFy))
+        {
+            var fyMismatchMsg = $"Quotation '{quotation.QuotationNumber}' financial year '{quotation.QtnYear}' does not match current financial year '{currentFy}'. Skipping conversion.";
+            _logger.LogInformation(fyMismatchMsg);
+            return new QuotationConversionItemResult
+            {
+                QuotationId = quotation.QuotationId,
+                QuotationNumber = quotation.QuotationNumber,
+                Success = false,
+                ErrorMessage = fyMismatchMsg,
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(quotation.CustomerCode))
+        {
+            var resolvedCust = await TryResolveCustomerCodeAsync(quotation, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(resolvedCust))
+            {
+                quotation = quotation with { CustomerCode = resolvedCust };
+            }
+        }
+
+        var soYear = !string.IsNullOrWhiteSpace(quotation.QtnYear) ? quotation.QtnYear : currentFy;
+        var soSiteId = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId : 1;
+        var soGroup = await GetDefaultSalesOrderGroupAsync(soYear, soSiteId, cancellationToken);
+
+        // Pre-check: If already converted, return existing order immediately without calling create
+        var preCheck = await VerifyCreatedSalesOrderAsync(quotation, soYear, soGroup, cancellationToken);
+        if (preCheck is not null)
+        {
+            _logger.LogInformation(
+                "Quotation {QuotationNumber} (Id: {QuotationId}) is already converted to Sales Order {SoNumber}. Skipping duplicate creation.",
+                quotation.QuotationNumber,
+                quotation.QuotationId,
+                preCheck.Value.SoNumber);
+
+            string? oafNum = null;
+            long? oafId = null;
+            if (autoCreateOaf && preCheck.Value.SoId > 0 && !preCheck.Value.SoNumber.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
+            {
+                var oafRes = await CreateOafForSalesOrderAsync(
+                    preCheck.Value.SoNumber,
+                    preCheck.Value.SoId,
+                    quotation.QuotationSiteId,
+                    quotation.QuotationSiteCode,
+                    quotation.CustomerCode,
+                    cancellationToken);
+
+                if (oafRes.Success)
+                {
+                    oafNum = oafRes.OafNumber;
+                    oafId = oafRes.OafId;
+                }
+            }
+
+            var skipMsg = $"Quotation '{quotation.QuotationNumber}' is already converted to Sales Order '{preCheck.Value.SoNumber}'.";
+            await _tracker.StartExecutionAsync(new TrackedQuotation(
+                quotation.QuotationId,
+                quotation.QuotationNumber,
+                quotation.QuotationSiteId,
+                quotation.CustomerCode,
+                quotation.QuotationDate.HasValue ? DateOnly.FromDateTime(quotation.QuotationDate.Value) : null), cancellationToken);
+            await _tracker.EnterStageAsync(QuotationToSoStages.Validation, QuotationToSoTasks.VerifyExistingSalesOrder, cancellationToken);
+            await _tracker.SkipExecutionAsync(skipMsg, cancellationToken);
+
+            return new QuotationConversionItemResult
+            {
+                QuotationId = quotation.QuotationId,
+                QuotationNumber = quotation.QuotationNumber,
+                SalesOrderNumber = preCheck.Value.SoNumber,
+                SalesOrderId = preCheck.Value.SoId,
+                OafNumber = oafNum,
+                OafId = oafId,
+                Success = true,
+                ErrorMessage = skipMsg,
+            };
+        }
+
         await _tracker.StartExecutionAsync(new TrackedQuotation(
             quotation.QuotationId,
             quotation.QuotationNumber,
@@ -223,12 +303,56 @@ public sealed class QuotationToSoService : IQuotationToSoService
             };
         }
 
+        // Populate customer and site details from full quotation header if empty in discovery summary
+        if (qtnData.TryGetProperty("quotationDetails", out var qdElem))
+        {
+            var firstHdr = qdElem.ValueKind == JsonValueKind.Array ? qdElem.EnumerateArray().FirstOrDefault() : qdElem;
+            if (firstHdr.ValueKind == JsonValueKind.Object)
+            {
+                var headerCust = GetStringProperty(firstHdr, "customerCode", "custCode", "custCD", "billToCustomerCode", "xqdCustCd");
+                var headerCustName = GetStringProperty(firstHdr, "customerName");
+                var headerSiteCode = GetStringProperty(firstHdr, "siteCode", "quotationSiteCode", "locationCode");
+                var headerSiteId = GetIntProperty(firstHdr, "quotationSiteId", "siteId", "siteID");
+
+                var effCust = !string.IsNullOrWhiteSpace(quotation.CustomerCode) ? quotation.CustomerCode : (headerCust ?? string.Empty);
+                var effName = !string.IsNullOrWhiteSpace(quotation.CustomerName) ? quotation.CustomerName : headerCustName;
+                var effSite = !string.IsNullOrWhiteSpace(quotation.QuotationSiteCode) ? quotation.QuotationSiteCode : (headerSiteCode ?? "NF1");
+                var effSiteId = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId : (headerSiteId > 0 ? headerSiteId : 1);
+
+                var canonicalQtnNo = FormatCanonicalQuotationNumber(
+                    quotation.QuotationNumber,
+                    quotation.QtnYear,
+                    quotation.QtnGroup,
+                    effSite,
+                    quotation.QtnNum);
+
+                quotation = quotation with
+                {
+                    QuotationNumber = canonicalQtnNo,
+                    CustomerCode = effCust,
+                    CustomerName = effName,
+                    QuotationSiteCode = effSite,
+                    QuotationSiteId = effSiteId,
+                };
+            }
+        }
+
         // Step 2: Build the SalesOrderReceiptEntrySaveModel JSON payload
         var orderDate = _clock.UtcNow.LocalDateTime;
         var domesticCurrency = "INR";
-        var soYear = !string.IsNullOrWhiteSpace(quotation.QtnYear) ? quotation.QtnYear : GetCurrentFinancialYear();
-        var soSiteId = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId : 1;
-        var soGroup = await GetDefaultSalesOrderGroupAsync(soYear, soSiteId, cancellationToken);
+        soYear = !string.IsNullOrWhiteSpace(quotation.QtnYear) ? quotation.QtnYear : currentFy;
+        soSiteId = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId : 1;
+        soGroup = await GetDefaultSalesOrderGroupAsync(soYear, soSiteId, cancellationToken);
+
+        JsonArray? fallbackTechSpecs = null;
+        var hasQuotationTechSpecs = qtnData.TryGetProperty("technicalspec", out var qtnTechSpecs)
+            && qtnTechSpecs.ValueKind == JsonValueKind.Array
+            && qtnTechSpecs.GetArrayLength() > 0;
+
+        if (!hasQuotationTechSpecs && qtnData.TryGetProperty("modelDetails", out var modelArray) && modelArray.ValueKind == JsonValueKind.Array)
+        {
+            fallbackTechSpecs = await FetchFallbackItemTechnicalSpecsAsync(modelArray, cancellationToken);
+        }
 
         var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
             qtnData,
@@ -237,7 +361,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
             _companyCode,
             domesticCurrency,
             orderDate,
-            soGroup);
+            soGroup,
+            fallbackTechSpecs);
 
         // Step 2.5: Pre-check if quotation is already converted or closed to avoid duplicate orders
         await _tracker.EnterStageAsync(
@@ -261,7 +386,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
             long? oafId = null;
             string? oafErr = null;
 
-            if (autoCreateOaf)
+            if (autoCreateOaf && existingSoId > 0 && !existingSoNum.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
             {
                 await _tracker.EnterStageAsync(
                     QuotationToSoStages.CreateOaf,
@@ -490,12 +615,66 @@ public sealed class QuotationToSoService : IQuotationToSoService
             };
         }
 
+        var currentFy = GetCurrentFinancialYear();
         var results = new List<QuotationConversionItemResult>();
 
         foreach (var qtn in openQuotations)
         {
             try
             {
+                var soGroup = await GetDefaultSalesOrderGroupAsync(currentFy, qtn.QuotationSiteId > 0 ? qtn.QuotationSiteId : 1, cancellationToken);
+                var existingSo = await VerifyCreatedSalesOrderAsync(qtn, currentFy, soGroup, cancellationToken);
+                if (existingSo is not null)
+                {
+                    _logger.LogInformation(
+                        "Quotation {QuotationNumber} (Id: {QuotationId}) is already converted to Sales Order {SoNumber}. Skipping duplicate creation.",
+                        qtn.QuotationNumber,
+                        qtn.QuotationId,
+                        existingSo.Value.SoNumber);
+
+                    string? oafNum = null;
+                    long? oafId = null;
+                    if (autoCreateOaf && existingSo.Value.SoId > 0 && !existingSo.Value.SoNumber.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var oafRes = await CreateOafForSalesOrderAsync(
+                            existingSo.Value.SoNumber,
+                            existingSo.Value.SoId,
+                            qtn.QuotationSiteId,
+                            qtn.QuotationSiteCode,
+                            qtn.CustomerCode,
+                            cancellationToken);
+
+                        if (oafRes.Success)
+                        {
+                            oafNum = oafRes.OafNumber;
+                            oafId = oafRes.OafId;
+                        }
+                    }
+
+                    var skipMsg = $"Quotation '{qtn.QuotationNumber}' is already converted to Sales Order '{existingSo.Value.SoNumber}'.";
+                    await _tracker.StartExecutionAsync(new TrackedQuotation(
+                        qtn.QuotationId,
+                        qtn.QuotationNumber,
+                        qtn.QuotationSiteId,
+                        qtn.CustomerCode,
+                        qtn.QuotationDate.HasValue ? DateOnly.FromDateTime(qtn.QuotationDate.Value) : null), cancellationToken);
+                    await _tracker.EnterStageAsync(QuotationToSoStages.Validation, QuotationToSoTasks.VerifyExistingSalesOrder, cancellationToken);
+                    await _tracker.SkipExecutionAsync(skipMsg, cancellationToken);
+
+                    results.Add(new QuotationConversionItemResult
+                    {
+                        QuotationId = qtn.QuotationId,
+                        QuotationNumber = qtn.QuotationNumber,
+                        SalesOrderNumber = existingSo.Value.SoNumber,
+                        SalesOrderId = existingSo.Value.SoId,
+                        OafNumber = oafNum,
+                        OafId = oafId,
+                        Success = true,
+                        ErrorMessage = skipMsg,
+                    });
+                    continue;
+                }
+
                 var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken, autoCreateOaf);
                 // Fallback retry via numerical search if single conversion needed numerical lookup
                 if (!itemResult.Success && !string.IsNullOrWhiteSpace(qtn.QuotationNumber))
@@ -544,20 +723,13 @@ public sealed class QuotationToSoService : IQuotationToSoService
         CancellationToken cancellationToken,
         bool autoCreateOaf = true)
     {
-        var trimmedCust = customerCode?.Trim();
-        var trimmedSite = siteCode?.Trim();
+        // "currently don't look for the customer code take site as default from the drop down and the only check for the current finance year if that match then convert else don't convert that"
+        const string defaultSite = "NF1";
+        var trimmedSite = !string.IsNullOrWhiteSpace(siteCode) && !string.Equals(siteCode.Trim(), "ALL", StringComparison.OrdinalIgnoreCase)
+            ? siteCode.Trim()
+            : defaultSite;
 
-        var isAllCustomers = string.IsNullOrWhiteSpace(trimmedCust)
-            || string.Equals(trimmedCust, "ALL", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(trimmedCust, "MULTIPLE", StringComparison.OrdinalIgnoreCase);
-
-        // If a specific customer is specified, delegate to ConvertQuotationsForCustomerAsync
-        if (!isAllCustomers)
-        {
-            return await ConvertQuotationsForCustomerAsync(trimmedCust!, trimmedSite, cancellationToken, autoCreateOaf);
-        }
-
-        _logger.LogInformation("Discovering all eligible open authorised quotations across all customers (Site: {SiteCode})", trimmedSite ?? "ALL");
+        _logger.LogInformation("Discovering all eligible open authorised quotations across all customers for current FY (Site: {SiteCode})", trimmedSite);
 
         var currentFy = GetCurrentFinancialYear();
         var openQuotations = new List<OpenQuotationSummary>();
@@ -570,7 +742,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
             var fromEntryList = await DiscoverQuotationsFromEntryListAsync(null, trimmedSite, cancellationToken);
             foreach (var q in fromEntryList)
             {
-                if (seenQuotationIds.Add(q.QuotationId))
+                if (IsSameFinancialYear(q.QtnYear, currentFy) && seenQuotationIds.Add(q.QuotationId))
                 {
                     openQuotations.Add(q);
                     if (!string.IsNullOrWhiteSpace(q.CustomerCode))
@@ -634,20 +806,32 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         var qSiteId = GetIntProperty(item, "quotationSiteId", "siteID", "siteId");
                         var qSiteCode = GetStringProperty(item, "locationCode", "siteCode", "quotationSiteCode") ?? string.Empty;
 
+                        // Only convert if quotation financial year matches current financial year
+                        if (!IsSameFinancialYear(qYear, currentFy))
+                        {
+                            continue;
+                        }
+
                         if (qtnId > 0 && !seenQuotationIds.Contains(qtnId) && MatchesSiteFilter(trimmedSite, qSiteId, qSiteCode, qNumber))
                         {
                             var (yr, grp, num) = ParseQuotationParts(qNumber ?? string.Empty, qYear, qGroup);
                             if (seenQuotationIds.Add(qtnId))
                             {
+                                var effSiteCode = !string.IsNullOrWhiteSpace(qSiteCode)
+                                    ? qSiteCode
+                                    : (qSiteId == 1 ? "NF1" : trimmedSite);
+                                var effSiteId = qSiteId > 0 ? qSiteId : 1;
+                                var canonicalQuotationNo = FormatCanonicalQuotationNumber(qNumber, yr, grp, effSiteCode, num);
+
                                 openQuotations.Add(new OpenQuotationSummary
                                 {
                                     QuotationId = qtnId,
-                                    QuotationNumber = !string.IsNullOrWhiteSpace(qNumber) ? qNumber : $"{yr}/{grp}/{qSiteCode}/{num}",
+                                    QuotationNumber = canonicalQuotationNo,
                                     QtnYear = yr,
                                     QtnGroup = grp,
                                     QtnNum = num,
-                                    QuotationSiteCode = qSiteCode,
-                                    QuotationSiteId = qSiteId > 0 ? qSiteId : 1,
+                                    QuotationSiteCode = effSiteCode,
+                                    QuotationSiteId = effSiteId,
                                     CustomerCode = custCode ?? string.Empty,
                                     CustomerName = GetStringProperty(item, "customerName"),
                                     QuotationCurrency = "INR",
@@ -671,7 +855,9 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 var custQuotations = await GetOpenAuthorisedQuotationsAsync(cust, string.Empty, cancellationToken);
                 foreach (var q in custQuotations)
                 {
-                    if (MatchesSiteFilter(trimmedSite, q.QuotationSiteId, q.QuotationSiteCode, q.QuotationNumber) && seenQuotationIds.Add(q.QuotationId))
+                    if (IsSameFinancialYear(q.QtnYear, currentFy) &&
+                        MatchesSiteFilter(trimmedSite, q.QuotationSiteId, q.QuotationSiteCode, q.QuotationNumber) &&
+                        seenQuotationIds.Add(q.QuotationId))
                     {
                         openQuotations.Add(q);
                     }
@@ -704,6 +890,59 @@ public sealed class QuotationToSoService : IQuotationToSoService
         {
             try
             {
+                var soGroup = await GetDefaultSalesOrderGroupAsync(currentFy, qtn.QuotationSiteId > 0 ? qtn.QuotationSiteId : 1, cancellationToken);
+                var existingSo = await VerifyCreatedSalesOrderAsync(qtn, currentFy, soGroup, cancellationToken);
+                if (existingSo is not null)
+                {
+                    _logger.LogInformation(
+                        "Quotation {QuotationNumber} (Id: {QuotationId}) is already converted to Sales Order {SoNumber}. Skipping duplicate creation.",
+                        qtn.QuotationNumber,
+                        qtn.QuotationId,
+                        existingSo.Value.SoNumber);
+
+                    string? oafNum = null;
+                    long? oafId = null;
+                    if (autoCreateOaf && existingSo.Value.SoId > 0 && !existingSo.Value.SoNumber.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var oafRes = await CreateOafForSalesOrderAsync(
+                            existingSo.Value.SoNumber,
+                            existingSo.Value.SoId,
+                            qtn.QuotationSiteId,
+                            qtn.QuotationSiteCode,
+                            qtn.CustomerCode,
+                            cancellationToken);
+
+                        if (oafRes.Success)
+                        {
+                            oafNum = oafRes.OafNumber;
+                            oafId = oafRes.OafId;
+                        }
+                    }
+
+                    var skipMsg = $"Quotation '{qtn.QuotationNumber}' is already converted to Sales Order '{existingSo.Value.SoNumber}'.";
+                    await _tracker.StartExecutionAsync(new TrackedQuotation(
+                        qtn.QuotationId,
+                        qtn.QuotationNumber,
+                        qtn.QuotationSiteId,
+                        qtn.CustomerCode,
+                        qtn.QuotationDate.HasValue ? DateOnly.FromDateTime(qtn.QuotationDate.Value) : null), cancellationToken);
+                    await _tracker.EnterStageAsync(QuotationToSoStages.Validation, QuotationToSoTasks.VerifyExistingSalesOrder, cancellationToken);
+                    await _tracker.SkipExecutionAsync(skipMsg, cancellationToken);
+
+                    results.Add(new QuotationConversionItemResult
+                    {
+                        QuotationId = qtn.QuotationId,
+                        QuotationNumber = qtn.QuotationNumber,
+                        SalesOrderNumber = existingSo.Value.SoNumber,
+                        SalesOrderId = existingSo.Value.SoId,
+                        OafNumber = oafNum,
+                        OafId = oafId,
+                        Success = true,
+                        ErrorMessage = skipMsg,
+                    });
+                    continue;
+                }
+
                 var itemResult = await ConvertSingleQuotationAsync(qtn, cancellationToken, autoCreateOaf);
                 // Fallback retry via numerical search if single conversion needed numerical lookup
                 if (!itemResult.Success && !string.IsNullOrWhiteSpace(qtn.QuotationNumber))
@@ -903,9 +1142,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
         // Step 2: Iterate through candidate quotations in priority order
         foreach (var qtnInfo in candidates)
         {
-            var candidateDesc = !string.IsNullOrWhiteSpace(qtnInfo.QuotationNumber)
-                ? qtnInfo.QuotationNumber
-                : $"{currentFy}/{qtnInfo.QtnGroup}/{qtnInfo.QuotationSiteCode}/{qtnInfo.QtnNum}";
+            var candidateDesc = FormatCanonicalQuotationNumber(
+                qtnInfo.QuotationNumber,
+                qtnInfo.QtnYear ?? currentFy,
+                qtnInfo.QtnGroup,
+                qtnInfo.QuotationSiteCode,
+                qtnInfo.QtnNum);
 
             // Check A: Is quotation authorized?
             if (!qtnInfo.IsAuthorized)
@@ -916,69 +1158,80 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 continue;
             }
 
-            // Check B: Is quotation already converted or closed?
+            // Check B: Pre-check if quotation is already converted or closed (Tier 1 local DB + Tier 2 ERP closed list)
+            var fallbackCust = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode) ? qtnInfo.CustomerCode : fallbackCustomerCode?.Trim();
+            var soGroup = await GetDefaultSalesOrderGroupAsync(currentFy, qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1, cancellationToken);
+
+            var candidateSummary = new OpenQuotationSummary
+            {
+                QuotationId = qtnInfo.QuotationId,
+                QuotationNumber = candidateDesc,
+                QtnYear = qtnInfo.QtnYear ?? currentFy,
+                QtnGroup = qtnInfo.QtnGroup ?? string.Empty,
+                QtnNum = qtnInfo.QtnNum ?? paddedNum,
+                QuotationSiteCode = !string.IsNullOrWhiteSpace(qtnInfo.QuotationSiteCode) ? qtnInfo.QuotationSiteCode : "NF1",
+                QuotationSiteId = qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1,
+                CustomerCode = fallbackCust ?? string.Empty,
+                CustomerName = qtnInfo.CustomerName,
+                QuotationDate = qtnInfo.QuotationDate,
+                QuotationCurrency = "INR",
+            };
+
+            var existingSo = await VerifyCreatedSalesOrderAsync(candidateSummary, currentFy, soGroup, cancellationToken);
+            if (existingSo is not null)
+            {
+                _logger.LogInformation(
+                    "Quotation '{CandidateDesc}' (Id: {QuotationId}, Group: '{QtnGroup}') is already converted to Sales Order '{SoNumber}'. Checking OAF...",
+                    candidateDesc,
+                    qtnInfo.QuotationId,
+                    qtnInfo.QtnGroup,
+                    existingSo.Value.SoNumber);
+
+                string? oafNum = null;
+                long? oafId = null;
+                if (autoCreateOaf && existingSo.Value.SoId > 0 && !existingSo.Value.SoNumber.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
+                {
+                    var oafRes = await CreateOafForSalesOrderAsync(
+                        existingSo.Value.SoNumber,
+                        existingSo.Value.SoId,
+                        qtnInfo.QuotationSiteId,
+                        qtnInfo.QuotationSiteCode,
+                        fallbackCust,
+                        cancellationToken);
+
+                    if (oafRes.Success)
+                    {
+                        oafNum = oafRes.OafNumber;
+                        oafId = oafRes.OafId;
+                    }
+                }
+
+                var skipMsg = $"Quotation '{candidateDesc}' is already converted to Sales Order '{existingSo.Value.SoNumber}'.";
+                await _tracker.StartExecutionAsync(new TrackedQuotation(
+                    qtnInfo.QuotationId,
+                    candidateDesc,
+                    qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1,
+                    fallbackCust,
+                    qtnInfo.QuotationDate.HasValue ? DateOnly.FromDateTime(qtnInfo.QuotationDate.Value) : null), cancellationToken);
+                await _tracker.EnterStageAsync(QuotationToSoStages.Validation, QuotationToSoTasks.VerifyExistingSalesOrder, cancellationToken);
+                await _tracker.SkipExecutionAsync(skipMsg, cancellationToken);
+
+                return new QuotationConversionItemResult
+                {
+                    QuotationId = qtnInfo.QuotationId,
+                    QuotationNumber = candidateDesc,
+                    Success = true,
+                    SalesOrderNumber = existingSo.Value.SoNumber,
+                    SalesOrderId = existingSo.Value.SoId,
+                    OafNumber = oafNum,
+                    OafId = oafId,
+                    ErrorMessage = skipMsg,
+                };
+            }
+
             if (string.Equals(qtnInfo.QtnStatus, "R", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(qtnInfo.QtnStatus, "C", StringComparison.OrdinalIgnoreCase))
             {
-                var fallbackCust = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode) ? qtnInfo.CustomerCode : fallbackCustomerCode?.Trim();
-                var soGroup = await GetDefaultSalesOrderGroupAsync(currentFy, qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1, cancellationToken);
-
-                var summary = new OpenQuotationSummary
-                {
-                    QuotationId = qtnInfo.QuotationId,
-                    QuotationNumber = qtnInfo.QuotationNumber,
-                    QtnYear = qtnInfo.QtnYear,
-                    QtnGroup = qtnInfo.QtnGroup,
-                    QtnNum = qtnInfo.QtnNum,
-                    QuotationSiteCode = qtnInfo.QuotationSiteCode,
-                    QuotationSiteId = qtnInfo.QuotationSiteId,
-                    CustomerCode = fallbackCust ?? string.Empty,
-                    CustomerName = qtnInfo.CustomerName,
-                    QuotationDate = qtnInfo.QuotationDate,
-                    QuotationCurrency = "INR",
-                };
-
-                var existingSo = await VerifyCreatedSalesOrderAsync(summary, currentFy, soGroup, cancellationToken);
-                if (existingSo is not null)
-                {
-                    _logger.LogInformation(
-                        "Quotation '{CandidateDesc}' (Id: {QuotationId}, Group: '{QtnGroup}') is already converted to Sales Order '{SoNumber}'. Checking OAF...",
-                        candidateDesc,
-                        qtnInfo.QuotationId,
-                        qtnInfo.QtnGroup,
-                        existingSo.Value.SoNumber);
-
-                    string? oafNum = null;
-                    long? oafId = null;
-                    if (autoCreateOaf)
-                    {
-                        var oafRes = await CreateOafForSalesOrderAsync(
-                            existingSo.Value.SoNumber,
-                            existingSo.Value.SoId,
-                            qtnInfo.QuotationSiteId,
-                            qtnInfo.QuotationSiteCode,
-                            fallbackCust,
-                            cancellationToken);
-
-                        if (oafRes.Success)
-                        {
-                            oafNum = oafRes.OafNumber;
-                            oafId = oafRes.OafId;
-                        }
-                    }
-
-                    return new QuotationConversionItemResult
-                    {
-                        QuotationId = qtnInfo.QuotationId,
-                        QuotationNumber = candidateDesc,
-                        Success = true,
-                        SalesOrderNumber = existingSo.Value.SoNumber,
-                        SalesOrderId = existingSo.Value.SoId,
-                        OafNumber = oafNum,
-                        OafId = oafId,
-                    };
-                }
-
                 var alreadyMsg = $"Quotation '{candidateDesc}' (Id: {qtnInfo.QuotationId}, Group: '{qtnInfo.QtnGroup}') is already converted or closed (ERP Status: {qtnInfo.QtnStatus}).";
                 _logger.LogInformation("{Note}. Moving to next candidate group if available.", alreadyMsg);
                 candidateNotes.Add(alreadyMsg);
@@ -989,6 +1242,11 @@ public sealed class QuotationToSoService : IQuotationToSoService
             var customerCode = !string.IsNullOrWhiteSpace(qtnInfo.CustomerCode)
                 ? qtnInfo.CustomerCode
                 : fallbackCustomerCode?.Trim();
+
+            if (string.IsNullOrWhiteSpace(customerCode))
+            {
+                customerCode = await TryResolveCustomerCodeAsync(candidateSummary, cancellationToken);
+            }
 
             var siteCode = !string.IsNullOrWhiteSpace(qtnInfo.QuotationSiteCode)
                 ? qtnInfo.QuotationSiteCode
@@ -1019,12 +1277,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 targetQuotation = new OpenQuotationSummary
                 {
                     QuotationId = qtnInfo.QuotationId,
-                    QuotationNumber = !string.IsNullOrWhiteSpace(qtnInfo.QuotationNumber) ? qtnInfo.QuotationNumber : paddedNum,
-                    QtnYear = qtnInfo.QtnYear,
-                    QtnGroup = qtnInfo.QtnGroup,
-                    QtnNum = qtnInfo.QtnNum,
-                    QuotationSiteCode = qtnInfo.QuotationSiteCode,
-                    QuotationSiteId = qtnInfo.QuotationSiteId,
+                    QuotationNumber = candidateDesc,
+                    QtnYear = qtnInfo.QtnYear ?? currentFy,
+                    QtnGroup = qtnInfo.QtnGroup ?? string.Empty,
+                    QtnNum = qtnInfo.QtnNum ?? paddedNum,
+                    QuotationSiteCode = !string.IsNullOrWhiteSpace(qtnInfo.QuotationSiteCode) ? qtnInfo.QuotationSiteCode : "NF1",
+                    QuotationSiteId = qtnInfo.QuotationSiteId > 0 ? qtnInfo.QuotationSiteId : 1,
                     CustomerCode = customerCode,
                     CustomerName = qtnInfo.CustomerName,
                     QuotationDate = qtnInfo.QuotationDate,
@@ -1061,6 +1319,21 @@ public sealed class QuotationToSoService : IQuotationToSoService
         var consolidatedMsg = candidates.Count == 1
             ? candidateNotes.FirstOrDefault() ?? $"Quotation '{trimmedQtnNo}' could not be converted."
             : $"Processed {candidates.Count} candidate quotation(s) for number '{paddedNum}': {string.Join(" | ", candidateNotes)}";
+
+        if (_tracker.ExecutionId is null && candidates.Count > 0)
+        {
+            var first = candidates[0];
+            var fallbackCust = !string.IsNullOrWhiteSpace(first.CustomerCode) ? first.CustomerCode : fallbackCustomerCode?.Trim();
+            var firstDesc = FormatCanonicalQuotationNumber(first.QuotationNumber, first.QtnYear, first.QtnGroup, first.QuotationSiteCode, first.QtnNum) ?? first.QuotationNumber;
+            await _tracker.StartExecutionAsync(new TrackedQuotation(
+                first.QuotationId,
+                firstDesc,
+                first.QuotationSiteId > 0 ? first.QuotationSiteId : 1,
+                fallbackCust,
+                first.QuotationDate.HasValue ? DateOnly.FromDateTime(first.QuotationDate.Value) : null), cancellationToken);
+            await _tracker.EnterStageAsync(QuotationToSoStages.Validation, QuotationToSoTasks.VerifyExistingSalesOrder, cancellationToken);
+            await _tracker.SkipExecutionAsync(consolidatedMsg, cancellationToken);
+        }
 
         return new QuotationConversionItemResult
         {
@@ -1147,7 +1420,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                             continue;
                         }
 
-                        var formattedQNumber = $"{qtnYear}/{qtnGrp}/{locCode}/{qtnNum}";
+                        var formattedQNumber = FormatCanonicalQuotationNumber(null, qtnYear, qtnGrp, locCode, qtnNum);
 
                         var initialInfo = new QuotationLookupInfo(
                             autoId,
@@ -1167,13 +1440,18 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         var header = await TryFetchQuotationHeaderAsync(initialInfo, cancellationToken);
                         if (header is not null)
                         {
+                            var effSite = !string.IsNullOrWhiteSpace(header.SiteCode) ? header.SiteCode : initialInfo.QuotationSiteCode;
+                            var effGrp = !string.IsNullOrWhiteSpace(header.Group) ? header.Group : initialInfo.QtnGroup;
+                            var fullCanonical = FormatCanonicalQuotationNumber(initialInfo.QuotationNumber, initialInfo.QtnYear, effGrp, effSite, initialInfo.QtnNum);
+
                             candidates.Add(initialInfo with
                             {
+                                QuotationNumber = fullCanonical,
                                 CustomerCode = !string.IsNullOrWhiteSpace(header.CustomerCode) ? header.CustomerCode : initialInfo.CustomerCode,
                                 CustomerName = header.CustomerName ?? string.Empty,
-                                QuotationSiteCode = !string.IsNullOrWhiteSpace(header.SiteCode) ? header.SiteCode : initialInfo.QuotationSiteCode,
+                                QuotationSiteCode = effSite,
                                 QuotationSiteId = header.SiteId > 0 ? header.SiteId : initialInfo.QuotationSiteId,
-                                QtnGroup = !string.IsNullOrWhiteSpace(header.Group) ? header.Group : initialInfo.QtnGroup,
+                                QtnGroup = effGrp,
                                 QtnStatus = header.QtnStatus ?? string.Empty,
                                 IsAuthorized = header.IsAuthorized || initialInfo.IsAuthorized,
                                 QuotationDate = header.QuotationDate,
@@ -1262,9 +1540,10 @@ public sealed class QuotationToSoService : IQuotationToSoService
                          || qNumber.EndsWith("-" + rawNum, StringComparison.OrdinalIgnoreCase)
                          || qNumber.EndsWith(paddedNum, StringComparison.OrdinalIgnoreCase)))
                     {
+                        var canonicalQtnNo = FormatCanonicalQuotationNumber(qNumber, qYear ?? currentFy, qGroup, sCode, paddedNum);
                         var info = new QuotationLookupInfo(
                             qId,
-                            qNumber,
+                            canonicalQtnNo,
                             qYear ?? currentFy,
                             qGroup ?? string.Empty,
                             paddedNum,
@@ -1279,13 +1558,18 @@ public sealed class QuotationToSoService : IQuotationToSoService
                         var header = await TryFetchQuotationHeaderAsync(info, cancellationToken);
                         if (header is not null)
                         {
+                            var effSite = !string.IsNullOrWhiteSpace(header.SiteCode) ? header.SiteCode : info.QuotationSiteCode;
+                            var effGrp = !string.IsNullOrWhiteSpace(header.Group) ? header.Group : info.QtnGroup;
+                            var fullCanonical = FormatCanonicalQuotationNumber(info.QuotationNumber, info.QtnYear, effGrp, effSite, info.QtnNum);
+
                             candidates.Add(info with
                             {
+                                QuotationNumber = fullCanonical,
                                 CustomerCode = !string.IsNullOrWhiteSpace(header.CustomerCode) ? header.CustomerCode : info.CustomerCode,
                                 CustomerName = header.CustomerName ?? string.Empty,
-                                QuotationSiteCode = !string.IsNullOrWhiteSpace(header.SiteCode) ? header.SiteCode : info.QuotationSiteCode,
+                                QuotationSiteCode = effSite,
                                 QuotationSiteId = header.SiteId > 0 ? header.SiteId : info.QuotationSiteId,
-                                QtnGroup = !string.IsNullOrWhiteSpace(header.Group) ? header.Group : info.QtnGroup,
+                                QtnGroup = effGrp,
                                 QtnStatus = !string.IsNullOrWhiteSpace(header.QtnStatus) ? header.QtnStatus : status,
                                 IsAuthorized = header.IsAuthorized || info.IsAuthorized,
                                 QuotationDate = header.QuotationDate,
@@ -1533,8 +1817,14 @@ public sealed class QuotationToSoService : IQuotationToSoService
         string soYear,
         string soGroup,
         string soNo,
+        int siteId,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(soNo) || soNo.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         try
         {
             const string listUrl = "api/v1/sales/orderackentry/list";
@@ -1547,12 +1837,13 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 searchValue = soNo,
                 userId = 1,
                 restcoresalestrans = false,
-                locationIds = string.Empty,
+                locationIds = siteId > 0 ? siteId.ToString(CultureInfo.InvariantCulture) : "1",
             };
 
             using var response = await _httpClient.PostAsJsonAsync(listUrl, filter, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                _logger.LogWarning("OAF search for Sales Order {SoNo} returned HTTP {StatusCode}; continuing without existing OAF", soNo, (int)response.StatusCode);
                 return null;
             }
 
@@ -1605,6 +1896,20 @@ public sealed class QuotationToSoService : IQuotationToSoService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(salesOrderNumber);
 
+        if (salesOrderId <= 0 || salesOrderNumber.StartsWith("EXISTING-SO-FOR-QTN-", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation(
+                "Sales Order '{SalesOrderNumber}' (Id: {SalesOrderId}) is a closed quotation placeholder without a concrete Sales Order in ERP. Skipping OAF creation.",
+                salesOrderNumber,
+                salesOrderId);
+
+            return new OafCreationResult
+            {
+                Success = false,
+                ErrorMessage = $"Sales Order '{salesOrderNumber}' has no concrete ERP Sales Order ID; OAF creation skipped.",
+            };
+        }
+
         var (soDocYear, soDocGroup, soSiteCode, soDocNo) = ParseSalesOrderParts(salesOrderNumber, siteCode);
         var effSiteId = siteId > 0 ? siteId : 1;
         var effSiteCode = !string.IsNullOrWhiteSpace(soSiteCode)
@@ -1623,7 +1928,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
         try
         {
             // Step 1: Pre-check if OAF is already created for this Sales Order
-            var existingOaf = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, cancellationToken);
+            var existingOaf = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, effSiteId, cancellationToken);
             if (existingOaf is not null)
             {
                 _logger.LogInformation(
@@ -1741,7 +2046,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
             if (scheduleLines.Count == 0)
             {
-                var existingOafRetry = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, cancellationToken);
+                var existingOafRetry = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, effSiteId, cancellationToken);
                 if (existingOafRetry is not null)
                 {
                     return new OafCreationResult
@@ -1834,7 +2139,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
             if (string.IsNullOrWhiteSpace(oafNumber) || createResponse is null || !createResponse.IsSuccessStatusCode)
             {
-                var verifiedOaf = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, cancellationToken);
+                var verifiedOaf = await FindExistingOafAsync(soDocYear, soDocGroup, soDocNo, effSiteId, cancellationToken);
                 if (verifiedOaf is not null)
                 {
                     oafNumber = verifiedOaf.Value.OafNumber;
@@ -1954,6 +2259,95 @@ public sealed class QuotationToSoService : IQuotationToSoService
         return (currentFy, "OR", fallbackSite ?? "NF1", clean);
     }
 
+    private async Task<string> TryResolveCustomerCodeAsync(
+        OpenQuotationSummary quotation,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(quotation.CustomerCode))
+        {
+            return quotation.CustomerCode.Trim();
+        }
+
+        try
+        {
+            // 1. Direct query via selectQtnFieldsOnSearchCriteria for this quotation
+            const string searchCriteriaUrl = "api/v1/sales/QuotationEntry/selectQtnFieldsOnSearchCriteria";
+            var criteriaModel = new
+            {
+                customerCode = string.Empty,
+                salesPersonCode = string.Empty,
+                siteId = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId.ToString(CultureInfo.InvariantCulture) : "0",
+                qtnYear = !string.IsNullOrWhiteSpace(quotation.QtnYear) ? quotation.QtnYear : GetCurrentFinancialYear(),
+                qtnGrp = quotation.QtnGroup ?? string.Empty,
+                qtnNum = quotation.QtnNum ?? string.Empty,
+                userLocations = "0",
+                criteria = "QTNDETAILS",
+                mode = "SEARCH",
+                companyId = _companyId.ToString(CultureInfo.InvariantCulture),
+                userId = "1",
+            };
+
+            using var criteriaResponse = await _httpClient.PostAsJsonAsync(searchCriteriaUrl, criteriaModel, cancellationToken);
+            if (criteriaResponse.IsSuccessStatusCode)
+            {
+                using var jsonDoc = await JsonDocument.ParseAsync(
+                    await criteriaResponse.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = jsonDoc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem) && dataElem.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in dataElem.EnumerateArray())
+                    {
+                        var cust = GetStringProperty(item, "customerCode", "custCode", "custCD", "xqdCustCd");
+                        if (!string.IsNullOrWhiteSpace(cust))
+                        {
+                            return cust.Trim();
+                        }
+                    }
+                }
+            }
+
+            // 2. Query detailed quotation header
+            var yearParam = !string.IsNullOrWhiteSpace(quotation.QtnYear) ? quotation.QtnYear : "0";
+            var grpParam = !string.IsNullOrWhiteSpace(quotation.QtnGroup) ? quotation.QtnGroup : "0";
+            var numParam = !string.IsNullOrWhiteSpace(quotation.QtnNum) ? quotation.QtnNum : quotation.QuotationNumber;
+            var siteIdParam = quotation.QuotationSiteId > 0 ? quotation.QuotationSiteId : 0;
+            var detailsUrl = $"api/v1/sales/QuotationEntry/getQuotationDetail/{Uri.EscapeDataString(yearParam)}/{Uri.EscapeDataString(grpParam)}/{Uri.EscapeDataString(numParam)}/{siteIdParam}/0/SEARCH/10";
+
+            using var qtnResponse = await _httpClient.PostAsJsonAsync(detailsUrl, new { }, cancellationToken);
+            if (qtnResponse.IsSuccessStatusCode)
+            {
+                using var qtnJson = await JsonDocument.ParseAsync(
+                    await qtnResponse.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var qRoot = qtnJson.RootElement;
+                if (qRoot.TryGetProperty("data", out var qData) && qData.ValueKind == JsonValueKind.Object)
+                {
+                    if (qData.TryGetProperty("quotationDetails", out var qdElem))
+                    {
+                        var firstHdr = qdElem.ValueKind == JsonValueKind.Array ? qdElem.EnumerateArray().FirstOrDefault() : qdElem;
+                        if (firstHdr.ValueKind == JsonValueKind.Object)
+                        {
+                            var headerCust = GetStringProperty(firstHdr, "customerCode", "custCode", "custCD", "billToCustomerCode", "xqdCustCd");
+                            if (!string.IsNullOrWhiteSpace(headerCust))
+                            {
+                                return headerCust.Trim();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to resolve CustomerCode for Quotation {QuotationNumber}", quotation.QuotationNumber);
+        }
+
+        return string.Empty;
+    }
+
     private async Task<(string SoNumber, int SoId)?> VerifyCreatedSalesOrderAsync(
         OpenQuotationSummary quotation,
         string soYear,
@@ -1963,11 +2357,33 @@ public sealed class QuotationToSoService : IQuotationToSoService
         try
         {
             // Give ERP a moment to commit any active transaction
-            await Task.Delay(500, cancellationToken);
+            await Task.Delay(200, cancellationToken);
+
+            // Tier 1: Local Automation Database Check
+            if (quotation.QuotationId > 0)
+            {
+                var localSo = await _tracker.GetExistingSalesOrderNumberAsync(quotation.QuotationId, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(localSo))
+                {
+                    _logger.LogInformation(
+                        "Quotation {QuotationNumber} (Id: {QuotationId}) was already successfully converted to Sales Order {SoNumber} in local tracking history",
+                        quotation.QuotationNumber,
+                        quotation.QuotationId,
+                        localSo);
+
+                    return (localSo, 0);
+                }
+            }
 
             var custCode = quotation.CustomerCode?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(custCode))
+            {
+                custCode = await TryResolveCustomerCodeAsync(quotation, cancellationToken);
+            }
 
-            // 1. Check getCloseQuotationDetailsForSO
+            var isClosedInErp = false;
+
+            // Tier 2: Check getCloseQuotationDetailsForSO
             if (!string.IsNullOrWhiteSpace(custCode))
             {
                 try
@@ -1994,6 +2410,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
                                 if (isClosedMatch)
                                 {
+                                    isClosedInErp = true;
                                     var soNumFromClosed = GetStringProperty(item, "salesOrderNumber", "orderNumber", "orderNo", "soNumber", "ioNumber");
                                     var soIdFromClosed = GetIntProperty(item, "orderId", "orderID", "salesOrderId", "soId");
                                     if (!string.IsNullOrWhiteSpace(soNumFromClosed))
@@ -2018,7 +2435,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 }
             }
 
-            // 2. Query selectOrderFieldsOnSearchCriteria for newly created order that explicitly matches this quotation
+            // Tier 3: Query selectOrderFieldsOnSearchCriteria for newly created order that explicitly matches this quotation
             const string searchUrl = "api/v1/sales/salesorderentry/selectOrderFieldsOnSearchCriteria";
             var searchCriteria = new
             {
@@ -2094,10 +2511,122 @@ public sealed class QuotationToSoService : IQuotationToSoService
                     }
                 }
             }
+
+            // If the quotation was verified as closed in ERP, but order search didn't return an order row
+            // (e.g. order is under another group or user), we still know with certainty that the quotation is closed.
+            // Returning a confirmed record prevents createSalesOrderEntry from creating a duplicate!
+            if (isClosedInErp)
+            {
+                _logger.LogInformation(
+                    "Quotation {QuotationNumber} (Id: {QuotationId}) is closed in ERP getCloseQuotationDetailsForSO; returning verified status to prevent duplicate creation",
+                    quotation.QuotationNumber,
+                    quotation.QuotationId);
+
+                return ($"EXISTING-SO-FOR-QTN-{quotation.QtnNum}", 0);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to verify created Sales Order for Quotation {QuotationId}", quotation.QuotationId);
+        }
+
+        return null;
+    }
+
+    private async Task<JsonArray?> FetchFallbackItemTechnicalSpecsAsync(
+        JsonElement modelArray,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fallbackList = new JsonArray();
+            var lineIndex = 1;
+
+            foreach (var modelItem in modelArray.EnumerateArray())
+            {
+                var itemCode = GetStringProperty(modelItem, "salesItemCode", "itemCode");
+                var modelNo = GetStringProperty(modelItem, "modelNo") ?? string.Empty;
+                var lineNo = GetIntProperty(modelItem, "itemLineNo", "itmModelRefNo");
+                var effectiveLineNo = lineNo > 0 ? lineNo : lineIndex++;
+
+                if (string.IsNullOrWhiteSpace(itemCode))
+                {
+                    continue;
+                }
+
+                _logger.LogDebug(
+                    "Quotation has no technical specifications. Querying Item Master technical specifications for item {ItemCode}",
+                    itemCode);
+
+                var reqBody = new
+                {
+                    modelNo = modelNo == "0" ? string.Empty : modelNo,
+                    itemCode = itemCode,
+                    isAllItems = 0,
+                };
+
+                using var response = await _httpClient.PostAsJsonAsync(
+                    "api/v1/sales/salesItemProductSpare/getSalesItemDetails",
+                    reqBody,
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug(
+                        "getSalesItemDetails returned HTTP {StatusCode} for item {ItemCode}",
+                        (int)response.StatusCode,
+                        itemCode);
+                    continue;
+                }
+
+                using var jsonDoc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = jsonDoc.RootElement;
+                if (!root.TryGetProperty("data", out var dataElem) || dataElem.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (!dataElem.TryGetProperty("technicalspec", out var specArray) || specArray.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var specItem in specArray.EnumerateArray())
+                {
+                    var specObj = new JsonObject
+                    {
+                        ["xtstrantype"] = "OITEM",
+                        ["xtstscode"] = GetStringProperty(specItem, "xtstscode") ?? string.Empty,
+                        ["xtsitemcode"] = itemCode,
+                        ["xtstssubcode"] = GetStringProperty(specItem, "xtstssubcode") ?? string.Empty,
+                        ["xtstssubdesc"] = GetStringProperty(specItem, "xtstssubdesc") ?? string.Empty,
+                        ["xtsvariable"] = GetBoolProperty(specItem, "xtsvariable"),
+                        ["xtsprintseq"] = GetIntProperty(specItem, "xtsprintseq"),
+                        ["termgroupcode"] = GetStringProperty(specItem, "termgroupcode") ?? string.Empty,
+                        ["termgroupdesc"] = GetStringProperty(specItem, "termgroupdesc") ?? string.Empty,
+                        ["checkoptional"] = GetBoolProperty(specItem, "checkoptional"),
+                        ["optional"] = GetStringProperty(specItem, "optional") ?? string.Empty,
+                        ["itmModelRefNo"] = effectiveLineNo,
+                        ["xtscreuserid"] = 1,
+                    };
+                    fallbackList.Add(specObj);
+                }
+            }
+
+            if (fallbackList.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Loaded {Count} fallback technical specification(s) from Item Master for quotation line items",
+                    fallbackList.Count);
+                return fallbackList;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query fallback technical specifications from Item Master");
         }
 
         return null;
@@ -2329,6 +2858,12 @@ public sealed class QuotationToSoService : IQuotationToSoService
             var cCode = GetStringProperty(item, "customerCode", "custCode", "custCD", "xqdCustCd", "customer", "partyCode");
             var cName = GetStringProperty(item, "customerName");
 
+            // Only check for the current finance year; if that matches then convert, else don't convert
+            if (!IsSameFinancialYear(qYear, currentFy))
+            {
+                continue;
+            }
+
             if (!string.IsNullOrWhiteSpace(targetCustomer) && !string.Equals(targetCustomer, "ALL", StringComparison.OrdinalIgnoreCase))
             {
                 if (!string.Equals(cCode, targetCustomer, StringComparison.OrdinalIgnoreCase))
@@ -2355,15 +2890,21 @@ public sealed class QuotationToSoService : IQuotationToSoService
                     }
                 }
 
+                var effSiteCode = !string.IsNullOrWhiteSpace(sCode)
+                    ? sCode
+                    : (sId == 1 ? "NF1" : (targetSite ?? "NF1"));
+                var effSiteId = sId > 0 ? sId : 1;
+                var canonicalQuotationNo = FormatCanonicalQuotationNumber(qNumber, yr, grp, effSiteCode, num);
+
                 results.Add(new OpenQuotationSummary
                 {
                     QuotationId = qId,
-                    QuotationNumber = qNumber,
+                    QuotationNumber = canonicalQuotationNo,
                     QtnYear = yr,
                     QtnGroup = grp,
                     QtnNum = num,
-                    QuotationSiteCode = sCode ?? string.Empty,
-                    QuotationSiteId = sId > 0 ? sId : 1,
+                    QuotationSiteCode = effSiteCode,
+                    QuotationSiteId = effSiteId,
                     CustomerCode = cCode ?? string.Empty,
                     CustomerName = cName,
                     QuotationDate = qDate,
@@ -2429,16 +2970,35 @@ public sealed class QuotationToSoService : IQuotationToSoService
 
         var cleanTarget = targetSite.Trim();
 
-        if (siteId > 0 && int.TryParse(cleanTarget, NumberStyles.Integer, CultureInfo.InvariantCulture, out var targetId) && siteId == targetId)
+        // In ERP, Site ID 1 is site "NF1" (the default site in the ERP dropdown).
+        // ERP search endpoints often return siteID: 1 with locationCode: "".
+        var effectiveSiteCode = !string.IsNullOrWhiteSpace(siteCode)
+            ? siteCode.Trim()
+            : (siteId == 1 ? "NF1" : string.Empty);
+        var effectiveSiteId = siteId > 0
+            ? siteId
+            : (string.Equals(effectiveSiteCode, "NF1", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
+
+        // 1. Direct integer siteId match (e.g. targetSite = "1" and siteId = 1 or siteCode = "NF1")
+        if (int.TryParse(cleanTarget, NumberStyles.Integer, CultureInfo.InvariantCulture, out var targetId) && targetId > 0)
         {
-            return true;
+            if (effectiveSiteId == targetId || (targetId == 1 && string.Equals(effectiveSiteCode, "NF1", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(siteCode) && string.Equals(siteCode.Trim(), cleanTarget, StringComparison.OrdinalIgnoreCase))
+        // 2. Direct string match on siteCode (e.g. targetSite = "NF1" and siteCode = "NF1" or siteId = 1)
+        if (!string.IsNullOrWhiteSpace(effectiveSiteCode))
         {
-            return true;
+            if (string.Equals(effectiveSiteCode, cleanTarget, StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(cleanTarget, "NF1", StringComparison.OrdinalIgnoreCase) && effectiveSiteId == 1))
+            {
+                return true;
+            }
         }
 
+        // 3. Fallback: Check if quotationNumber contains the site code in its segments
         if (!string.IsNullOrWhiteSpace(quotationNumber))
         {
             var parts = quotationNumber.Split(['/', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -2449,6 +3009,51 @@ public sealed class QuotationToSoService : IQuotationToSoService
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Formats a quotation number into canonical database representation:
+    /// {Year}/{Group}/{SiteCode}/{Number} (e.g. "26-27/TF/NF1/000051").
+    /// </summary>
+    public static string FormatCanonicalQuotationNumber(
+        string? rawNumber,
+        string? year,
+        string? group,
+        string? siteCode,
+        string? num)
+    {
+        // 1. If rawNumber already has a complete 4-part structure "26-27/TF/NF1/000051"
+        if (!string.IsNullOrWhiteSpace(rawNumber))
+        {
+            var rawParts = rawNumber.Trim().Split('/', StringSplitOptions.TrimEntries);
+            if (rawParts.Length == 4)
+            {
+                return rawNumber.Trim();
+            }
+            if (rawParts.Length == 3 && !string.IsNullOrWhiteSpace(siteCode))
+            {
+                // Format: Year/Group/Number -> Year/Group/SiteCode/Number
+                return $"{rawParts[0]}/{rawParts[1]}/{siteCode.Trim()}/{rawParts[2]}";
+            }
+        }
+
+        // 2. Build from constituent components if available
+        var effYear = !string.IsNullOrWhiteSpace(year) ? year.Trim() : string.Empty;
+        var effGroup = !string.IsNullOrWhiteSpace(group) ? group.Trim() : string.Empty;
+        var effSite = !string.IsNullOrWhiteSpace(siteCode) ? siteCode.Trim() : string.Empty;
+        var effNum = !string.IsNullOrWhiteSpace(num) ? num.Trim() : (!string.IsNullOrWhiteSpace(rawNumber) ? rawNumber.Trim() : string.Empty);
+
+        if (!string.IsNullOrWhiteSpace(effYear) && !string.IsNullOrWhiteSpace(effGroup) && !string.IsNullOrWhiteSpace(effSite) && !string.IsNullOrWhiteSpace(effNum))
+        {
+            return $"{effYear}/{effGroup}/{effSite}/{effNum}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(effYear) && !string.IsNullOrWhiteSpace(effGroup) && !string.IsNullOrWhiteSpace(effNum))
+        {
+            return $"{effYear}/{effGroup}/{effNum}";
+        }
+
+        return !string.IsNullOrWhiteSpace(rawNumber) ? rawNumber.Trim() : effNum;
     }
 
     private static (string Year, string Group, string Num) ParseQuotationParts(
@@ -2481,7 +3086,7 @@ public sealed class QuotationToSoService : IQuotationToSoService
     private static OpenQuotationSummary? ParseOpenQuotationSummaryItem(JsonElement item, string defaultCustomer, string defaultSite)
     {
         var qtnId = GetIntProperty(item, "quotationID", "quotationId", "qtnID");
-        var qtnNumFormatted = GetStringProperty(item, "qtnNumber", "quotationNumber", "qtn Number");
+        var qtnNumFormatted = GetStringProperty(item, "qtnNumber", "qtn Number");
         var qtnYear = GetStringProperty(item, "quotationYear", "qtnYear");
         var qtnGroup = GetStringProperty(item, "quotationGroup", "qtnGroup");
         var qtnNum = GetStringProperty(item, "quotationNumber", "qtnNum");
@@ -2508,15 +3113,17 @@ public sealed class QuotationToSoService : IQuotationToSoService
             }
         }
 
-        if (qtnId > 0 && !string.IsNullOrWhiteSpace(qtnNumFormatted))
+        var canonicalQuotationNumber = FormatCanonicalQuotationNumber(qtnNumFormatted, qtnYear, qtnGroup, qtnSiteCode, qtnNum);
+
+        if (qtnId > 0 && !string.IsNullOrWhiteSpace(canonicalQuotationNumber))
         {
             return new OpenQuotationSummary
             {
                 QuotationId = qtnId,
-                QuotationNumber = qtnNumFormatted,
+                QuotationNumber = canonicalQuotationNumber,
                 QtnYear = qtnYear ?? string.Empty,
                 QtnGroup = qtnGroup ?? string.Empty,
-                QtnNum = qtnNum ?? string.Empty,
+                QtnNum = !string.IsNullOrWhiteSpace(qtnNum) ? qtnNum : canonicalQuotationNumber,
                 QuotationSiteCode = qtnSiteCode,
                 QuotationSiteId = qtnSiteId > 0 ? qtnSiteId : 1,
                 CustomerCode = custCode,

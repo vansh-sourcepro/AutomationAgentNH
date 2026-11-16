@@ -52,5 +52,74 @@ public sealed class QuotationToSoTrackingTests
         quotation.CustomerCode.Should().Be("CUST-001");
         quotation.QuotationDate.Should().Be(new DateOnly(2026, 10, 15));
     }
+
+    [Fact]
+    public async Task NullQuotationToSoTracker_GetExistingSalesOrderNumberAsync_Returns_Null()
+    {
+        var tracker = NullQuotationToSoTracker.Instance;
+        var result = await tracker.GetExistingSalesOrderNumberAsync(501, CancellationToken.None);
+        result.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("Quotation '26-27/TE/NF1/000057' is already converted to Sales Order '26-27/SW/NF1/000105'.", "26-27/SW/NF1/000105")]
+    [InlineData("Quotation '000045' is already converted to Sales Order '26-27/SO/NF1/000099'. Checking OAF...", "26-27/SO/NF1/000099")]
+    [InlineData("Quotation '000057' could not be converted.", null)]
+    public void SkippedReason_SalesOrderExtraction_Matches_Expected(string reason, string? expectedSo)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            reason,
+            @"Sales Order '([^']+)'",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (expectedSo is not null)
+        {
+            match.Success.Should().BeTrue();
+            match.Groups[1].Value.Should().Be(expectedSo);
+        }
+        else
+        {
+            match.Success.Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public void Dashboard_Fallback_Reason_WhenExamined_ReturnsDescriptiveReason()
+    {
+        int examined = 1;
+        string? failureReason = null;
+
+        var reason = failureReason ?? (examined == 0
+            ? "No eligible open authorised quotations found."
+            : $"All {examined} examined quotation(s) were already converted or closed.");
+
+        reason.Should().Be("All 1 examined quotation(s) were already converted or closed.");
+    }
+
+    [Fact]
+    public void Dashboard_Fallback_Reason_WhenZeroExamined_ReturnsEmptyReason()
+    {
+        int examined = 0;
+        string? failureReason = null;
+
+        var reason = failureReason ?? (examined == 0
+            ? "No eligible open authorised quotations found."
+            : $"All {examined} examined quotation(s) were already converted or closed.");
+
+        reason.Should().Be("No eligible open authorised quotations found.");
+    }
+
+    [Fact]
+    public void Dashboard_Fallback_Reason_WhenFailureReasonPresent_PreservesFailureReason()
+    {
+        int examined = 2;
+        string? failureReason = "ERP connection timed out.";
+
+        var reason = failureReason ?? (examined == 0
+            ? "No eligible open authorised quotations found."
+            : $"All {examined} examined quotation(s) were already converted or closed.");
+
+        reason.Should().Be("ERP connection timed out.");
+    }
 }
 

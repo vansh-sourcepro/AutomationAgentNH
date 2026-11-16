@@ -123,4 +123,346 @@ public sealed class QuotationToSoPayloadBuilderTests
         Assert.Equal("NH1", payload["companyCode"]?.GetValue<string>());
         Assert.Equal(1, payload["companyId"]?.GetValue<int>());
     }
+
+    [Fact]
+    public void BuildSavePayload_DefaultsToNf1AndResolvesCustomerFromHeader_WhenSummaryCustomerAndSiteAreEmpty()
+    {
+        // Arrange
+        var qtnJson = """
+        {
+            "quotationDetails": [
+                {
+                    "customerCode": "A001",
+                    "customerName": "ABC LIMITED",
+                    "siteCode": "NF1",
+                    "siteId": 1,
+                    "currencyCode": "INR"
+                }
+            ],
+            "modelDetails": [
+                {
+                    "itemLineNo": 1,
+                    "salesItemCode": "#TYRE18",
+                    "qtyIUOM": 34.0,
+                    "basicPriceIUOM": 345.00
+                }
+            ]
+        }
+        """;
+
+        using var doc = JsonDocument.Parse(qtnJson);
+
+        var summary = new OpenQuotationSummary
+        {
+            QuotationId = 167,
+            QuotationNumber = "000041",
+            QtnYear = "26-27",
+            QtnGroup = "TE",
+            QtnNum = "000041",
+            QuotationSiteCode = "",
+            QuotationSiteId = 1,
+            CustomerCode = "",
+            CustomerName = null,
+        };
+
+        var orderDate = new DateTime(2026, 11, 13);
+
+        // Act
+        var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
+            doc.RootElement,
+            summary,
+            companyId: 1,
+            companyCode: "1",
+            domesticCurrency: "INR",
+            orderDate: orderDate);
+
+        // Assert
+        Assert.NotNull(payload);
+        var soDetails = payload["salesOrderDetails"]?.AsObject();
+        Assert.NotNull(soDetails);
+
+        Assert.Equal("A001", soDetails["customerCode"]?.GetValue<string>());
+        Assert.Equal("ABC LIMITED", soDetails["customerName"]?.GetValue<string>());
+        Assert.Equal("NF1", soDetails["ioSiteCode"]?.GetValue<string>());
+        Assert.Equal(1, soDetails["ioSiteId"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public void BuildSavePayload_MapsTechnicalSpecifications_WhenPresentInQuotationData()
+    {
+        // Arrange
+        var qtnJson = """
+        {
+            "quotationDetails": [
+                {
+                    "customerCode": "C002",
+                    "customerName": "Bajaj Auto",
+                    "siteCode": "AHM",
+                    "siteId": 2,
+                    "currencyCode": "INR"
+                }
+            ],
+            "modelDetails": [
+                {
+                    "itemLineNo": 1,
+                    "salesItemCode": "#BAJAJDOMINAR400",
+                    "qtyIUOM": 1.0,
+                    "basicPriceIUOM": 250000.00
+                }
+            ],
+            "technicalspec": [
+                {
+                    "xtstrantype": "QITEM",
+                    "xtstscode": "COLOR",
+                    "xtsitemcode": "#BAJAJDOMINAR400",
+                    "xtstssubcode": "BLK",
+                    "xtstssubdesc": "Midnight Black",
+                    "xtsvariable": false,
+                    "xtsprintseq": 1,
+                    "termgroupcode": "SPEC",
+                    "termgroupdesc": "Specifications",
+                    "checkoptional": false,
+                    "optional": "",
+                    "itmModelRefNo": 1
+                }
+            ]
+        }
+        """;
+
+        using var doc = JsonDocument.Parse(qtnJson);
+
+        var summary = new OpenQuotationSummary
+        {
+            QuotationId = 500,
+            QuotationNumber = "000045",
+            QtnYear = "26-27",
+            QtnGroup = "TE",
+            QtnNum = "000045",
+            QuotationSiteCode = "AHM",
+            QuotationSiteId = 2,
+            CustomerCode = "C002",
+            CustomerName = "Bajaj Auto",
+        };
+
+        // Act
+        var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
+            doc.RootElement,
+            summary,
+            companyId: 1,
+            companyCode: "1",
+            domesticCurrency: "INR",
+            orderDate: new DateTime(2026, 11, 14));
+
+        // Assert
+        Assert.NotNull(payload);
+        Assert.True(payload["msctechspecifications"]?.GetValue<bool>());
+
+        var specs = payload["technicalspec"]?.AsArray();
+        Assert.NotNull(specs);
+        Assert.Single(specs);
+
+        var firstSpec = specs[0]?.AsObject();
+        Assert.NotNull(firstSpec);
+        Assert.Equal("OITEM", firstSpec["xtstrantype"]?.GetValue<string>());
+        Assert.Equal("#BAJAJDOMINAR400", firstSpec["xtsitemcode"]?.GetValue<string>());
+        Assert.Equal("COLOR", firstSpec["xtstscode"]?.GetValue<string>());
+        Assert.Equal("BLK", firstSpec["xtstssubcode"]?.GetValue<string>());
+        Assert.Equal("Midnight Black", firstSpec["xtstssubdesc"]?.GetValue<string>());
+        Assert.Equal(1, firstSpec["itmModelRefNo"]?.GetValue<int>());
+        Assert.Equal(1, firstSpec["xtscreuserid"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public void BuildSavePayload_UsesExplicitTechnicalSpecs_WhenProvided()
+    {
+        // Arrange
+        var qtnJson = """
+        {
+            "quotationDetails": [
+                {
+                    "customerCode": "C003",
+                    "customerName": "Test Corp",
+                    "siteCode": "NF1",
+                    "siteId": 1
+                }
+            ],
+            "modelDetails": [
+                {
+                    "itemLineNo": 1,
+                    "salesItemCode": "#BAJAJDOMINAR400"
+                }
+            ]
+        }
+        """;
+
+        using var doc = JsonDocument.Parse(qtnJson);
+
+        var summary = new OpenQuotationSummary
+        {
+            QuotationId = 501,
+            QuotationNumber = "000046",
+            QtnYear = "26-27",
+            QtnGroup = "TE",
+            QtnNum = "000046",
+            QuotationSiteCode = "NF1",
+            QuotationSiteId = 1,
+            CustomerCode = "C003",
+        };
+
+        var fallbackSpecs = new JsonArray
+        {
+            new JsonObject
+            {
+                ["xtstrantype"] = "SITEM",
+                ["xtstscode"] = "ENGINE",
+                ["xtsitemcode"] = "#BAJAJDOMINAR400",
+                ["xtstssubcode"] = "400CC",
+                ["xtstssubdesc"] = "373cc DOHC Liquid Cooled",
+                ["itmModelRefNo"] = 1,
+            }
+        };
+
+        // Act
+        var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
+            doc.RootElement,
+            summary,
+            companyId: 1,
+            companyCode: "1",
+            domesticCurrency: "INR",
+            orderDate: new DateTime(2026, 11, 14),
+            explicitTechnicalSpecs: fallbackSpecs);
+
+        // Assert
+        Assert.NotNull(payload);
+        Assert.True(payload["msctechspecifications"]?.GetValue<bool>());
+
+        var specs = payload["technicalspec"]?.AsArray();
+        Assert.NotNull(specs);
+        Assert.Single(specs);
+
+        var firstSpec = specs[0]?.AsObject();
+        Assert.NotNull(firstSpec);
+        Assert.Equal("OITEM", firstSpec["xtstrantype"]?.GetValue<string>());
+        Assert.Equal("ENGINE", firstSpec["xtstscode"]?.GetValue<string>());
+        Assert.Equal("#BAJAJDOMINAR400", firstSpec["xtsitemcode"]?.GetValue<string>());
+        Assert.Equal(1, firstSpec["xtscreuserid"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public void BuildSavePayload_SetsMsctechspecificationsFalse_WhenNoSpecs()
+    {
+        // Arrange
+        var qtnJson = """
+        {
+            "quotationDetails": [
+                {
+                    "customerCode": "C004",
+                    "siteCode": "NF1",
+                    "siteId": 1
+                }
+            ],
+            "modelDetails": [
+                {
+                    "itemLineNo": 1,
+                    "salesItemCode": "STANDARDITEM"
+                }
+            ]
+        }
+        """;
+
+        using var doc = JsonDocument.Parse(qtnJson);
+
+        var summary = new OpenQuotationSummary
+        {
+            QuotationId = 502,
+            QuotationNumber = "000047",
+            QtnYear = "26-27",
+            QtnGroup = "TE",
+            QtnNum = "000047",
+            QuotationSiteCode = "NF1",
+            QuotationSiteId = 1,
+            CustomerCode = "C004",
+        };
+
+        // Act
+        var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
+            doc.RootElement,
+            summary,
+            companyId: 1,
+            companyCode: "1",
+            domesticCurrency: "INR",
+            orderDate: new DateTime(2026, 11, 14));
+
+        // Assert
+        Assert.NotNull(payload);
+        Assert.False(payload["msctechspecifications"]?.GetValue<bool>());
+        var specs = payload["technicalspec"]?.AsArray();
+        Assert.NotNull(specs);
+        Assert.Empty(specs);
+    }
+
+    [Fact]
+    public void FormatCanonicalQuotationNumber_Returns4PartCanonical_WhenAlreadyFormatted()
+    {
+        // Arrange
+        const string input = "26-27/TF/NF1/000051";
+
+        // Act
+        var result = QuotationToSoService.FormatCanonicalQuotationNumber(input, "26-27", "TF", "NF1", "000051");
+
+        // Assert
+        Assert.Equal("26-27/TF/NF1/000051", result);
+    }
+
+    [Fact]
+    public void FormatCanonicalQuotationNumber_Assembles4PartCanonical_FromConstituentParts()
+    {
+        // Arrange: Short number "000051" with separate metadata
+        const string rawNumber = "000051";
+
+        // Act
+        var result = QuotationToSoService.FormatCanonicalQuotationNumber(rawNumber, "26-27", "TF", "NF1", "000051");
+
+        // Assert
+        Assert.Equal("26-27/TF/NF1/000051", result);
+    }
+
+    [Fact]
+    public void FormatCanonicalQuotationNumber_Upgrades3PartQuotation_WhenSiteCodeProvided()
+    {
+        // Arrange: 3-part quotation "26-27/TF/000051"
+        const string raw3Part = "26-27/TF/000051";
+
+        // Act
+        var result = QuotationToSoService.FormatCanonicalQuotationNumber(raw3Part, "26-27", "TF", "NF1", "000051");
+
+        // Assert
+        Assert.Equal("26-27/TF/NF1/000051", result);
+    }
+
+    [Fact]
+    public void FormatCanonicalQuotationNumber_FormatsQuotation000045_Correctly()
+    {
+        // Arrange: Quotation 000045 from recent sweep error
+        const string rawNumber = "000045";
+
+        // Act
+        var result = QuotationToSoService.FormatCanonicalQuotationNumber(rawNumber, "26-27", "TF", "NF1", "000045");
+
+        // Assert
+        Assert.Equal("26-27/TF/NF1/000045", result);
+    }
+
+    [Fact]
+    public void FormatCanonicalQuotationNumber_FallsBackGracefully_WhenSiteCodeMissing()
+    {
+        // Arrange: Group & year present, but site code empty
+        const string rawNumber = "000052";
+
+        // Act
+        var result = QuotationToSoService.FormatCanonicalQuotationNumber(rawNumber, "26-27", "TF", null, "000052");
+
+        // Assert
+        Assert.Equal("26-27/TF/000052", result);
+    }
 }

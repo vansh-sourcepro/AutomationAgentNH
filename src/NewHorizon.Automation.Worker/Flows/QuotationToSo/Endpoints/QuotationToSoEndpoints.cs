@@ -206,6 +206,9 @@ public static class QuotationToSoEndpoints
             siteCode = config.SiteCode;
         }
 
+        // Take site as default from dropdown: if null or empty, default to "NF1"
+        siteCode = !string.IsNullOrWhiteSpace(siteCode) ? siteCode : "NF1";
+
         // Determine target quotation numbers (supports "1, 2, 3" in request.QuotationNumbers, request.QuotationNumber, or config.QuotationNumbers)
         string? quotationNumbersString;
         if (!string.IsNullOrWhiteSpace(request.QuotationNumbers))
@@ -260,11 +263,13 @@ public static class QuotationToSoEndpoints
                     autoCreateOaf);
 
                 var status = itemResult.Success ? "Success" : "Failed";
-                var message = itemResult.Success
-                    ? (!string.IsNullOrWhiteSpace(itemResult.OafNumber)
-                        ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}' and OAF '{itemResult.OafNumber}'."
-                        : $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'.")
-                    : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.";
+                var message = !string.IsNullOrWhiteSpace(itemResult.ErrorMessage) && itemResult.ErrorMessage.Contains("already converted", StringComparison.OrdinalIgnoreCase)
+                    ? itemResult.ErrorMessage
+                    : (itemResult.Success
+                        ? (!string.IsNullOrWhiteSpace(itemResult.OafNumber)
+                            ? $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}' and OAF '{itemResult.OafNumber}'."
+                            : $"Quotation '{itemResult.QuotationNumber}' successfully converted to Sales Order '{itemResult.SalesOrderNumber}'.")
+                        : itemResult.ErrorMessage ?? $"Failed to convert quotation '{qtnNo}'.");
 
                 config.RecordRunCompleted(status, message, clock.UtcNow);
                 await SaveConfigSafeAsync(configRepo, config, logger, cancellationToken);
@@ -348,8 +353,8 @@ public static class QuotationToSoEndpoints
                 triggerSource);
 
             var sweepResult = await service.ConvertAllEligibleQuotationsAsync(
-                customerCode,
-                siteCode,
+                null,
+                siteCode ?? "NF1",
                 cancellationToken,
                 autoCreateOaf);
 

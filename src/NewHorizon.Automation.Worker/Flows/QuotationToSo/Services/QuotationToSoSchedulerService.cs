@@ -108,8 +108,8 @@ public sealed class QuotationToSoSchedulerService : BackgroundService
 
         var body = new Dictionary<string, object?>
         {
-            ["customerCode"] = config.CustomerCode,
-            ["siteCode"] = config.SiteCode,
+            ["customerCode"] = null,
+            ["siteCode"] = config.SiteCode ?? "NF1",
         };
 
         if (!string.IsNullOrWhiteSpace(config.QuotationNumbers))
