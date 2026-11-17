@@ -316,6 +316,19 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 $"Delivery Challan {effectiveDcId} has no items with valid Delivery Challan ID and pending invoice quantity > 0. Skipping invoice creation to prevent creating an empty invoice.");
         }
 
+        // Ensure headerRateStructureCode is always populated (required by ERP SalesInvoiceValidator and XINVHDR)
+        if (string.IsNullOrWhiteSpace(headerRateStructureCode))
+        {
+            headerRateStructureCode = validItems.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.RateStructureCode))?.RateStructureCode
+                ?? taxLines.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.RateStructureCode))?.RateStructureCode
+                ?? matchedDc.DcRateStructureCode
+                ?? (!string.IsNullOrWhiteSpace(_options.DefaultRateStructureCode) ? _options.DefaultRateStructureCode : "GST18");
+
+            _logger.LogInformation(
+                "DcToInvoice: Resolved header Rate Structure Code from item/tax lines (XIHRTSCD): {RateStructureCode}",
+                headerRateStructureCode);
+        }
+
         // ── Step 9: Resolve Dispatch-From Address ──
         var dispatchAddress = await FetchDispatchFromAddressAsync(
             effectiveDcId, effectiveSiteId, cancellationToken);
@@ -436,14 +449,11 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         if (string.IsNullOrWhiteSpace(dc.CurrencyCode))
             errors.Add(new InvoiceValidationError("Currency", "Currency code is required."));
 
-        // 2. Rate Structure Validation according to MSCENABLELINELEVELRTSTR
-        if (!isLineLevelRateStructure)
+        // 2. Rate Structure Validation: ERP XIHRTSCD is ALWAYS mandatory on invoice header
+        if (string.IsNullOrWhiteSpace(headerRateStructureCode))
         {
-            if (string.IsNullOrWhiteSpace(headerRateStructureCode))
-            {
-                errors.Add(new InvoiceValidationError("HeaderRateStructure",
-                    $"Delivery Challan {dc.DcNo} (Id: {dc.DcId}) requires a valid Header-level Rate Structure (MSCENABLELINELEVELRTSTR=0)."));
-            }
+            errors.Add(new InvoiceValidationError("HeaderRateStructure",
+                $"Delivery Challan {dc.DcNo} (Id: {dc.DcId}) requires a valid Header-level Rate Structure (XIHRTSCD)."));
         }
 
         // 3. Mandatory Items Validation
@@ -533,6 +543,12 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         var todayIso = DateTime.Today.ToString("yyyy-MM-ddT00:00:00.000Z", CultureInfo.InvariantCulture);
         var nowIso = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.000Z", CultureInfo.InvariantCulture);
 
+        var effectiveHeaderRate = !string.IsNullOrWhiteSpace(headerRateStructureCode)
+            ? headerRateStructureCode
+            : (items.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.RateStructureCode))?.RateStructureCode
+                ?? taxLines.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.RateStructureCode))?.RateStructureCode
+                ?? (!string.IsNullOrWhiteSpace(_options.DefaultRateStructureCode) ? _options.DefaultRateStructureCode : "GST18"));
+
         // Header node
         var dtInvHdr = new JsonArray
         {
@@ -548,7 +564,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 ["XIHLOC"] = siteId,
                 ["XIHFRLOC"] = siteId,
                 ["XIHCUSTCD"] = dc.BillTo,
-                ["XIHRTSCD"] = headerRateStructureCode,
+                ["XIHRTSCD"] = effectiveHeaderRate,
                 ["XIHCURCD"] = dc.CurrencyCode,
                 ["XIHEXRT"] = dc.ExchangeRate > 0 ? dc.ExchangeRate : 1.0000m,
                 ["XIHAMT"] = totalAmount,
