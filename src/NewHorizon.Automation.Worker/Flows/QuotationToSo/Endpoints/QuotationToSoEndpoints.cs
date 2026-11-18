@@ -443,20 +443,26 @@ public static class QuotationToSoEndpoints
     }
 
     private static async Task<IResult> GetOpenQuotationsAsync(
-        string customerCode,
-        string siteCode,
         IQuotationToSoService service,
-        CancellationToken cancellationToken)
+        IQuotationSoAutomationConfigRepository configRepo,
+        CancellationToken cancellationToken,
+        string? customerCode = null,
+        string? siteCode = null)
     {
-        if (string.IsNullOrWhiteSpace(customerCode) || string.IsNullOrWhiteSpace(siteCode))
+        var cust = customerCode?.Trim();
+        var site = siteCode?.Trim();
+
+        if (string.IsNullOrWhiteSpace(cust))
         {
-            return Results.Problem(
-                title: "Missing parameters.",
-                detail: "Query parameters 'customerCode' and 'siteCode' are required.",
-                statusCode: StatusCodes.Status400BadRequest);
+            var config = await configRepo.GetAsync(cancellationToken);
+            cust = config.CustomerCode?.Trim();
+            if (string.IsNullOrWhiteSpace(site))
+            {
+                site = config.SiteCode?.Trim();
+            }
         }
 
-        var list = await service.GetOpenAuthorisedQuotationsAsync(customerCode, siteCode, cancellationToken);
+        var list = await service.GetOpenAuthorisedQuotationsAsync(cust, site ?? "NF1", cancellationToken);
         return Results.Ok(new { success = true, count = list.Count, data = list });
     }
 
@@ -700,6 +706,17 @@ public static class QuotationToSoEndpoints
         {
             parsed = result;
             return true;
+        }
+
+        if (typeof(TEnum) == typeof(JobStatus))
+        {
+            var trimmed = value.Trim();
+            if (string.Equals(trimmed, "Success", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "PartialSuccess", StringComparison.OrdinalIgnoreCase))
+            {
+                parsed = (TEnum)(object)JobStatus.Completed;
+                return true;
+            }
         }
 
         error = Results.Problem(

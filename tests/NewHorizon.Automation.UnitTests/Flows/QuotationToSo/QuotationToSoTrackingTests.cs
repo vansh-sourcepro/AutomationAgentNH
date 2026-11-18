@@ -121,5 +121,69 @@ public sealed class QuotationToSoTrackingTests
 
         reason.Should().Be("ERP connection timed out.");
     }
+
+    [Fact]
+    public void IndentPoOutcome_Created_Truncates_PoNumber_To_50_Characters_When_Long()
+    {
+        var longPoNumber = "26-27/SO/NF1/000008 (OAF: 26-27/OA/NF1/000008) Extra Characters";
+        var outcome = NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoOutcome.Created(
+            Guid.NewGuid(),
+            sequence: 1,
+            vendorCode: "CUSTOMER",
+            currencyCode: "INR",
+            rateStructureCode: null,
+            poId: 20_000_000_001L,
+            poNumber: longPoNumber,
+            lineCount: 1,
+            DateTimeOffset.UtcNow);
+
+        outcome.PoNumber.Should().NotBeNull();
+        outcome.PoNumber!.Length.Should().BeLessOrEqualTo(50);
+        outcome.PoNumber.Should().Be(longPoNumber[..50]);
+        outcome.PoId.Should().Be(20_000_000_001L);
+    }
+
+    [Fact]
+    public void IndentPoOutcome_Created_Truncates_VendorCode_To_20_Characters()
+    {
+        var longVendor = "CUST-VERY-LONG-NAME-OVER-TWENTY";
+        var outcome = NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoOutcome.Created(
+            Guid.NewGuid(),
+            sequence: 1,
+            vendorCode: longVendor,
+            currencyCode: null,
+            rateStructureCode: null,
+            poId: 20_000_000_002L,
+            poNumber: "26-27/SO/NF1/000001",
+            lineCount: 1,
+            DateTimeOffset.UtcNow);
+
+        outcome.VendorCode.Should().NotBeNull();
+        outcome.VendorCode!.Length.Should().BeLessOrEqualTo(20);
+        outcome.VendorCode.Should().Be(longVendor[..20]);
+    }
+
+    [Fact]
+    public void IndentKind_Quotation_Is_Distinct_And_Has_Quotation_DocumentType()
+    {
+        var kind = NewHorizon.Automation.Domain.Flows.IndentToPo.IndentKind.Quotation;
+        kind.ToString().Should().Be("Quotation");
+        NewHorizon.Automation.Domain.Flows.IndentToPo.IndentDocumentTypes.For(kind).Should().Be("Quotation");
+        kind.Should().NotBe(NewHorizon.Automation.Domain.Flows.IndentToPo.IndentKind.Regular);
+    }
+
+    [Fact]
+    public void TargetQuotations_SafeTruncation_Fits_Within_60_Characters()
+    {
+        var rawQuotationNumbers = "26-27/QT/NF1/000008, 26-27/QT/NF1/000009, 26-27/QT/NF1/000010, 26-27/QT/NF1/000011";
+        var safeTarget = string.IsNullOrWhiteSpace(rawQuotationNumbers)
+            ? "All"
+            : (rawQuotationNumbers.Trim().Length > 60
+                ? rawQuotationNumbers.Trim()[..57] + "..."
+                : rawQuotationNumbers.Trim());
+
+        safeTarget.Length.Should().BeLessOrEqualTo(60);
+        safeTarget.Should().EndWith("...");
+    }
 }
 

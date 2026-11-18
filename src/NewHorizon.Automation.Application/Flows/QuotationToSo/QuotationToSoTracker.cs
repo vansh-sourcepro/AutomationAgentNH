@@ -58,14 +58,28 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
             return;
         }
 
+        var safeTarget = string.IsNullOrWhiteSpace(quotationNumbers)
+            ? "All"
+            : (quotationNumbers.Trim().Length > 60
+                ? quotationNumbers.Trim()[..57] + "..."
+                : quotationNumbers.Trim());
+
+        var safeTriggeredBy = string.IsNullOrWhiteSpace(triggeredBy)
+            ? null
+            : (triggeredBy.Trim().Length > 100 ? triggeredBy.Trim()[..100] : triggeredBy.Trim());
+
+        var safeTriggerRef = string.IsNullOrWhiteSpace(triggerReference)
+            ? null
+            : (triggerReference.Trim().Length > 200 ? triggerReference.Trim()[..200] : triggerReference.Trim());
+
         _run = AutomationRun.Start(
             WorkflowNames.QuotationToSalesOrder,
             triggerSource,
             AutomationMode.Full,
-            string.IsNullOrWhiteSpace(quotationNumbers) ? "All" : quotationNumbers,
+            safeTarget,
             _clock.UtcNow,
-            triggeredBy,
-            triggerReference);
+            safeTriggeredBy,
+            safeTriggerRef);
 
         await _tracking.AddRunAsync(_run, cancellationToken);
 
@@ -91,19 +105,23 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
 
         _currentQuotation = quotation;
 
-        // Reuse or open conversion case in IndentPoConversions
-        var conversion = await _tracking.FindConversionAsync(quotation.QuotationId, IndentKind.Regular, cancellationToken);
+        var safeQuotationNumber = quotation.QuotationNumber.Trim().Length > 50
+            ? quotation.QuotationNumber.Trim()[..50]
+            : quotation.QuotationNumber.Trim();
+
+        // Reuse or open conversion case in IndentPoConversions under IndentKind.Quotation
+        var conversion = await _tracking.FindConversionAsync(quotation.QuotationId, IndentKind.Quotation, cancellationToken);
         if (conversion is not null)
         {
-            conversion.Refresh(quotation.QuotationNumber, quotation.SiteId, quotation.QuotationDate);
+            conversion.Refresh(safeQuotationNumber, quotation.SiteId, quotation.QuotationDate);
             await _tracking.UpdateConversionAsync(conversion, cancellationToken);
         }
         else
         {
             conversion = IndentPoConversion.Open(
                 quotation.QuotationId,
-                IndentKind.Regular,
-                quotation.QuotationNumber,
+                IndentKind.Quotation,
+                safeQuotationNumber,
                 quotation.SiteId,
                 _clock.UtcNow,
                 quotation.QuotationDate);
@@ -204,18 +222,53 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
         _execution.Complete(now);
         await _jobs.SaveAsync(_execution, cancellationToken);
 
+        var safeDocRef = fullDocumentRef.Length > 50 ? fullDocumentRef[..50] : fullDocumentRef;
+        var cust = (_currentQuotation?.CustomerCode ?? "CUSTOMER").Trim();
+        var safeCust = cust.Length > 20 ? cust[..20] : cust;
+
+        // Offset Sales Order PoId into 20B+ range so it never collides with Purchase Order PoId (UX_IndentPoOutcome_PoId).
+        // Ensure effectivePoId is always > 0, never null or 0.
+        long effectivePoId;
+        if (salesOrderId.HasValue && salesOrderId.Value > 0)
+        {
+            effectivePoId = 20_000_000_000L + salesOrderId.Value;
+        }
+        else if (_currentQuotation?.QuotationId > 0)
+        {
+            effectivePoId = 30_000_000_000L + _currentQuotation.QuotationId;
+        }
+        else
+        {
+            effectivePoId = 40_000_000_000L + (Math.Abs((long)_execution.Id.GetHashCode()) % 1_000_000_000L) + 1;
+        }
+
         var outcome = IndentPoOutcome.Created(
             _execution.Id,
             sequence: 1,
-            vendorCode: _currentQuotation?.CustomerCode ?? "CUSTOMER",
+            vendorCode: safeCust,
             currencyCode: "INR",
             rateStructureCode: null,
-            poId: salesOrderId ?? 0,
-            poNumber: fullDocumentRef,
+            poId: effectivePoId,
+            poNumber: safeDocRef,
             lineCount: 1,
             now);
 
-        await _tracking.AddOutcomesAsync([outcome], cancellationToken);
+        var existingOutcomes = await _tracking.GetOutcomesAsync([_execution.Id], cancellationToken);
+        if (existingOutcomes.TryGetValue(_execution.Id, out var existingList) && existingList.Count > 0)
+        {
+            _logger.LogWarning("Execution {JobId} already has {Count} outcome(s) recorded; skipping duplicate outcome insert.", _execution.Id, existingList.Count);
+        }
+        else
+        {
+            try
+            {
+                await _tracking.AddOutcomesAsync([outcome], cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist outcome for execution {JobId}; order ref: {DocRef}", _execution.Id, safeDocRef);
+            }
+        }
 
         _ordersCreated++;
         _execution = null;
@@ -246,14 +299,29 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
             await _jobs.SaveAsync(_execution, cancellationToken);
         }
 
-        var outcome = IndentPoOutcome.Skipped(
-            _execution.Id,
-            sequence: 1,
-            reason,
-            now,
-            vendorCode: _currentQuotation?.CustomerCode);
+        var existingOutcomes = await _tracking.GetOutcomesAsync([_execution.Id], cancellationToken);
+        if (existingOutcomes.TryGetValue(_execution.Id, out var existingList) && existingList.Count > 0)
+        {
+            _logger.LogWarning("Execution {JobId} already has {Count} outcome(s) recorded; skipping duplicate skip outcome.", _execution.Id, existingList.Count);
+        }
+        else
+        {
+            var outcome = IndentPoOutcome.Skipped(
+                _execution.Id,
+                sequence: 1,
+                reason,
+                now,
+                vendorCode: _currentQuotation?.CustomerCode);
 
-        await _tracking.AddOutcomesAsync([outcome], cancellationToken);
+            try
+            {
+                await _tracking.AddOutcomesAsync([outcome], cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist skip outcome for execution {JobId}", _execution.Id);
+            }
+        }
 
         _execution = null;
         _currentQuotation = null;
@@ -290,24 +358,41 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
             await _jobs.SaveAsync(_execution, cancellationToken);
         }
 
+        var safeLayman = laymanMessage.Length > 1000 ? laymanMessage[..997] + "..." : laymanMessage;
+
         await _jobs.AddErrorAsync(
             AutomationError.Create(
                 _execution.Id,
                 running?.Id,
                 transient ? ErrorType.Technical : ErrorType.Business,
-                technicalMessage ?? laymanMessage,
-                laymanMessage,
+                technicalMessage ?? safeLayman,
+                safeLayman,
                 now),
             cancellationToken);
 
-        var outcome = IndentPoOutcome.Failed(
-            _execution.Id,
-            sequence: 1,
-            laymanMessage,
-            now,
-            vendorCode: _currentQuotation?.CustomerCode);
+        var existingOutcomes = await _tracking.GetOutcomesAsync([_execution.Id], cancellationToken);
+        if (existingOutcomes.TryGetValue(_execution.Id, out var existingList) && existingList.Count > 0)
+        {
+            _logger.LogWarning("Execution {JobId} already has {Count} outcome(s) recorded; skipping duplicate fail outcome.", _execution.Id, existingList.Count);
+        }
+        else
+        {
+            var outcome = IndentPoOutcome.Failed(
+                _execution.Id,
+                sequence: 1,
+                safeLayman,
+                now,
+                vendorCode: _currentQuotation?.CustomerCode);
 
-        await _tracking.AddOutcomesAsync([outcome], cancellationToken);
+            try
+            {
+                await _tracking.AddOutcomesAsync([outcome], cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist fail outcome for execution {JobId}", _execution.Id);
+            }
+        }
 
         _execution = null;
         _currentQuotation = null;
@@ -322,7 +407,7 @@ public sealed class QuotationToSoTracker : IQuotationToSoTracker
 
         try
         {
-            var conversion = await _tracking.FindConversionAsync(quotationId, IndentKind.Regular, cancellationToken);
+            var conversion = await _tracking.FindConversionAsync(quotationId, IndentKind.Quotation, cancellationToken);
             if (conversion is null)
             {
                 return null;

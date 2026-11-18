@@ -100,8 +100,10 @@ public sealed class QuotationSoAutomationConfigTests
     [InlineData(SoAutomationRunMode.Api, TriggerSource.Timer, false)]
     [InlineData(SoAutomationRunMode.Timer, TriggerSource.Timer, true)]
     [InlineData(SoAutomationRunMode.Timer, TriggerSource.Api, false)]
+    [InlineData(SoAutomationRunMode.Timer, TriggerSource.Manual, true)]
     [InlineData(SoAutomationRunMode.Disabled, TriggerSource.Api, false)]
     [InlineData(SoAutomationRunMode.Disabled, TriggerSource.Timer, false)]
+    [InlineData(SoAutomationRunMode.Disabled, TriggerSource.Manual, false)]
     public void Run_mode_governs_trigger_permissions(SoAutomationRunMode mode, TriggerSource trigger, bool expected)
     {
         mode.Allows(trigger).Should().Be(expected);

@@ -134,7 +134,7 @@ public sealed class IndentPoOutcome
             Blank(currencyCode),
             Blank(rateStructureCode),
             poId,
-            poNumber.Trim(),
+            Blank(poNumber, 50)!,
             lineCount,
             reason: null,
             nowUtc);

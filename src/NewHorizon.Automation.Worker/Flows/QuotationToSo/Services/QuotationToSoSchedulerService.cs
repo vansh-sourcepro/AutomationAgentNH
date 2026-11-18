@@ -141,6 +141,7 @@ public sealed class QuotationToSoSchedulerService : BackgroundService
 
         if (!string.IsNullOrWhiteSpace(config.QuotationNumbers))
         {
+            body["quotationNumbers"] = config.QuotationNumbers;
             body["quotationNumber"] = config.QuotationNumbers;
         }
 

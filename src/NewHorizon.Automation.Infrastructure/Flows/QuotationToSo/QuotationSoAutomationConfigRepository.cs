@@ -154,7 +154,43 @@ public sealed class QuotationSoAutomationConfigRepository : IQuotationSoAutomati
             stored.RecordQuotationRunCompleted(config.LastRunStatus, config.LastTriggeredAtUtc ?? _clock.UtcNow);
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(ex, "Failed to save Quotation automation config due to tracked entity conflicts; clearing ChangeTracker and retrying.");
+            _dbContext.ChangeTracker.Clear();
+            var reloaded = await _dbContext.IndentPoAutomationConfigs
+                .FirstOrDefaultAsync(c => c.IndentKind == IndentKind.Quotation, cancellationToken);
+            if (reloaded is not null)
+            {
+                reloaded.UpdateFromQuotation(
+                    runMode: poMode,
+                    scheduleTime: config.ScheduleTime,
+                    clearScheduleTime: config.ScheduleTime is null,
+                    quotationNumbers: config.QuotationNumbers,
+                    clearQuotationNumbers: string.IsNullOrWhiteSpace(config.QuotationNumbers),
+                    sites: formattedSites,
+                    isActive: config.IsActive,
+                    dryRun: config.DryRun,
+                    nowUtc: config.UpdatedAtUtc != default ? config.UpdatedAtUtc : _clock.UtcNow,
+                    updatedBy: config.UpdatedBy);
+
+                if (config.LastScheduledRunDate.HasValue || config.LastTriggeredAtUtc.HasValue)
+                {
+                    reloaded.RecordQuotationRunStarted(config.LastTriggeredAtUtc ?? _clock.UtcNow, config.LastScheduledRunDate);
+                }
+
+                if (!string.IsNullOrWhiteSpace(config.LastRunStatus))
+                {
+                    reloaded.RecordQuotationRunCompleted(config.LastRunStatus, config.LastTriggeredAtUtc ?? _clock.UtcNow);
+                }
+
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
     }
 
     private QuotationSoAutomationConfig MapToQuotationConfig(IndentPoAutomationConfig row)
