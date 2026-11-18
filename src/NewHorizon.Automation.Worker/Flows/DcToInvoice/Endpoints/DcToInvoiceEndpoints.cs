@@ -639,6 +639,15 @@ public static class DcToInvoiceEndpoints
                 ErrorMessage: "Provide at least a DcId or DcNo."));
         }
 
+        // If the caller supplied multiple DC numbers to this endpoint, seamlessly process them via batch
+        if (request.DcNumbers != null && request.DcNumbers.Count(n => !string.IsNullOrWhiteSpace(n)) > 1)
+        {
+            var batchReq = new BatchInvoiceCreationRequestDto(
+                CustomerCode: request.CustomerCode,
+                DcNumbers: request.DcNumbers);
+            return await CreateInvoicesFromAllDeliveryChallansAsync(batchReq, service, configRepo, loggerFactory, cancellationToken);
+        }
+
         try
         {
             var result = await service.CreateInvoiceFromDeliveryChallanAsync(

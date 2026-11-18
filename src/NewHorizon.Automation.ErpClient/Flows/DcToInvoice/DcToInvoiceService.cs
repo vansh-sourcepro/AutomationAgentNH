@@ -98,9 +98,19 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         // ── Step 2: Query Sales Policy to read MSCENABLELINELEVELRTSTR dynamically ──
         var salesPolicy = await GetSalesPolicyAsync(cancellationToken);
         bool isLineLevelRateStructure = salesPolicy.EnableLineLevelRateStructure;
+        if (string.Equals(_options.RateStructureMode, "Header", StringComparison.OrdinalIgnoreCase))
+        {
+            isLineLevelRateStructure = false;
+        }
+        else if (string.Equals(_options.RateStructureMode, "Inline", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(_options.RateStructureMode, "LineLevel", StringComparison.OrdinalIgnoreCase))
+        {
+            isLineLevelRateStructure = true;
+        }
+
         _logger.LogInformation(
-            "DcToInvoice: Sales Policy resolved. CompanyCode={CompanyCode}, MSCENABLELINELEVELRTSTR={Flag}",
-            salesPolicy.CompanyCode, isLineLevelRateStructure ? 1 : 0);
+            "DcToInvoice: Sales Policy resolved. CompanyCode={CompanyCode}, MSCENABLELINELEVELRTSTR={Flag}, ConfigOverride={Override}, EffectiveMode={Mode}",
+            salesPolicy.CompanyCode, salesPolicy.EnableLineLevelRateStructure ? 1 : 0, _options.RateStructureMode, isLineLevelRateStructure ? "LineLevel" : "Header");
 
         // ── Step 3: Fetch Document Control Defaults ──
         var today = DateTime.Today;
@@ -676,18 +686,35 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 ? (item.RateStructureCode ?? headerRateStructureCode)
                 : headerRateStructureCode;
 
+            // Match taxes for this item by surrogate DcAutoId (from DcRndNo) first,
+            // or by item code, and deduplicate by RateCode per line to prevent duplicate PK
+            long.TryParse(item.DcRndNo, out var itemDcAutoId);
             var applicableTaxes = taxLines.Where(t =>
-                string.IsNullOrWhiteSpace(t.ItemCode) ||
-                string.Equals(t.ItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase)).ToList();
+                (t.DcAutoId > 0 && itemDcAutoId > 0 && t.DcAutoId == itemDcAutoId) ||
+                (t.DcAutoId == 0 && (string.IsNullOrWhiteSpace(t.ItemCode) ||
+                 string.Equals(t.ItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase)))).ToList();
 
             if (applicableTaxes.Count == 0 && taxLines.Count > 0)
             {
-                applicableTaxes = taxLines.ToList();
+                applicableTaxes = taxLines.Where(t =>
+                    string.IsNullOrWhiteSpace(t.ItemCode) ||
+                    string.Equals(t.ItemCode, item.SalesItemCode, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                if (applicableTaxes.Count == 0)
+                {
+                    applicableTaxes = taxLines.ToList();
+                }
             }
 
-            for (int tIdx = 0; tIdx < applicableTaxes.Count; tIdx++)
+            // Group by RateCode to guarantee no duplicate rate lines on the same item line in xDocTxDtl
+            var distinctTaxes = applicableTaxes
+                .GroupBy(t => t.RateCode, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+
+            for (int tIdx = 0; tIdx < distinctTaxes.Count; tIdx++)
             {
-                var tax = applicableTaxes[tIdx];
+                var tax = distinctTaxes[tIdx];
                 decimal rateAmt = tax.RateAmount;
                 if (rateAmt <= 0 && tax.TaxValue > 0 && item.Amount > 0)
                 {
@@ -1330,6 +1357,13 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                     }
                 }
 
+                long taxDcAutoId = 0;
+                var rawTaxDcAuto = taxNode["dcautoid"] ?? taxNode["dcAutoId"];
+                if (rawTaxDcAuto != null && long.TryParse(rawTaxDcAuto.ToString(), out var parsedTaxAuto))
+                {
+                    taxDcAutoId = parsedTaxAuto;
+                }
+
                 taxesList.Add(new ErpInvoiceRateStructureLine(
                     RateCode: taxNode["rateCode"]?.ToString() ?? string.Empty,
                     RateDesc: taxNode["rateDesc"]?.ToString() ?? string.Empty,
@@ -1343,7 +1377,8 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                     UniqueNo: taxNode["uniqueno"] != null ? Convert.ToInt32(taxNode["uniqueno"]!.ToString()) : 0,
                     ItemCode: taxNode["itemCode"]?.ToString() ?? string.Empty,
                     SeqNo: taxNode["seqNo"] != null ? Convert.ToInt32(taxNode["seqNo"]!.ToString()) : seq++,
-                    RateStructureCode: taxNode["ratestructurecd"]?.ToString() ?? rateStructureCode
+                    RateStructureCode: taxNode["ratestructurecd"]?.ToString() ?? rateStructureCode,
+                    DcAutoId: taxDcAutoId
                 ));
             }
         }
@@ -1367,10 +1402,54 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
         int siteId,
         CancellationToken cancellationToken)
     {
-        const string url = "/api/v1/sales/deliverychallanentry/getCustomerList/L/F";
+        var customerCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // 1. Direct discovery from active authorized Delivery Challans list (the same screen user views)
         try
         {
+            var dcListUrl = $"/api/v1/sales/deliverychallanentry/dCEntryList/{siteId}?status=Authorised";
+            var dcPayload = new JsonObject
+            {
+                ["pageSize"] = 100,
+                ["pageNumber"] = 1,
+                ["sortField"] = "",
+                ["sortDirection"] = "desc",
+                ["searchValue"] = ""
+            };
+
+            var dcResponse = await _httpClient.PostAsJsonAsync(dcListUrl, dcPayload, cancellationToken);
+            if (dcResponse.IsSuccessStatusCode)
+            {
+                var envelope = await dcResponse.Content.ReadFromJsonAsync<ErpEnvelopeList<JsonObject>>(
+                    SerializerOptions, cancellationToken);
+
+                if (envelope?.Data != null)
+                {
+                    foreach (var row in envelope.Data)
+                    {
+                        var custFull = row["CustomerFullName"]?.ToString() ?? row["customerFullName"]?.ToString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(custFull))
+                        {
+                            var parts = custFull.Split('-');
+                            var code = parts[0].Trim();
+                            if (!string.IsNullOrWhiteSpace(code))
+                            {
+                                customerCodes.Add(code);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "DcToInvoice: dCEntryList customer discovery failed: {Msg}", ex.Message);
+        }
+
+        // 2. Also query getCustomerList for any additional LOV customers
+        try
+        {
+            const string url = "/api/v1/sales/deliverychallanentry/getCustomerList/L/F";
             var filterPayload = new JsonObject
             {
                 ["pageSize"] = 100,
@@ -1382,30 +1461,30 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             };
 
             var response = await _httpClient.PostAsJsonAsync(url, filterPayload, cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
             {
-                return Array.Empty<string>();
+                var envelope = await response.Content.ReadFromJsonAsync<ErpEnvelopeList<JsonObject>>(
+                    SerializerOptions, cancellationToken);
+
+                if (envelope?.Data != null)
+                {
+                    foreach (var node in envelope.Data)
+                    {
+                        var c = node["customerCode"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(c))
+                        {
+                            customerCodes.Add(c.Trim());
+                        }
+                    }
+                }
             }
-
-            var envelope = await response.Content.ReadFromJsonAsync<ErpEnvelopeList<JsonObject>>(
-                SerializerOptions, cancellationToken);
-
-            if (envelope?.Data is null)
-            {
-                return Array.Empty<string>();
-            }
-
-            return envelope.Data
-                .Select(node => node["customerCode"]?.ToString() ?? "")
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "DcToInvoice: GetCustomersForDc failed: {Msg}", ex.Message);
-            return Array.Empty<string>();
+            _logger.LogDebug(ex, "DcToInvoice: getCustomerList fallback failed: {Msg}", ex.Message);
         }
+
+        return customerCodes.ToList();
     }
 
     private async Task<ErpDispatchFromAddress> FetchDispatchFromAddressAsync(

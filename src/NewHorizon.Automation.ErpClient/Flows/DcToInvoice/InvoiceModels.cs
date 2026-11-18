@@ -292,7 +292,8 @@ internal sealed record ErpInvoiceRateStructureLine(
     int UniqueNo,
     string ItemCode,
     int SeqNo,
-    string? RateStructureCode = null);
+    string? RateStructureCode = null,
+    long DcAutoId = 0);
 
 internal sealed record ErpDispatchFromAddress(
     string? Address1,

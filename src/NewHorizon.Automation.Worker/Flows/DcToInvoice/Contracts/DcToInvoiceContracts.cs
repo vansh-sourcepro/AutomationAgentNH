@@ -12,14 +12,19 @@ public sealed record CreateInvoiceFromDcRequest(
     long? DcId = null,
     string? DcNo = null,
     string? DcNumber = null,
+    IReadOnlyList<string>? DcNumbers = null,
     string? CustomerCode = null,
     bool DryRun = false)
 {
-    public string? ResolvedDcNo => !string.IsNullOrWhiteSpace(DcNo) ? DcNo : DcNumber;
+    public string? ResolvedDcNo =>
+        !string.IsNullOrWhiteSpace(DcNo) ? DcNo :
+        !string.IsNullOrWhiteSpace(DcNumber) ? DcNumber :
+        DcNumbers?.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
 
     public bool HasAnyIdentifier =>
         (DcId.HasValue && DcId.Value > 0) ||
-        !string.IsNullOrWhiteSpace(ResolvedDcNo);
+        !string.IsNullOrWhiteSpace(ResolvedDcNo) ||
+        (DcNumbers != null && DcNumbers.Any(n => !string.IsNullOrWhiteSpace(n)));
 }
 
 /// <summary>

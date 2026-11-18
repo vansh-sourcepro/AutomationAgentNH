@@ -36,4 +36,12 @@ public sealed class DcToInvoiceOptions
 
     /// <summary>Default Rate Structure Code if DC carries none (default: "GST18").</summary>
     public string DefaultRateStructureCode { get; set; } = "GST18";
+
+    /// <summary>
+    /// Rate Structure Mode:
+    /// "Auto" (default) -> dynamically respects the database's Sales Policy (MSCENABLELINELEVELRTSTR).
+    /// "Header"         -> forces Header-level Rate Structure instantly without altering database.
+    /// "Inline" / "LineLevel" -> forces Line-level Rate Structure instantly without altering database.
+    /// </summary>
+    public string RateStructureMode { get; set; } = "Auto";
 }
