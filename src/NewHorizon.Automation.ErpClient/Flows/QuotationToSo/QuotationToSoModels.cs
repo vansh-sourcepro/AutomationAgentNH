@@ -10,8 +10,8 @@ public sealed record OpenQuotationSummary
     public required string QtnYear { get; init; }
     public required string QtnGroup { get; init; }
     public required string QtnNum { get; init; }
-    public required string QuotationSiteCode { get; init; }
-    public required int QuotationSiteId { get; init; }
+    public required string QuotationSiteCode { get; set; }
+    public required int QuotationSiteId { get; set; }
     public required string CustomerCode { get; init; }
     public string? CustomerName { get; init; }
     public DateTime? QuotationDate { get; init; }

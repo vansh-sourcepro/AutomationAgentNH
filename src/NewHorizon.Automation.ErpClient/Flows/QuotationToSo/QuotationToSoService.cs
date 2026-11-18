@@ -354,6 +354,42 @@ public sealed class QuotationToSoService : IQuotationToSoService
             fallbackTechSpecs = await FetchFallbackItemTechnicalSpecsAsync(modelArray, cancellationToken);
         }
 
+        string? policyOafGroup = null;
+        var isFlag2On = await IsAutoGenerateOafOnSalesOrderAuthorizationEnabledAsync(cancellationToken);
+        if (isFlag2On)
+        {
+            // Primary: resolve default OAF Group and Site directly from Document Control Master (api/v1/admin/documentControl/getDocumentDetail/{siteId}/AF/AF)
+            var (dcGroup, dcSiteId, dcSiteCode) = await GetDocumentControlDefaultOafGroupAndSiteAsync(
+                soSiteId,
+                quotation.QuotationSiteCode,
+                cancellationToken);
+
+            policyOafGroup = dcGroup;
+            if (dcSiteId > 0 && !string.IsNullOrWhiteSpace(dcSiteCode))
+            {
+                quotation = quotation with { QuotationSiteId = dcSiteId, QuotationSiteCode = dcSiteCode };
+                soSiteId = dcSiteId;
+            }
+            else if (dcSiteId > 0)
+            {
+                quotation = quotation with { QuotationSiteId = dcSiteId };
+                soSiteId = dcSiteId;
+            }
+            else if (!string.IsNullOrWhiteSpace(dcSiteCode))
+            {
+                quotation = quotation with { QuotationSiteCode = dcSiteCode };
+            }
+
+            // Secondary fallback: if Document Control had no group, check Sales Policy mapping
+            if (string.IsNullOrWhiteSpace(policyOafGroup))
+            {
+                policyOafGroup = await GetSalesPolicyOafGroupForSiteAsync(
+                    soSiteId,
+                    quotation.QuotationSiteCode,
+                    cancellationToken);
+            }
+        }
+
         var payload = QuotationToSoPayloadBuilder.BuildSavePayload(
             qtnData,
             quotation,
@@ -362,7 +398,8 @@ public sealed class QuotationToSoService : IQuotationToSoService
             domesticCurrency,
             orderDate,
             soGroup,
-            fallbackTechSpecs);
+            fallbackTechSpecs,
+            policyOafGroup);
 
         // Step 2.5: Pre-check if quotation is already converted or closed to avoid duplicate orders
         await _tracker.EnterStageAsync(
@@ -1813,6 +1850,581 @@ public sealed class QuotationToSoService : IQuotationToSoService
         return "OA";
     }
 
+    /// <inheritdoc/>
+    public async Task<bool> IsSalesOrderAuthorizationRequiredAsync(
+        int? siteId = null,
+        string? siteCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        var effSiteId = siteId > 0
+            ? siteId.Value
+            : (int.TryParse(siteCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0 ? parsed : 1);
+
+        // 1. Primary check: api/v1/admin/documentControl/getDocumentDetail/{effSiteId}/OB/OB
+        try
+        {
+            var detailUrl = $"api/v1/admin/documentControl/getDocumentDetail/{effSiteId}/OB/OB";
+            using var response = await _httpClient.GetAsync(detailUrl, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem))
+                {
+                    if (dataElem.TryGetProperty("details", out var detailsArr) && detailsArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in detailsArr.EnumerateArray())
+                        {
+                            if (TryGetBoolProperty(item, out var isAuth, "isAuthRequired", "isAutorisationRequired", "mDOCAUTHRQ"))
+                            {
+                                _logger.LogInformation(
+                                    "Document Control for Sales Order Receipt (OB/OB) at site {SiteId} reports Authorization Required: {IsAuthRequired}",
+                                    effSiteId,
+                                    isAuth);
+                                return isAuth;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check Document Control details via getDocumentDetail for site {SiteId}", effSiteId);
+        }
+
+        // 2. Secondary check: api/v1/admin/documentControl/getDefaultDocumentDetail/{year}/OB/OB/{effSiteId}
+        try
+        {
+            var year = GetCurrentFinancialYear();
+            var defaultUrl = $"api/v1/admin/documentControl/getDefaultDocumentDetail/{Uri.EscapeDataString(year)}/OB/OB/{effSiteId}";
+            using var response = await _httpClient.GetAsync(defaultUrl, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem))
+                {
+                    if (dataElem.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in dataElem.EnumerateArray())
+                        {
+                            if (TryGetBoolProperty(item, out var isAuth, "isAutorisationRequired", "isAuthRequired", "mDOCAUTHRQ"))
+                            {
+                                _logger.LogInformation(
+                                    "Document Control defaults for Sales Order Receipt (OB/OB) at site {SiteId} reports Authorization Required: {IsAuthRequired}",
+                                    effSiteId,
+                                    isAuth);
+                                return isAuth;
+                            }
+                        }
+                    }
+                    else if (dataElem.ValueKind == JsonValueKind.Object)
+                    {
+                        if (TryGetBoolProperty(dataElem, out var isAuth, "isAutorisationRequired", "isAuthRequired", "mDOCAUTHRQ"))
+                        {
+                            _logger.LogInformation(
+                                "Document Control defaults for Sales Order Receipt (OB/OB) at site {SiteId} reports Authorization Required: {IsAuthRequired}",
+                                effSiteId,
+                                isAuth);
+                            return isAuth;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check Document Control defaults via getDefaultDocumentDetail for site {SiteId}", effSiteId);
+        }
+
+        _logger.LogWarning(
+            "Unable to determine Document Control Authorization Required flag from ERP for site {SiteId}; defaulting to true",
+            effSiteId);
+        return true;
+    }
+
+    private async Task<string?> GetResolvedCompanyCodeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            const string companyUrl = "api/v1/admin/company/getCompany";
+            using var response = await _httpClient.GetAsync(companyUrl, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                var compArray = root.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Array
+                    ? d
+                    : (root.ValueKind == JsonValueKind.Array ? root : default);
+
+                if (compArray.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var c in compArray.EnumerateArray())
+                    {
+                        var cId = GetIntProperty(c, "id", "mcmcompid", "companyId");
+                        var cCode = GetStringProperty(c, "code", "mcmcompcode", "companyCode");
+                        if (!string.IsNullOrWhiteSpace(cCode) && (_companyId <= 0 || cId == _companyId))
+                        {
+                            return cCode.Trim();
+                        }
+                    }
+
+                    var first = compArray.EnumerateArray().FirstOrDefault();
+                    var fallbackCode = GetStringProperty(first, "code", "mcmcompcode", "companyCode");
+                    if (!string.IsNullOrWhiteSpace(fallbackCode))
+                    {
+                        return fallbackCode.Trim();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query company list for dynamic company code resolution.");
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> IsAutoGenerateOafOnSalesOrderAuthorizationEnabledAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var resolvedCode = await GetResolvedCompanyCodeAsync(cancellationToken) ?? _companyCode;
+            var policyUrl = $"api/v1/admin/salespolicy/getDetail/{Uri.EscapeDataString(resolvedCode)}";
+            using var response = await _httpClient.GetAsync(policyUrl, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem))
+                {
+                    // Check inside data.salesPolicyResultModel
+                    if (dataElem.TryGetProperty("salesPolicyResultModel", out var policyArr) && policyArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in policyArr.EnumerateArray())
+                        {
+                            if (TryGetBoolProperty(item, out var isAutoOaf, "autogenerateoafonsalesorder", "autoGenerateOafOnSalesOrder", "mSCSYSAL_AUTOGENERATEOAFONSALESORDER"))
+                            {
+                                _logger.LogInformation(
+                                    "Sales Policy for company {CompanyCode} reports Auto Generate OAF on Sales Order Authorization (Flag 2): {IsAutoOaf}",
+                                    resolvedCode,
+                                    isAutoOaf);
+                                return isAutoOaf;
+                            }
+                        }
+                    }
+
+                    // Fallback: check directly on dataElem (if serialized as object or array)
+                    if (dataElem.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in dataElem.EnumerateArray())
+                        {
+                            if (TryGetBoolProperty(item, out var isAutoOaf, "autogenerateoafonsalesorder", "autoGenerateOafOnSalesOrder"))
+                            {
+                                return isAutoOaf;
+                            }
+                        }
+                    }
+                    else if (dataElem.ValueKind == JsonValueKind.Object)
+                    {
+                        if (TryGetBoolProperty(dataElem, out var isAutoOaf, "autogenerateoafonsalesorder", "autoGenerateOafOnSalesOrder"))
+                        {
+                            return isAutoOaf;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check Sales Policy getDetail for company {CompanyCode}", _companyCode);
+        }
+
+        // Secondary check: verify Document Control Master (api/v1/admin/documentControl/getDocumentDetail/1/AF/AF)
+        // If Document Control has isAutoNoGenerateRequired = true and active numbering rows for AF/AF,
+        // Auto OAF generation is active in Document Control.
+        try
+        {
+            const string docCtrlUrl = "api/v1/admin/documentControl/getDocumentDetail/1/AF/AF";
+            using var dcResp = await _httpClient.GetAsync(docCtrlUrl, cancellationToken);
+            if (dcResp.IsSuccessStatusCode)
+            {
+                using var dcDoc = await JsonDocument.ParseAsync(
+                    await dcResp.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var dcRoot = dcDoc.RootElement;
+                if (dcRoot.TryGetProperty("data", out var dcData) && dcData.ValueKind == JsonValueKind.Object)
+                {
+                    if (dcData.TryGetProperty("details", out var detArr) && detArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var det in detArr.EnumerateArray())
+                        {
+                            if (TryGetBoolProperty(det, out var autoGen, "isAutoNoGenerateRequired") && autoGen)
+                            {
+                                _logger.LogInformation("Document Control Master confirms Auto Number Generation is enabled for OAF (DocType: AF).");
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check Document Control Master fallback for OAF flag");
+        }
+
+        _logger.LogWarning(
+            "Unable to determine Auto Generate OAF on Sales Order Authorization flag; defaulting to false");
+        return false;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> IsSalesOrderAuthorizedAsync(
+        long salesOrderId,
+        string? soYear = null,
+        string? soGroup = null,
+        string? soNo = null,
+        int? siteId = null,
+        string? siteCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (salesOrderId <= 0)
+        {
+            return false;
+        }
+
+        // Primary check: api/v1/sales/salesorderentry/getActionDetail/{salesOrderId}
+        try
+        {
+            var actionUrl = $"api/v1/sales/salesorderentry/getActionDetail/{salesOrderId}";
+            using var response = await _httpClient.GetAsync(actionUrl, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem) && dataElem.ValueKind == JsonValueKind.Object)
+                {
+                    if (dataElem.TryGetProperty("actiondetails", out var actionsArr) && actionsArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in actionsArr.EnumerateArray())
+                        {
+                            var actionType = GetStringProperty(item, "actionType", "actiontype");
+                            if (!string.IsNullOrWhiteSpace(actionType) && actionType.Contains("Authoriz", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var userName = GetStringProperty(item, "userName", "username");
+                                _logger.LogInformation(
+                                    "Sales Order Id {SalesOrderId} is authorized (Action: {ActionType}, User: {UserName})",
+                                    salesOrderId,
+                                    actionType,
+                                    userName);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check Sales Order authorization status via getActionDetail for order {OrderId}", salesOrderId);
+        }
+
+        // Secondary check: getSalesOrderDetail if order parts are provided
+        if (!string.IsNullOrWhiteSpace(soYear) && !string.IsNullOrWhiteSpace(soGroup) && !string.IsNullOrWhiteSpace(soNo))
+        {
+            try
+            {
+                var effSiteId = siteId > 0 ? siteId.Value : 1;
+                var effSiteCode = !string.IsNullOrWhiteSpace(siteCode) ? siteCode : "NF1";
+                const string detailUrl = "api/v1/sales/salesorderentry/getSalesOrderDetail";
+                var req = new
+                {
+                    IOSiteCode = effSiteCode,
+                    IOYear = soYear,
+                    ioGroup = soGroup,
+                    ioNumber = soNo,
+                    locid = effSiteId.ToString(CultureInfo.InvariantCulture),
+                    AuthReq = "Y",
+                    IsInterBranchTransfer = false,
+                    dispmaxrecords = 10,
+                    compantid = 1
+                };
+
+                using var response = await _httpClient.PostAsJsonAsync(detailUrl, req, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(
+                        await response.Content.ReadAsStreamAsync(cancellationToken),
+                        cancellationToken: cancellationToken);
+
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("data", out var dataElem) && dataElem.TryGetProperty("salesOrderDetails", out var soArr) && soArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in soArr.EnumerateArray())
+                        {
+                            var status = GetStringProperty(item, "orderStatus", "xobordstat");
+                            var authBy = GetStringProperty(item, "authBy", "xobauthby");
+                            if (string.Equals(status, "A", StringComparison.OrdinalIgnoreCase)
+                                || (!string.IsNullOrWhiteSpace(authBy) && authBy != "0"))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed secondary authorization check via getSalesOrderDetail for Sales Order {Year}/{Group}/{No}", soYear, soGroup, soNo);
+            }
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc/>
+    public async Task<string?> GetSalesPolicyOafGroupForSiteAsync(
+        int siteId,
+        string? siteCode,
+        CancellationToken cancellationToken = default)
+    {
+        // 1. Check if Flag 2 is ON
+        var isFlag2On = await IsAutoGenerateOafOnSalesOrderAuthorizationEnabledAsync(cancellationToken);
+        if (!isFlag2On)
+        {
+            _logger.LogInformation("Auto Generate OAF on Sales Order Authorization (Flag 2) is OFF. OAF Group will remain unassigned.");
+            return null;
+        }
+
+        // 2. Query GetOAFGroupData from Sales Policy (api/v1/admin/salespolicy/GetOAFGroupData/1/{companyId})
+        try
+        {
+            var url = $"api/v1/admin/salespolicy/GetOAFGroupData/1/{_companyId}";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in dataArr.EnumerateArray())
+                    {
+                        var sId = GetIntProperty(item, "siteId", "siteid", "mSAMSITEID");
+                        var sCode = GetStringProperty(item, "siteCode", "sitecode", "mLOCCODE");
+                        var grpCode = GetStringProperty(item, "groupCode", "groupcode", "mAMACCGRPCODE");
+
+                        if (!string.IsNullOrWhiteSpace(grpCode))
+                        {
+                            var matchByCode = !string.IsNullOrWhiteSpace(siteCode)
+                                && string.Equals(sCode?.Trim(), siteCode.Trim(), StringComparison.OrdinalIgnoreCase);
+                            var matchById = siteId > 0 && sId == siteId;
+
+                            if (matchByCode || matchById)
+                            {
+                                _logger.LogInformation(
+                                    "Resolved OAF Group '{GroupCode}' from Sales Policy for Site {SiteCode} (Id: {SiteId})",
+                                    grpCode,
+                                    siteCode,
+                                    siteId);
+                                return grpCode;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query GetOAFGroupData for site {SiteCode} (Id: {SiteId})", siteCode, siteId);
+        }
+
+        // 3. Fallback check: getDetail/{companyCode}
+        try
+        {
+            var policyUrl = $"api/v1/admin/salespolicy/getDetail/{Uri.EscapeDataString(_companyCode)}";
+            using var response = await _httpClient.GetAsync(policyUrl, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem))
+                {
+                    JsonElement listElem = default;
+                    if (dataElem.TryGetProperty("salesPolicyResultModel", out var policyArr) && policyArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in policyArr.EnumerateArray())
+                        {
+                            if (item.TryGetProperty("oafGroupDataList", out var grpList) && grpList.ValueKind == JsonValueKind.Array)
+                            {
+                                listElem = grpList;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (listElem.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in listElem.EnumerateArray())
+                        {
+                            var sId = GetIntProperty(item, "siteId", "siteid");
+                            var sCode = GetStringProperty(item, "siteCode", "sitecode");
+                            var grpCode = GetStringProperty(item, "groupCode", "groupcode");
+
+                            if (!string.IsNullOrWhiteSpace(grpCode))
+                            {
+                                var matchByCode = !string.IsNullOrWhiteSpace(siteCode)
+                                    && string.Equals(sCode?.Trim(), siteCode.Trim(), StringComparison.OrdinalIgnoreCase);
+                                var matchById = siteId > 0 && sId == siteId;
+
+                                if (matchByCode || matchById)
+                                {
+                                    _logger.LogInformation(
+                                        "Resolved OAF Group '{GroupCode}' from Sales Policy getDetail fallback for Site {SiteCode} (Id: {SiteId})",
+                                        grpCode,
+                                        siteCode,
+                                        siteId);
+                                    return grpCode;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed fallback check for Sales Policy OAF group");
+        }
+
+        _logger.LogWarning(
+            "Flag 2 is ON but no OAF Group mapping was found in Sales Policy for Site {SiteCode} (Id: {SiteId})",
+            siteCode,
+            siteId);
+        return null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<(string? GroupCode, int SiteId, string? SiteCode)> GetDocumentControlDefaultOafGroupAndSiteAsync(
+        int? siteId = null,
+        string? siteCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        var targetSiteId = siteId is > 0 ? siteId.Value : 1;
+        try
+        {
+            var url = $"api/v1/admin/documentControl/getDocumentDetail/{targetSiteId}/AF/AF";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    cancellationToken: cancellationToken);
+
+                var root = doc.RootElement;
+                if (root.TryGetProperty("data", out var dataElem) && dataElem.ValueKind == JsonValueKind.Object)
+                {
+                    if (dataElem.TryGetProperty("documentNoGenerations", out var genArr) && genArr.ValueKind == JsonValueKind.Array)
+                    {
+                        var list = new List<(string GroupCode, int LocId, string LocCode, bool IsDefault)>();
+                        foreach (var item in genArr.EnumerateArray())
+                        {
+                            var gCode = GetStringProperty(item, "groupCode", "groupcode");
+                            var lId = GetIntProperty(item, "locationId", "locationid");
+                            var lCode = GetStringProperty(item, "locationCode", "locationcode") ?? string.Empty;
+                            var isDef = string.Equals(GetStringProperty(item, "isDefault", "isdefault")?.Trim(), "Y", StringComparison.OrdinalIgnoreCase);
+
+                            if (!string.IsNullOrWhiteSpace(gCode))
+                            {
+                                list.Add((gCode.Trim(), lId, lCode.Trim(), isDef));
+                            }
+                        }
+
+                        // Filter by requested site if specified
+                        var siteMatches = list.Where(x =>
+                            (siteId is > 0 && x.LocId == siteId.Value) ||
+                            (!string.IsNullOrWhiteSpace(siteCode) && string.Equals(x.LocCode, siteCode.Trim(), StringComparison.OrdinalIgnoreCase))
+                        ).ToList();
+
+                        if (siteMatches.Count > 0)
+                        {
+                            // 1. Pick the default group for this site
+                            var defaultForSite = siteMatches.FirstOrDefault(x => x.IsDefault);
+                            if (!string.IsNullOrWhiteSpace(defaultForSite.GroupCode))
+                            {
+                                _logger.LogInformation(
+                                    "Resolved default OAF Group '{GroupCode}' and Site {SiteCode} (Id: {SiteId}) from Document Control for requested site.",
+                                    defaultForSite.GroupCode,
+                                    defaultForSite.LocCode,
+                                    defaultForSite.LocId);
+                                return (defaultForSite.GroupCode, defaultForSite.LocId, defaultForSite.LocCode);
+                            }
+
+                            // 2. Fallback to first group for this site
+                            var firstForSite = siteMatches[0];
+                            _logger.LogInformation(
+                                "Resolved first available OAF Group '{GroupCode}' and Site {SiteCode} (Id: {SiteId}) from Document Control for requested site.",
+                                firstForSite.GroupCode,
+                                firstForSite.LocCode,
+                                firstForSite.LocId);
+                            return (firstForSite.GroupCode, firstForSite.LocId, firstForSite.LocCode);
+                        }
+
+                        // If site was not matched, take the overall default group
+                        var overallDefault = list.FirstOrDefault(x => x.IsDefault);
+                        if (!string.IsNullOrWhiteSpace(overallDefault.GroupCode))
+                        {
+                            _logger.LogInformation(
+                                "Resolved overall default OAF Group '{GroupCode}' and Site {SiteCode} (Id: {SiteId}) from Document Control.",
+                                overallDefault.GroupCode,
+                                overallDefault.LocCode,
+                                overallDefault.LocId);
+                            return (overallDefault.GroupCode, overallDefault.LocId, overallDefault.LocCode);
+                        }
+
+                        if (list.Count > 0)
+                        {
+                            var first = list[0];
+                            return (first.GroupCode, first.LocId, first.LocCode);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve default OAF Group and Site from Document Control (locationId {SiteId})", targetSiteId);
+        }
+
+        return (null, targetSiteId, siteCode);
+    }
+
     private async Task<(string OafNumber, long OafId)?> FindExistingOafAsync(
         string soYear,
         string soGroup,
@@ -1945,7 +2557,46 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 };
             }
 
-            // Step 2: Query delivery schedule lines from ERP
+            // Step 2: Validate Flag 2 (Sales Policy: Auto Generate OAF on Sales Order Authorization)
+            var isFlag2Enabled = await IsAutoGenerateOafOnSalesOrderAuthorizationEnabledAsync(cancellationToken);
+            if (!isFlag2Enabled)
+            {
+                _logger.LogInformation(
+                    "Auto Generate OAF on Sales Order Authorization (Flag 2 in Sales Policy) is OFF. Skipping OAF creation for Sales Order {SalesOrderNumber}.",
+                    salesOrderNumber);
+
+                return new OafCreationResult
+                {
+                    Success = false,
+                    ErrorMessage = "Auto Generate OAF on Sales Order Authorization (Flag 2) is disabled in Sales Policy. OAF generation skipped.",
+                };
+            }
+
+            // Step 3: Validate Sales Order Authorization status
+            var isAuthorized = await IsSalesOrderAuthorizedAsync(
+                salesOrderId,
+                soDocYear,
+                soDocGroup,
+                soDocNo,
+                effSiteId,
+                effSiteCode,
+                cancellationToken);
+
+            if (!isAuthorized)
+            {
+                _logger.LogInformation(
+                    "Sales Order {SalesOrderNumber} (Id: {SalesOrderId}) is not authorized yet. OAF cannot be created without Sales Order authorization.",
+                    salesOrderNumber,
+                    salesOrderId);
+
+                return new OafCreationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Sales Order '{salesOrderNumber}' is not authorized. OAF can only be created after Sales Order authorization.",
+                };
+            }
+
+            // Step 4: Query delivery schedule lines from ERP
             const string scheduleUrl = "api/v1/sales/orderackentry/getItemDeliverySchedule";
             var scheduleRequest = new
             {
@@ -2065,8 +2716,19 @@ public sealed class QuotationToSoService : IQuotationToSoService
                 };
             }
 
-            // Step 3: Resolve default OAF Document Group (defaults to "OA")
-            var oafGroup = await GetDefaultOafGroupAsync(soDocYear, effSiteId, cancellationToken);
+            // Step 3: Resolve default OAF Document Group and Site from Document Control Master
+            var (dcOafGroup, dcSiteId, dcSiteCode) = await GetDocumentControlDefaultOafGroupAndSiteAsync(effSiteId, effSiteCode, cancellationToken);
+            var oafGroup = !string.IsNullOrWhiteSpace(dcOafGroup)
+                ? dcOafGroup
+                : await GetDefaultOafGroupAsync(soDocYear, effSiteId, cancellationToken);
+            if (dcSiteId > 0)
+            {
+                effSiteId = dcSiteId;
+            }
+            if (!string.IsNullOrWhiteSpace(dcSiteCode))
+            {
+                effSiteCode = dcSiteCode;
+            }
 
             var now = _clock.UtcNow.LocalDateTime;
             var createOafPayload = new
@@ -2794,6 +3456,50 @@ public sealed class QuotationToSoService : IQuotationToSoService
                     if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt32(out var i))
                     {
                         return i > 0;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetBoolProperty(JsonElement elem, out bool value, params string[] names)
+    {
+        value = false;
+        if (elem.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var prop in elem.EnumerateObject())
+        {
+            foreach (var name in names)
+            {
+                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (prop.Value.ValueKind is JsonValueKind.True)
+                    {
+                        value = true;
+                        return true;
+                    }
+                    if (prop.Value.ValueKind is JsonValueKind.False)
+                    {
+                        value = false;
+                        return true;
+                    }
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        var s = prop.Value.GetString()?.Trim();
+                        value = string.Equals(s, "true", StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(s, "Y", StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(s, "1", StringComparison.OrdinalIgnoreCase);
+                        return true;
+                    }
+                    if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt32(out var i))
+                    {
+                        value = i > 0;
+                        return true;
                     }
                 }
             }

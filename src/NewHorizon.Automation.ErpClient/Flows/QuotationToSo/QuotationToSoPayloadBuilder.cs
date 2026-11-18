@@ -17,7 +17,8 @@ public static class QuotationToSoPayloadBuilder
         string domesticCurrency,
         DateTime orderDate,
         string soGroup = "SW",
-        JsonArray? explicitTechnicalSpecs = null)
+        JsonArray? explicitTechnicalSpecs = null,
+        string? explicitOafGroup = null)
     {
         ArgumentNullException.ThrowIfNull(summary);
 
@@ -42,7 +43,9 @@ public static class QuotationToSoPayloadBuilder
         var agentCode = GetString(qtnHeader, "agentCode") ?? summary.AgentCode ?? string.Empty;
         var isAgent = GetBool(qtnHeader, "isAgentAssociated") || !string.IsNullOrWhiteSpace(agentCode);
         var soType = GetString(qtnHeader, "quotationTypeSalesOrder") ?? "REG";
-        var oafGroup = GetString(qtnHeader, "oafGroup") ?? string.Empty;
+        var oafGroup = !string.IsNullOrWhiteSpace(explicitOafGroup)
+            ? explicitOafGroup.Trim()
+            : (GetString(qtnHeader, "oafGroup") ?? string.Empty);
         var projectItemCode = GetString(qtnHeader, "projectItemCode") ?? string.Empty;
 
         var exchangeRate = GetDecimal(qtnHeader, "exchangeRate");

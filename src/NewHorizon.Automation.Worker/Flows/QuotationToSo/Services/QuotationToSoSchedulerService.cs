@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using NewHorizon.Automation.Application.Abstractions;
 using NewHorizon.Automation.Application.Configuration;
 using NewHorizon.Automation.Application.Flows.QuotationToSo;
+using NewHorizon.Automation.ErpClient.Flows.QuotationToSo;
 using NewHorizon.Automation.Worker.Endpoints;
 
 namespace NewHorizon.Automation.Worker.Flows.QuotationToSo.Services;
@@ -86,6 +87,32 @@ public sealed class QuotationToSoSchedulerService : BackgroundService
 
         if (!config.ShouldRunOnSchedule(localNow, localToday))
         {
+            return;
+        }
+
+        // Strictly verify Flag 1 (Document Control Master: Authorization Required?) before firing scheduled conversion
+        var quotationService = scope.ServiceProvider.GetRequiredService<IQuotationToSoService>();
+        var isAuthRequired = await quotationService.IsSalesOrderAuthorizationRequiredAsync(
+            siteCode: config.SiteCode,
+            cancellationToken: cancellationToken);
+
+        if (!isAuthRequired)
+        {
+            var notification =
+                "Quotation to Sales Order scheduled run skipped: 'Authorization Required?' for Sales Order Receipt is turned OFF in Document Control Master. You must turn ON 'Authorization Required?' in Document Control Master before this automation can run.";
+
+            _logger.LogWarning("{Notification}", notification);
+
+            config.SetActive(false, clock.UtcNow, "Scheduler");
+            config.RecordRunCompleted("Failed", notification, clock.UtcNow);
+            try
+            {
+                await configs.SaveAsync(config, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save inactive config state when Flag 1 was OFF during scheduler tick.");
+            }
             return;
         }
 

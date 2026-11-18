@@ -157,6 +157,35 @@ public static class QuotationToSoEndpoints
                 statusCode: StatusCodes.Status409Conflict);
         }
 
+        // 3a. Strictly verify Flag 1: Authorization Required in Document Control Master
+        var isAuthRequired = await service.IsSalesOrderAuthorizationRequiredAsync(
+            siteCode: request.SiteCode ?? config.SiteCode,
+            cancellationToken: cancellationToken);
+
+        if (!isAuthRequired)
+        {
+            const string notification =
+                "Cannot execute Quotation to Sales Order automation: 'Authorization Required?' for Sales Order Receipt is turned OFF in Document Control Master. You must turn ON 'Authorization Required?' in Document Control Master before this automation can run.";
+
+            logger.LogWarning("{Notification}", notification);
+
+            config.SetActive(false, clock.UtcNow, "System");
+            config.RecordRunCompleted("Failed", notification, clock.UtcNow);
+            try
+            {
+                await configRepo.SaveAsync(config, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to persist disabled config state after Flag 1 refusal.");
+            }
+
+            return Results.Problem(
+                title: "Authorization Required flag is OFF in Document Control Master.",
+                detail: notification,
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         // 4. Run mode permission check (Manual/Api only, Timer only, Both)
         if (!config.RunMode.Allows(triggerSource))
         {

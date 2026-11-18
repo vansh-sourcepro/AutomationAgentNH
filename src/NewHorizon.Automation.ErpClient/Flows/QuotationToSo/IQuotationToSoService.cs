@@ -66,4 +66,50 @@ public interface IQuotationToSoService
         string? siteCode,
         string? customerCode,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Checks whether 'Authorization Required?' (Flag 1 in Document Control Master) is enabled
+    /// for Sales Order Receipt (Document Type: OB, SubType: OB) at the specified site.
+    /// </summary>
+    Task<bool> IsSalesOrderAuthorizationRequiredAsync(
+        int? siteId = null,
+        string? siteCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether 'Auto Generate OAF on Sales Order Authorization' (Flag 2 in Sales Policy) is enabled.
+    /// </summary>
+    Task<bool> IsAutoGenerateOafOnSalesOrderAuthorizationEnabledAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether the specified Sales Order has been authorized in the ERP system.
+    /// </summary>
+    Task<bool> IsSalesOrderAuthorizedAsync(
+        long salesOrderId,
+        string? soYear = null,
+        string? soGroup = null,
+        string? soNo = null,
+        int? siteId = null,
+        string? siteCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// If Flag 2 ('Auto Generate OAF on Sales Order Authorization') is ON, resolves the OAF Group Code
+    /// configured for the specified site in Sales Policy. Returns null if Flag 2 is OFF or no group is mapped.
+    /// </summary>
+    Task<string?> GetSalesPolicyOafGroupForSiteAsync(
+        int siteId,
+        string? siteCode,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves the default OAF Group Code and Site from Document Control Master
+    /// (api/v1/admin/documentControl/getDocumentDetail/{locationId}/AF/AF).
+    /// Returns the group marked with isDefault = "Y" (or first group) and the matching location.
+    /// </summary>
+    Task<(string? GroupCode, int SiteId, string? SiteCode)> GetDocumentControlDefaultOafGroupAndSiteAsync(
+        int? siteId = null,
+        string? siteCode = null,
+        CancellationToken cancellationToken = default);
 }

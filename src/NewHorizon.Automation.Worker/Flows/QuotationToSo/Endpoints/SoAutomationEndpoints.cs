@@ -97,6 +97,51 @@ public static class SoAutomationEndpoints
             ? null
             : request.SiteCode?.Trim();
 
+        var currentConfig = await configs.GetAsync(cancellationToken);
+        var willBeActive = request.IsActive == true || (request.IsActive is null && currentConfig.IsActive);
+
+        // Strictly verify Flag 1 (Document Control Master: Authorization Required?) if automation is to be active
+        if (willBeActive)
+        {
+            var isAuthRequired = await service.IsSalesOrderAuthorizationRequiredAsync(
+                siteCode: siteCodeToSave ?? currentConfig.SiteCode,
+                cancellationToken: cancellationToken);
+
+            if (!isAuthRequired)
+            {
+                const string notificationMessage =
+                    "Cannot enable Quotation to Sales Order automation: 'Authorization Required?' for Sales Order Receipt is turned OFF in Document Control Master. You must turn ON 'Authorization Required?' in Document Control Master before enabling this automation.";
+
+                logger.LogWarning("Quotation to Sales Order configuration update rejected: {Notification}", notificationMessage);
+
+                // Strictly ensure automation remains disabled
+                var updateRejected = new QuotationSoAutomationConfigUpdate
+                {
+                    RunMode = mode,
+                    ScheduleTime = scheduleTime,
+                    ClearScheduleTime = request.ClearScheduleTime,
+                    QuotationNumbers = quotationNumbersToSave,
+                    ClearQuotationNumbers = clearQuotations,
+                    CustomerCode = customerCodeToSave,
+                    ClearCustomerCode = clearCustomer,
+                    SiteCode = siteCodeToSave,
+                    ClearSiteCode = clearSite,
+                    IsActive = false,
+                    DryRun = request.DryRun,
+                    AutoCreateOaf = request.AutoCreateOaf,
+                };
+
+                var inactiveSaved = await configs.UpsertAsync(updateRejected, ActorOf(user), cancellationToken);
+                inactiveSaved.RecordScheduled(notificationMessage, clock.UtcNow, status: "AuthorizationRequiredOff");
+                await configs.SaveAsync(inactiveSaved, cancellationToken);
+
+                return Results.Problem(
+                    title: "Authorization Required flag is OFF in Document Control Master.",
+                    detail: notificationMessage,
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+        }
+
         var update = new QuotationSoAutomationConfigUpdate
         {
             RunMode = mode,
@@ -288,13 +333,40 @@ public static class SoAutomationEndpoints
     private static async Task<IResult> SetEnabledAsync(
         SetSoAutomationEnabledRequest? request,
         IQuotationSoAutomationConfigRepository configs,
+        IQuotationToSoService service,
         IClock clock,
+        ILogger<QuotationToSoService> logger,
         ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
         if (request is null)
         {
             return Results.Problem("An { \"enabled\": true|false } body is required.", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (request.Enabled)
+        {
+            var current = await configs.GetAsync(cancellationToken);
+            var isAuthRequired = await service.IsSalesOrderAuthorizationRequiredAsync(
+                siteCode: current.SiteCode,
+                cancellationToken: cancellationToken);
+
+            if (!isAuthRequired)
+            {
+                const string notificationMessage =
+                    "Cannot enable Quotation to Sales Order automation: 'Authorization Required?' for Sales Order Receipt is turned OFF in Document Control Master. You must turn ON 'Authorization Required?' in Document Control Master before enabling this automation.";
+
+                logger.LogWarning("SetSoAutomationEnabled rejected: {Notification}", notificationMessage);
+
+                current.SetActive(false, clock.UtcNow, ActorOf(user));
+                current.RecordScheduled(notificationMessage, clock.UtcNow, status: "AuthorizationRequiredOff");
+                await configs.SaveAsync(current, cancellationToken);
+
+                return Results.Problem(
+                    title: "Authorization Required flag is OFF in Document Control Master.",
+                    detail: notificationMessage,
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
         }
 
         var saved = await configs.SetActiveAsync(request.Enabled, ActorOf(user), cancellationToken);
