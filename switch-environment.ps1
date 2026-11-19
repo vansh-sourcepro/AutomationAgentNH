@@ -144,7 +144,7 @@ function Set-Local {
       "SiteCode": "NF1",
       "CustomerCode": "",
       // RateStructureMode: "Auto" (respects DB flag), "Header" (forces header), "Inline" (forces line-level)
-      "RateStructureMode": "Header"
+      "RateStructureMode": "Auto"
     },
     "SoAllocationToDC": {
       "SiteId": 1,
