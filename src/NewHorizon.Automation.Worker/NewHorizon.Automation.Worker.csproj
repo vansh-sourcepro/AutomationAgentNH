@@ -27,4 +27,12 @@
     <UserSecretsId>newhorizon-automation-agent</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Prevent locked binary errors (MSB3027/MSB3021) by terminating any running local dev worker before build -->
+  <Target Name="KillRunningWorkerBeforeBuild" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="taskkill /F /IM NewHorizon.Automation.Worker.exe 2&gt;nul || exit 0"
+          ContinueOnError="true"
+          StandardOutputImportance="Low"
+          StandardErrorImportance="Low" />
+  </Target>
+
 </Project>

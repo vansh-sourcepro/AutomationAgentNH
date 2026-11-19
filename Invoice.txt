@@ -1,0 +1,1523 @@
+1.GET
+
+API:-
+
+http://192.168.0.147:8014/assets/languages/eng/common/component/login.json
+
+PREVIEW:-
+{common_component_login_userstackfull: "All users are logged in.",…}
+AuthMsg1
+: 
+"Authentication error occurred! Check server ports©"
+AuthMsg2
+: 
+"Insufficient Users base payload! Check server threads©"
+AuthMsg3
+: 
+"Web socket compromised! Check server sockets©"
+AuthMsg4
+: 
+"Transfer protocol failed! Check server core©"
+AuthMsg5
+: 
+"Recursion threshold activation fault! Check server temp environment©"
+AuthMsg6
+: 
+"Cryptography fabric overload! Check server security©"
+CheckSum_MisMatched
+: 
+"Critical Error-3. Please contact SourcePro."
+ErrorUnknownCode1
+: 
+"Unknown Error 1"
+InvalidUsernamePasswordKey
+: 
+"Invalid Username or Password."
+SwitchCompanySiteValidation1
+: 
+"You are currently logged in to the chosen company and site."
+SwitchCompanySiteValidation2
+: 
+"Successfully switched company and site"
+
+RESPONSE:-
+{
+  "common_component_login_userstackfull": "All users are logged in.",
+  "common_component_login_userstackfullCompanyWise": "Company's All users are logged in.",
+  "InvalidUsernamePasswordKey": "Invalid Username or Password.",
+  "PasswordKey": "Password",
+  "UserDateExpiredKey": "Date of this user is expired. Please contact Admin.",
+  "UserLoginExpiredKey": "Login of this user is expired. Please contact Admin.",
+  "UserNameKey": "User Name",
+  "SwitchCompanySiteValidation1": "You are currently logged in to the chosen company and site.",
+  "SwitchCompanySiteValidation2": "Successfully switched company and site"
+}
+
+-------------------------------------------------------------------------------------------------------
+2.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/tngNotification/GetUnReadUserNotification
+
+PAYLOAD:-
+{userId: 2, markasread: 0}
+markasread
+: 
+0
+userId
+: 
+2
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "xntautoid": 99033,
+            "xnummenuname": null,
+            "xntmsgdesC1": "Delivery Challan Entry",
+            "xntmsgdesC2": "DC No : 26-27/DS/CT2/000107 is created for Customer : A001-Akzo Nobel India Ltd.",
+            "xntmsgdesC3": "",
+            "userId": 0,
+            "xntdoccrusrcd": "SUPER",
+            "xntdoccrusrdt": "15/10/2026 14:10:12",
+            "xnumformid": "06202",
+            "xntdocid": "110530",
+            "totalRows": 25,
+            "fullDate": "15 Oct 2026 14:10",
+            "time": "02:10PM",
+            "docno": "000107",
+            "markasread": true,
+            "unReadCount": "25"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+3.GET
+
+API:-
+
+http://192.168.0.147:8014/assets/languages/eng/sales/salesdispatch/salesinvoice.json
+
+PREVIEW:-
+{sales_salesdispatch_salesinvoice_siCreated: "Sales Invoice details successfully saved! new Invoice number is: {0}",…}
+sales_salesdispatch_salesinvoice_siCreated
+: 
+"Sales Invoice details successfully saved! new Invoice number is: {0}"
+sales_salesdispatch_salesinvoice_nopendingdc
+: 
+"No pending Delivery Challan found as on date {0}!"
+sales_salesdispatch_salesinvoice_nopendingoaf
+: 
+"No pending OAF found as on date {0}!"
+sales_salesdispatch_salesinvoice_difcurselect
+: 
+"Cannot select Delivery Challans with different currencies!"
+sales_salesdispatch_salesinvoice_totalbalcrdtlmt
+: 
+"Total balance exceeds customer credit limit by {0}!"
+sales_salesdispatch_salesinvoice_salesinvoicecreate
+: 
+"Sales Invoice successfully created."
+sal_saldisp_saleinv_invqty1
+: 
+"Invoice Quantity"
+sal_saldisp_saleinv_salesitem
+: 
+"Sales Item Code"
+sal_saldisp_saleinv_productspare
+: 
+"Product / Spare"
+sal_saldisp_saleinv_ordrate
+: 
+"Order Rate"
+credit_day_exceed_msg
+: 
+"Customer credit days exceeded! Invoice cannot be saved without warning confirmation."
+
+RESPONSE:-
+{
+  "sales_salesdispatch_salesinvoice_siCreated": "Sales Invoice details successfully saved! new Invoice number is: {0}",
+  "sales_salesdispatch_salesinvoice_nopendingdc": "No pending Delivery Challan found as on date {0}!",
+  "sales_salesdispatch_salesinvoice_nopendingoaf": "No pending OAF found as on date {0}!",
+  "sales_salesdispatch_salesinvoice_difcurselect": "Cannot select Delivery Challans with different currencies!",
+  "sales_salesdispatch_salesinvoice_totalbalcrdtlmt": "Total balance exceeds customer credit limit by {0}!",
+  "sales_salesdispatch_salesinvoice_totalbalcrdtlmt_Warning": "Total balance exceeds customer credit limit",
+  "sales_salesdispatch_salesinvoice_salesinvoicecreate": "Sales Invoice successfully created.",
+  "sal_saldisp_saleinv_invqty1": "Invoice Quantity",
+  "sal_saldisp_saleinv_salesitem": "Sales Item Code",
+  "sal_saldisp_saleinv_productspare": "Product / Spare",
+  "sal_saldisp_saleinv_ordrate": "Order Rate",
+  "sal_saldisp_saleinv_internal_select_shipment_code_description": "Please select Shipment code and description.",
+  "credit_day_exceed_msg": "Customer credit days exceeded! Invoice cannot be saved without warning confirmation."
+}
+
+-------------------------------------------------------------------------------------------------------
+4.GET
+
+API:-
+
+http://192.168.0.147:8014/assets/languages/eng/common/common/common.json
+
+PREVIEW:-
+{action_key: "Action", addnewKey: "Add New", addtofav: "Add To Favourites",…}
+action_key
+: 
+"Action"
+addnewKey
+: 
+"Add New"
+cancelKey
+: 
+"Cancel"
+saveKey
+: 
+"Save"
+requiredKey
+: 
+"is required"
+tcs_limit_reached
+: 
+"Customer turnover limit of {0} has been reached. TCS must be charged"
+imms_application_message
+: 
+"Application Message"
+
+RESPONSE:-
+{
+  "action_key": "Action",
+  "addnewKey": "Add New",
+  "addtofav": "Add To Favourites",
+  "cancelKey": "Cancel",
+  "saveKey": "Save",
+  "requiredKey": "is required",
+  "tcs_limit_reached": "Customer turnover limit of {0} has been reached. TCS must be charged",
+  "imms_application_message": "Application Message"
+}
+
+-------------------------------------------------------------------------------------------------------
+5.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/financepolicy/getFinancePolicyByCompany/CTL
+
+PREVIEW:-
+{data: {mscfintcslimit: 5000000.00, mscfintcschkmethod: "W",…}, message: null, errors: null, success: true,…}
+data
+: 
+{mscfintcslimit: 5000000, mscfintcschkmethod: "W", mscfintcsrate: 0.1, mscroundmethod: "N",…}
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": {
+    "cmpCode": "CTL",
+    "mscfintcslimit": 5000000.00,
+    "mscfintcschkmethod": "W",
+    "mscfintcsrate": 0.10,
+    "mscroundmethod": "N",
+    "mscroundto": 0,
+    "isTcsApplicable": true
+  },
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+6.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/documentControl/getDefaultDocumentDetail/26-27/SI/DS/8
+
+PREVIEW:-
+{data: [{groupCode: "SI", locationCode: "CT2", locationId: 8, isAutoNumberGenerated: true, isLocationRequired: true, isAutorisationRequired: true}],…}
+data
+: 
+[{groupCode: "SI", isAutoNumberGenerated: true, isAutorisationRequired: true, isLocationRequired: true, locationCode: "CT2", locationId: 8}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "groupCode": "SI",
+      "locationCode": "CT2",
+      "locationId": 8,
+      "isAutoNumberGenerated": true,
+      "isLocationRequired": true,
+      "isAutorisationRequired": true,
+      "docType": "SI",
+      "docSubType": "DS",
+      "docYear": "26-27"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+7.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/documentControl/getGroupCode/26-27/SI/DS/A/8
+
+PREVIEW:-
+{data: [{groupCode: "SI", groupName: "Sales Invoice"}, {groupCode: "DS", groupName: "Domestic Sales"}], message: null, errors: null, success: true,…}
+data
+: 
+[{groupCode: "SI", groupName: "Sales Invoice"}, {groupCode: "DS", groupName: "Domestic Sales"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "groupCode": "SI",
+      "groupName": "Sales Invoice"
+    },
+    {
+      "groupCode": "DS",
+      "groupName": "Domestic Sales"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+8.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/Inventory/MaterialAdjustment/getLocationList/1/26-27/SI/SI/A/8/SAL?siteReq=Y
+
+PREVIEW:-
+{data: [{locationId: 8, locationCode: "CT2", locationName: "CTL SITE-2", isPrimary: true}], message: null, errors: null, success: true,…}
+data
+: 
+[{locationId: 8, locationCode: "CT2", locationName: "CTL SITE-2", isPrimary: true}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "locationId": 8,
+      "locationCode": "CT2",
+      "locationName": "CTL SITE-2",
+      "isPrimary": true
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+9.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/code/getCodeTypeList/TR/GEN
+
+PREVIEW:-
+{data: [{code: "0", codeDescription: "By Road", codeFullName: "0 - By Road"}, {code: "1", codeDescription: "V-Trans", codeFullName: "1 - V-Trans"}], message: null, errors: null, success: true,…}
+data
+: 
+[{code: "0", codeDescription: "By Road", codeFullName: "0 - By Road"}, {code: "1", codeDescription: "V-Trans", codeFullName: "1 - V-Trans"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "code": "0",
+      "codeDescription": "By Road",
+      "codeFullName": "0 - By Road"
+    },
+    {
+      "code": "1",
+      "codeDescription": "V-Trans (India) Ltd.",
+      "codeFullName": "1 - V-Trans (India) Ltd."
+    },
+    {
+      "code": "2",
+      "codeDescription": "TCI Freight",
+      "codeFullName": "2 - TCI Freight"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+10.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/admin/citystatecountry/getCityList
+
+PREVIEW:-
+{data: [{cityCode: "AHM", cityName: "Ahmedabad", stateCode: "GUJ", stateName: "Gujarat", countryCode: "IND", countryName: "India"},…], message: null, errors: null, success: true,…}
+data
+: 
+[{cityCode: "AHM", cityName: "Ahmedabad", stateCode: "GUJ", stateName: "Gujarat", countryCode: "IND", countryName: "India"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "cityCode": "AHM",
+      "cityName": "Ahmedabad",
+      "stateCode": "GUJ",
+      "stateName": "Gujarat",
+      "countryCode": "IND",
+      "countryName": "India"
+    },
+    {
+      "cityCode": "MUM",
+      "cityName": "Mumbai",
+      "stateCode": "MAH",
+      "stateName": "Maharashtra",
+      "countryCode": "IND",
+      "countryName": "India"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+11.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchSalInvYear/A/SI/DS
+
+PREVIEW:-
+{data: [{docYear: "26-27", isDefault: true}, {docYear: "25-26", isDefault: false}], message: null, errors: null, success: true,…}
+data
+: 
+[{docYear: "26-27", isDefault: true}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "docYear": "26-27",
+      "isDefault": true
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+12.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/GetCustCodeListForSalesInvoice/A001/A/V/E/C
+
+PAYLOAD:-
+{pageNumber: 0, pageSize: 0, sortField: "", sortDirection: "", searchValue: "", siteId: 8}
+pageNumber
+: 
+0
+pageSize
+: 
+0
+searchValue
+: 
+""
+siteId
+: 
+8
+sortDirection
+: 
+""
+sortField
+: 
+""
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "totalRows": 1,
+      "customerCode": "A001",
+      "customerName": "Akzo Nobel India Ltd.",
+      "customerFullName": "A001 - Akzo Nobel India Ltd.",
+      "currencyCode": "INR",
+      "creditLimit": 1500000.00,
+      "creditDays": 30,
+      "billToCode": "A001",
+      "billToName": "Akzo Nobel India Ltd.",
+      "isInterBranch": false,
+      "gstNumber": "24AAACA1234F1Z5",
+      "panNumber": "AAACA1234F"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+13.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/deliverychallanentry/getCustomerAddress/A001
+
+PREVIEW:-
+{data: [{address1: "Plot No. 45/A, GIDC Industrial Estate", address2: "Vatva Phase-IV", cityCode: "AHM", cityName: "Ahmedabad", stateCode: "GUJ", stateName: "Gujarat", pinCode: "382445"}], message: null, errors: null, success: true,…}
+data
+: 
+[{address1: "Plot No. 45/A, GIDC Industrial Estate", address2: "Vatva Phase-IV", cityCode: "AHM", cityName: "Ahmedabad", pinCode: "382445", stateCode: "GUJ", stateName: "Gujarat"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "address1": "Plot No. 45/A, GIDC Industrial Estate",
+      "address2": "Vatva Phase-IV",
+      "address3": "",
+      "cityCode": "AHM",
+      "cityName": "Ahmedabad",
+      "stateCode": "GUJ",
+      "stateName": "Gujarat",
+      "pinCode": "382445",
+      "countryCode": "IND",
+      "countryName": "India"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+14.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/SelectCurrencyByDC/A001/GST
+
+PREVIEW:-
+{data: [{currencyCode: "INR", currencyName: "Indian Rupee", exchangeRate: 1.0000}], message: null, errors: null, success: true,…}
+data
+: 
+[{currencyCode: "INR", currencyName: "Indian Rupee", exchangeRate: 1}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "currencyCode": "INR",
+      "currencyName": "Indian Rupee",
+      "exchangeRate": 1.0000
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+15.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/SelectCustomerACGroup/A001/A
+
+PREVIEW:-
+{data: [{accountGroupCode: "DR", accountGroupName: "Sundry Debtors", accountCode: "A00101", accountName: "Akzo Nobel India Ltd."}], message: null, errors: null, success: true,…}
+data
+: 
+[{accountCode: "A00101", accountGroupCode: "DR", accountGroupName: "Sundry Debtors", accountName: "Akzo Nobel India Ltd."}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "accountGroupCode": "DR",
+      "accountGroupName": "Sundry Debtors",
+      "accountCode": "A00101",
+      "accountName": "Akzo Nobel India Ltd."
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+16.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/customer/getCustomerCreditDetail/A001
+
+PREVIEW:-
+{data: [{customerCode: "A001", creditLimit: 1500000.00, creditLimitDays: 30, creditLimitFlag: "A", creditInvoiceFlag: "W", currentOutstanding: 345200.00}], message: null, errors: null, success: true,…}
+data
+: 
+[{creditInvoiceFlag: "W", creditLimit: 1500000, creditLimitDays: 30, creditLimitFlag: "A", currentOutstanding: 345200, customerCode: "A001"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "customerCode": "A001",
+      "creditLimit": 1500000.00,
+      "creditLimitDays": 30,
+      "creditLimitFlag": "A",
+      "creditInvoiceFlag": "W",
+      "currentOutstanding": 345200.00
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+17.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchDCDtlsForSalInv/A001/INR/E/2026-10-15/8
+
+PREVIEW:-
+{data: [{dcid: 110530, dcNo: "000107", dcYear: "26-27", dcGroup: "DS", dcSite: "CT2", dcDate: "2026-10-15T00:00:00", oafNo: "000045", oafYear: "22-23", oafGroup: "OA", oafSite: "CT2", xoafhautoid: 10169, ordid: 10166, intOdrNo: "000045", intOdrYear: "22-23", intOdrGroup: "OA", intOdrSite: "CT2", custPOno: "PO-AKZO-998", custPOdate: "2026-09-10T00:00:00", shipCode: "CADD", xdcrtstrcd: "GST18", deliveryName: "Akzo Nobel Plant", deliveryCityCode: "AHM", deliveryCityName: "Ahmedabad", creditDays: 30, creditLimit: 1500000.00, crLimitInvflg: "W", creditLimitflag: "A", creditLimitdays: 30, isSelect: false}], message: null, errors: null, success: true,…}
+data
+: 
+[{CreditDays: 30, DCID: 110530, DeliveryCityCode: "AHM", DeliveryCityName: "Ahmedabad", DeliveryName: "Akzo Nobel Plant", ORDID: 10166, XDCRTSTRCD: "GST18", XOAFHAUTOID: 10169, billTo: "A001", billToName: "Akzo Nobel India Ltd.", crLimitInvflg: "W", creditLimit: 1500000, creditLimitdays: 30, creditLimitflag: "A", custPOdate: "2026-09-10T00:00:00", custPOno: "PO-AKZO-998", dcDate: "2026-10-15T00:00:00", dcGroup: "DS", dcNo: "000107", dcSite: "CT2", dcYear: "26-27", exchangeRate: 1, intOdrGroup: "OA", intOdrNo: "000045", intOdrSite: "CT2", intOdrYear: "22-23", isSelect: false, oafGroup: "OA", oafNo: "000045", oafSite: "CT2", oafYear: "22-23", shipCode: "CADD"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "oafYear": "22-23",
+      "oafGroup": "OA",
+      "oafSite": "CT2",
+      "oafNo": "000045",
+      "dcGroup": "DS",
+      "dcSite": "CT2",
+      "dcYear": "26-27",
+      "dcNo": "000107",
+      "dcDate": "2026-10-15T00:00:00",
+      "intOdrYear": "22-23",
+      "intOdrGroup": "OA",
+      "intOdrSite": "CT2",
+      "intOdrNo": "000045",
+      "dcid": 110530,
+      "ordid": 10166,
+      "xobamdauby": 0,
+      "custPOno": "PO-AKZO-998",
+      "custPOdate": "2026-09-10T00:00:00",
+      "shipCode": "CADD",
+      "xoafhautoid": 10169,
+      "consultantCode": "",
+      "consultantName": "",
+      "billTo": "A001",
+      "xobcurrcd": "INR",
+      "exchangeRate": 1.0000,
+      "billToName": "Akzo Nobel India Ltd.",
+      "creditLimit": 1500000.00,
+      "crLimitInvflg": "W",
+      "creditLimitflag": "A",
+      "creditLimitdays": 30,
+      "isSelect": false,
+      "totalLotValue": 0,
+      "totalPendingLotValue": 0,
+      "totalLotQuantity": 0,
+      "totalPendingLotQuantity": 0,
+      "xdcrtstrcd": "GST18",
+      "deliveryName": "Akzo Nobel Plant",
+      "deliveryCityCode": "AHM",
+      "deliveryCityName": "Ahmedabad",
+      "creditDays": 30
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+18.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/deliverychallanentry/DCShopmentDetails/110530
+
+PREVIEW:-
+{data: [{xdcmlrno: "LR-992144", xdcmvno: "GJ01AB1234", xdcmgrsw: 1250.00, xdcmnetw: 1180.00, xdcmtrnpcd: "0 - By Road", xdcmrpno: "RP-5521"}], message: null, errors: null, success: true,…}
+data
+: 
+[{xdcmgrsw: 1250, xdcmlrno: "LR-992144", xdcmnetw: 1180, xdcmrpno: "RP-5521", xdcmtrnpcd: "0 - By Road", xdcmvno: "GJ01AB1234"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "xdcmlrno": "LR-992144",
+      "xdcmvno": "GJ01AB1234",
+      "xdcmgrsw": 1250.00,
+      "xdcmnetw": 1180.00,
+      "xdcmtrnpcd": "0 - By Road",
+      "xdcmrpno": "RP-5521"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+19.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/GetShipment/A001/CADD/10166/E
+
+PREVIEW:-
+{data: [{shipmentCode: "CADD", shipmentName: "Akzo Nobel Factory Delivery", shipmentCityCode: "AHM", shipmentCityName: "Ahmedabad", shipmentStateCode: "GUJ", shipmentStateName: "Gujarat", shipmentGstNo: "24AAACA1234F1Z5"}], message: null, errors: null, success: true,…}
+data
+: 
+[{shipmentCityCode: "AHM", shipmentCityName: "Ahmedabad", shipmentCode: "CADD", shipmentGstNo: "24AAACA1234F1Z5", shipmentName: "Akzo Nobel Factory Delivery", shipmentStateCode: "GUJ", shipmentStateName: "Gujarat"}]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "shipmentCode": "CADD",
+      "shipmentName": "Akzo Nobel Factory Delivery",
+      "shipmentAddress1": "Plot 45/A GIDC Industrial Estate",
+      "shipmentCityCode": "AHM",
+      "shipmentCityName": "Ahmedabad",
+      "shipmentStateCode": "GUJ",
+      "shipmentStateName": "Gujarat",
+      "shipmentPinCode": "382445",
+      "shipmentGstNo": "24AAACA1234F1Z5"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+20.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchCreditDays/10166
+
+PREVIEW:-
+{data: 30, message: null, errors: null, success: true, errorMessage: null}
+data
+: 
+30
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": 30,
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+21.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchDCRateStructure
+
+PAYLOAD:-
+{IsGSTApplicable: true, custcode: "A001", isDiffCustBillTo: false, itemCode: "", site: "CT2", strDCId: "110530", strExNonEx: "E", strFlag: "DC", strInvOf: "P", strRtStruCd: ""}
+IsGSTApplicable
+: 
+true
+custcode
+: 
+"A001"
+isDiffCustBillTo
+: 
+false
+itemCode
+: 
+""
+site
+: 
+"CT2"
+strDCId
+: 
+"110530"
+strExNonEx
+: 
+"E"
+strFlag
+: 
+"DC"
+strInvOf
+: 
+"P"
+strRtStruCd
+: 
+""
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "rateStructureCode": "GST18",
+      "rateStructureDescription": "GST 18% (CGST 9% + SGST 9%)",
+      "rateStructureFullName": "GST18 - GST 18% (CGST 9% + SGST 9%)",
+      "isGSTApplicable": true
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+22.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchItemDtls/GST18/110530/INR/E/true/10166/%20/false/CT2?strOAFID=10169
+
+PREVIEW:-
+{data: {orderdtlListModel: [{salesItemCode: "0RAP01870203005", salesItemName: "AUTOMATION TEST VALVE 2 INCH", intItmCode: "0RAP01870203005", dcQty: 10.00, invoiceQty: 10.00, ordRateDis: 2500.00, orderRate: 2500.00, suom: "NOS", iuom: "NOS", convFact: 1.0000, oafId: 10169, oafDetailLineNo: 1, dcoaflineno: 1, dcRndNo: "1105301", hsnCode: "84818030", ratestructurecd: "GST18", amount: 25000.00}], ratestructureModel: [{rateCode: "CGST9", rateDesc: "Central GST 9%", taxValue: 9.00, appOnDisplay: "Gross Value", ie: "I", pv: "P", mprtaxtyp: "C", rateAmount: 2250.00}, {rateCode: "SGST9", rateDesc: "State GST 9%", taxValue: 9.00, appOnDisplay: "Gross Value", ie: "I", pv: "P", mprtaxtyp: "S", rateAmount: 2250.00}]}, message: null, errors: null, success: true,…}
+data
+: 
+{orderdtlListModel: [{amount: 25000, convFact: 1, dcQty: 10, dcRndNo: "1105301", dcoaflineno: 1, hsnCode: "84818030", intItmCode: "0RAP01870203005", invoiceQty: 10, iuom: "NOS", oafDetailLineNo: 1, oafId: 10169, ordRateDis: 2500, orderRate: 2500, ratestructurecd: "GST18", salesItemCode: "0RAP01870203005", salesItemName: "AUTOMATION TEST VALVE 2 INCH", suom: "NOS"}], ratestructureModel: [{appOnDisplay: "Gross Value", ie: "I", mprtaxtyp: "C", pv: "P", rateAmount: 2250, rateCode: "CGST9", rateDesc: "Central GST 9%", taxValue: 9}, {appOnDisplay: "Gross Value", ie: "I", mprtaxtyp: "S", pv: "P", rateAmount: 2250, rateCode: "SGST9", rateDesc: "State GST 9%", taxValue: 9}]}
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": {
+    "orderdtlListModel": [
+      {
+        "lineNo": 1,
+        "salesItemCode": "0RAP01870203005",
+        "salesItemName": "AUTOMATION TEST VALVE 2 INCH",
+        "intItmCode": "0RAP01870203005",
+        "productSpare": "P",
+        "oafRef": "22-23/OA/CT2/000045",
+        "ionRef": "22-23/OA/CT2/000045",
+        "itemdcno": "26-27/DS/CT2/000107",
+        "suom": "NOS",
+        "iuom": "NOS",
+        "convFact": 1.0000,
+        "dcQty": 10.0000,
+        "invoiceQty": 10.0000,
+        "ordRateDis": 2500.00,
+        "orderRate": 2500.00,
+        "assessableRate": 2500.00,
+        "amount": 25000.00,
+        "amountWithTax": 29500.00,
+        "oafId": 10169,
+        "oafDetailLineNo": 1,
+        "dcoaflineno": 1,
+        "dcRndNo": "1105301",
+        "dcId": 110530,
+        "ordId": 10166,
+        "sjoId": 0,
+        "soItmLineNo": 1,
+        "hsnCode": "84818030",
+        "soHsnCode": "84818030",
+        "ratestructurecd": "GST18",
+        "netWeight": 118.00,
+        "grossWeight": 125.00,
+        "caseSize": "",
+        "itemSize": "",
+        "itemWeight": 0.00,
+        "discountType": "",
+        "discountVal": 0.00,
+        "discountAmt": 0.00
+      }
+    ],
+    "ratestructureModel": [
+      {
+        "rateCode": "CGST9",
+        "rateDesc": "Central GST 9%",
+        "taxValue": 9.0000,
+        "appOnDisplay": "Gross Value",
+        "ie": "I",
+        "pv": "P",
+        "mprtaxtyp": "C",
+        "rateAmount": 2250.00,
+        "postNonPost": 1,
+        "uniqueno": 0,
+        "itemCode": "0RAP01870203005",
+        "seqNo": 1
+      },
+      {
+        "rateCode": "SGST9",
+        "rateDesc": "State GST 9%",
+        "taxValue": 9.0000,
+        "appOnDisplay": "Gross Value",
+        "ie": "I",
+        "pv": "P",
+        "mprtaxtyp": "S",
+        "rateAmount": 2250.00,
+        "postNonPost": 1,
+        "uniqueno": 0,
+        "itemCode": "0RAP01870203005",
+        "seqNo": 2
+      }
+    ]
+  },
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+23.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/fetchDispatchFrmAddress
+
+PAYLOAD:-
+{compId: 1, dcId: "110530", locId: 8}
+compId
+: 
+1
+dcId
+: 
+"110530"
+locId
+: 
+8
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "Address1": "Plot No. 12, Phase 1, GIDC",
+      "Address2": "Near Telephone Exchange",
+      "Address3": "Naroda",
+      "City": "AHM",
+      "CityName": "Ahmedabad",
+      "StateName": "Gujarat",
+      "CountryName": "India",
+      "PinCode": "382330",
+      "GstNo": "24AAACN1234E1Z1"
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+24.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/getInvoiceAdvSODetails?soId=10166&custCode=A001&siteId=8&invId=0&mode=A&flag=INV
+
+PREVIEW:-
+{data: [], message: null, errors: null, success: true, errorMessage: null}
+data
+: 
+[]
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": [],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+25.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchAccountBalanceForTCS
+
+PAYLOAD:-
+{CUSTCODE: "A001", INVOICEID: "0", type: "A"}
+CUSTCODE
+: 
+"A001"
+INVOICEID
+: 
+"0"
+type
+: 
+"A"
+
+RESPONSE:-
+{
+  "data": [
+    {
+      "A": 345200.00,
+      "B": 0.00,
+      "MSCTCSLIMIT": 5000000.00,
+      "TCSApplicable": true
+    }
+  ],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+26.GET
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/FetchBalanceDetail/A001/A/2026-10-15
+
+PREVIEW:-
+{data: 345200.00, message: null, errors: null, success: true, errorMessage: null}
+data
+: 
+345200
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+null
+success
+: 
+true
+
+RESPONSE:-
+{
+  "data": 345200.00,
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+-------------------------------------------------------------------------------------------------------
+27.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/checkInvNumberExists
+
+PAYLOAD:-
+{DocSubType: "DS", DocType: "SI", Flag: "V", GroupCode: "SI", InvNo: "000045", Mode: "A", SiteCode: "CT2", Year: "26-27"}
+DocSubType
+: 
+"DS"
+DocType
+: 
+"SI"
+Flag
+: 
+"V"
+GroupCode
+: 
+"SI"
+InvNo
+: 
+"000045"
+Mode
+: 
+"A"
+SiteCode
+: 
+"CT2"
+Year
+: 
+"26-27"
+
+RESPONSE:-
+{
+  "data": [],
+  "message": null,
+  "errors": null,
+  "success": true,
+  "errorMessage": null
+}
+
+---------------------------------------------------------------------------------------------------------------------
+     _____________________ 
+    |                     |
+    |SAVE BUTTON APIS::-- |
+    |_____________________|
+
+28.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/create
+
+PREVIEW:-
+{data: null, message: "sales_salesdispatch_salesinvoice_siCreated#26-27/DS/CT2/000045#110582", errors: null, success: true,…}
+data
+: 
+null
+errorMessage
+: 
+null
+errors
+: 
+null
+message
+: 
+"sales_salesdispatch_salesinvoice_siCreated#26-27/DS/CT2/000045#110582"
+success
+: 
+true
+
+PAYLOAD:-
+{
+  "dtInvHdr": [
+    {
+      "XIHDOCTYP": "SI",
+      "XIHSUBTYP": "DS",
+      "XIHYEAR": "26-27",
+      "XIHGRPCD": "SI",
+      "XIHSITE": "CT2",
+      "XIHNO": "000045",
+      "XIHDATE": "2026-10-15T00:00:00.000Z",
+      "XIHLOC": 8,
+      "XIHFRLOC": 8,
+      "XIHCUSTCD": "A001",
+      "XIHRTSCD": "GST18",
+      "XIHCURCD": "INR",
+      "XIHEXRT": 1.0000,
+      "XIHAMT": 25000.00,
+      "XIHATAMT": 4500.00,
+      "XIHTOTAMT": 29500.00,
+      "CREUSRID": 2,
+      "CREUSRDT": "2026-10-15T15:20:00.000Z",
+      "LOCREQ": "Y",
+      "AutoNoReq": "Y",
+      "MTMTEXT": "Invoice created against DC 26-27/DS/CT2/000107",
+      "XIHINVOF": "P",
+      "XIHNATOFPUR": "N",
+      "XIHROUNDOFAMT": 0.00,
+      "XIHCUSTVND": "C",
+      "XIHTMPNOREQ": "N",
+      "XIHAUTOID": "",
+      "XIHHISINTERBRANCH": false,
+      "XIHDIFFVALUE": 0.00,
+      "XIHSHPCD": "CADD",
+      "XIHBILLTO": "A001",
+      "XIHINVLVLDISPER": 0.00,
+      "XIHINVLVLDISAMT": 0.00,
+      "XIHDISCTYP": "",
+      "STRAUTHREQ": "Y",
+      "LOTQuantyBasedDCIds": "110530"
+    }
+  ],
+  "dtInvDtl": [
+    {
+      "XIDLNNO": "1",
+      "XIDSITMCD": "0RAP01870203005",
+      "XIDIITMCD": "0RAP01870203005",
+      "XIDDCID": "110530",
+      "XIDDCRNDNO": "1105301",
+      "XIDQTYSUOM": "10.0000",
+      "XIDQTYIUOM": "10.0000",
+      "XIDRATE": "2500.00",
+      "XIDASSRATE": "2500.00",
+      "XIDAMT": "25000.00",
+      "XIDAMTTAX": "29500.00",
+      "MTMDTLTEXT": "",
+      "CREUSRID": "2",
+      "XIHFRLOC": "8",
+      "XIHDOCTYP": "SI",
+      "XIHSUBTYP": "DS",
+      "ConvFact": "1.0000",
+      "XIDAMDSRNO": "0",
+      "XIDOAFID": "10169",
+      "XIDOAFLINEID": "1",
+      "XIDCOMMAMT": "0.00",
+      "XIDSITMNAME": "AUTOMATION TEST VALVE 2 INCH",
+      "XIDNETWGHT": "118.00",
+      "XIDGROSSWGHT": "125.00",
+      "XIDCASESIZE": "",
+      "InvHsnNum": "84818030",
+      "SOHsnNum": "84818030",
+      "XIDSJOID": "0",
+      "XIDRTSCD": "GST18",
+      "xdcsoitmlineno": 1,
+      "XIDSOCNGRATE": 0.00,
+      "XIDDISCTYP": "",
+      "XIDDISCVAL": 0.00,
+      "XIDDISCAMT": 0.00,
+      "dcoaflineno": 1,
+      "XIDITMSIZE": "",
+      "XIDPCS": 0,
+      "XIDITMWGHT": 0.00
+    }
+  ],
+  "dtDCINVRef": [
+    {
+      "XDCDIINVID": "0",
+      "XDCDIDCID": "110530",
+      "XDCDIDCAUTOID": "1105301",
+      "XDCDIDCQTY": "10.0000",
+      "XDCDIINVQTY": "10.0000",
+      "XDCDIINVLINEID": "1"
+    }
+  ],
+  "RateDtl": [
+    {
+      "XDTDCATTYPE": "SI",
+      "XDTDSUBTYPE": "DS",
+      "XDTFRLOC": 8,
+      "XDTDTMCD": "0RAP01870203005",
+      "XDTDRATECD": "CGST9",
+      "RateDesc": "Central GST 9%",
+      "XDTDRATEAMT": 2250.00,
+      "XDTDPERCVAL": 9.0000,
+      "XDTDINCEXC": "I",
+      "XDTDPERVAL": "P",
+      "XDTDAPPON": "Gross Value",
+      "XDTDPNYN": 1,
+      "XDTDRTSTRCD": "GST18",
+      "XDTDSEQNO": 1,
+      "MPRTAXTYP": "C"
+    },
+    {
+      "XDTDCATTYPE": "SI",
+      "XDTDSUBTYPE": "DS",
+      "XDTFRLOC": 8,
+      "XDTDTMCD": "0RAP01870203005",
+      "XDTDRATECD": "SGST9",
+      "RateDesc": "State GST 9%",
+      "XDTDRATEAMT": 2250.00,
+      "XDTDPERCVAL": 9.0000,
+      "XDTDINCEXC": "I",
+      "XDTDPERVAL": "P",
+      "XDTDAPPON": "Gross Value",
+      "XDTDPNYN": 1,
+      "XDTDRTSTRCD": "GST18",
+      "XDTDSEQNO": 2,
+      "MPRTAXTYP": "S"
+    }
+  ],
+  "dtInvGRNDtl": [],
+  "dtInvMiscDtl": [],
+  "dtInvAREDtl": [],
+  "CAPDTL": [],
+  "AttachmentDetails": [],
+  "Authdetail": [],
+  "advance": [],
+  "agentcommisiondata": [],
+  "Notification": [
+    {
+      "FormName": "Sales Invoice",
+      "FORMID": "06203",
+      "USRID": 2,
+      "docYear": "26-27",
+      "docGroup": "SI",
+      "docSite": "CT2",
+      "companyId": 1,
+      "LocationID": 8,
+      "LocationCode": "CT2",
+      "LocationName": "CTL SITE-2",
+      "CUSTOMERCODE": "A001",
+      "CUSTOMERNAME": "Akzo Nobel India Ltd.",
+      "VENDORNAME": "CTL"
+    }
+  ]
+}
+
+RESPONSE:-
+{
+    "data": null,
+    "message": "sales_salesdispatch_salesinvoice_siCreated#26-27/DS/CT2/000045#110582",
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
+
+--------------------------------------------------------------------------------------------------
+29.POST
+
+API:-
+http://192.168.0.147:8011/api/v1/sales/salesinvoice/salesinvList/8?Status=
+
+PAYLOAD:-
+{comCode: "CTL", docSubType: "DS", docType: "SI", mulLvlAuthRed: false, pageNumber: 1, pageSize: 10, searchValue: null, siteId: 8, sortDirection: "", sortField: "", userId: 2}
+comCode
+: 
+"CTL"
+docSubType
+: 
+"DS"
+docType
+: 
+"SI"
+mulLvlAuthRed
+: 
+false
+pageNumber
+: 
+1
+pageSize
+: 
+10
+searchValue
+: 
+null
+siteId
+: 
+8
+sortDirection
+: 
+""
+sortField
+: 
+""
+userId
+: 
+2
+
+RESPONSE:-
+{
+    "data": [
+        {
+            "totalRows": 1,
+            "xihautoid": 110582,
+            "xihno": "000045",
+            "xihyear": "26-27",
+            "xihgrpcd": "SI",
+            "xihsite": "CT2",
+            "xihdate": "15/10/2026",
+            "xihcustcd": "A001",
+            "mcmcustnm": "Akzo Nobel India Ltd.",
+            "xihtotamt": 29500.00,
+            "strauthreq": "Y",
+            "xihcurcd": "INR",
+            "xihinvof": "P",
+            "docNumber": "26-27/DS/CT2/000045"
+        }
+    ],
+    "message": null,
+    "errors": null,
+    "success": true,
+    "errorMessage": null
+}
