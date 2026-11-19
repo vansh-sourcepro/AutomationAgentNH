@@ -1,10 +1,14 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NewHorizon.Automation.Application.Configuration;
 using NewHorizon.Automation.Application.Flows.IndentToPo;
 using NewHorizon.Automation.Application.Workflows.Definitions;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.ErpClient.Flows.IndentToPo;
+using NewHorizon.Automation.Infrastructure.Persistence;
 using NewHorizon.Automation.Worker.Contracts;
 using NewHorizon.Automation.Worker.Endpoints;
 using NewHorizon.Automation.Worker.Flows.IndentToPo.Contracts;
@@ -129,9 +133,11 @@ public static class ProcessJobEndpoints
     /// The grid collapsed to totals, for the same filter <see cref="ListAsync"/> takes (its
     /// <c>page</c>/<c>pageSize</c> have nothing to collapse and are not accepted here).
     /// </summary>
-    private static async Task<IResult> GetSummaryAsync(
+    internal static async Task<IResult> GetSummaryAsync(
         IProcessJobService processJobs,
+        IServiceProvider sp,
         CancellationToken cancellationToken,
+        string? module = null,
         string? search = null,
         string? workflow = null,
         string? status = null,
@@ -142,28 +148,227 @@ public static class ProcessJobEndpoints
         DateTimeOffset? from = null,
         DateTimeOffset? to = null)
     {
-        var (query, error) = BuildQuery(
-            search, workflow, status, company, trigger, stage, indentType, from, to, page: 1, pageSize: 1);
+        var selected = (module ?? workflow)?.Trim().ToLowerInvariant();
+        bool isGrnOnly = selected is "po-to-grn" or "potogrn" or "grn" or "po_to_grn";
+        bool isIndentOnly = selected is "indent-to-po" or "indenttopo" or "indent" or "indenttopurchaseorder" or "indent_to_po";
 
-        if (query is null)
+        var dbContext = sp.GetService<AutomationDbContext>();
+
+        // 1. PO → GRN only
+        if (isGrnOnly)
         {
-            return error!;
+            if (dbContext is null)
+            {
+                return Results.Ok(new ProcessJobSummaryResponse(0, new Dictionary<string, int>(), 0, null, null, 0, 0, 0, 0));
+            }
+
+            var grnSummary = await ComputePoGrnSummaryAsync(dbContext, from, to, cancellationToken);
+            return Results.Ok(grnSummary);
         }
 
-        var summary = await processJobs.GetSummaryAsync(query, cancellationToken);
+        // 2. Indent → PO only
+        if (isIndentOnly || dbContext is null)
+        {
+            var (query, error) = BuildQuery(
+                search, workflow, status, company, trigger, stage, indentType, from, to, page: 1, pageSize: 1);
 
-        return Results.Ok(ProcessJobMapper.ToResponse(summary));
+            if (query is null)
+            {
+                return error!;
+            }
+
+            var summary = await processJobs.GetSummaryAsync(query, cancellationToken);
+            return Results.Ok(ProcessJobMapper.ToResponse(summary));
+        }
+
+        // 3. No parameter (or "all") → Unified combined KPIs across both flows
+        var (defaultQuery, defaultError) = BuildQuery(
+            search, null, status, company, trigger, stage, indentType, from, to, page: 1, pageSize: 1);
+
+        if (defaultQuery is null)
+        {
+            return defaultError!;
+        }
+
+        var indentStats = ProcessJobMapper.ToResponse(await processJobs.GetSummaryAsync(defaultQuery, cancellationToken));
+
+        var grnStats = await ComputePoGrnSummaryAsync(dbContext, from, to, cancellationToken);
+
+        var combinedCounts = new Dictionary<string, int>(indentStats.CountsByStatus);
+        foreach (var (k, v) in grnStats.CountsByStatus)
+        {
+            combinedCounts[k] = combinedCounts.GetValueOrDefault(k) + v;
+        }
+
+        int totalJobs = indentStats.TotalJobs + grnStats.TotalJobs;
+        int successCount = indentStats.SuccessCount + grnStats.SuccessCount;
+        double? successRate = totalJobs > 0 ? Math.Round((double)successCount / totalJobs, 4) : null;
+        int totalTriggers = indentStats.TotalTriggerAttempts + grnStats.TotalTriggerAttempts;
+        int emptyTriggers = indentStats.TriggerAttemptsWithoutEligibleIndent + grnStats.TriggerAttemptsWithoutEligibleIndent;
+        int businessRefusals = indentStats.BusinessRefusalCount + grnStats.BusinessRefusalCount;
+        int technicalFailures = indentStats.TechnicalFailureCount + grnStats.TechnicalFailureCount;
+
+        double? avgDuration = null;
+        if (indentStats.AverageDurationMs.HasValue && grnStats.AverageDurationMs.HasValue && totalTriggers > 0)
+        {
+            avgDuration = Math.Round(
+                ((indentStats.AverageDurationMs.Value * indentStats.TotalTriggerAttempts) +
+                 (grnStats.AverageDurationMs.Value * grnStats.TotalTriggerAttempts)) / totalTriggers, 1);
+        }
+        else
+        {
+            avgDuration = indentStats.AverageDurationMs ?? grnStats.AverageDurationMs;
+        }
+
+        return Results.Ok(new ProcessJobSummaryResponse(
+            totalJobs,
+            combinedCounts,
+            successCount,
+            successRate,
+            avgDuration,
+            totalTriggers,
+            emptyTriggers,
+            businessRefusals,
+            technicalFailures));
+    }
+
+    private static async Task<ProcessJobSummaryResponse> ComputePoGrnSummaryAsync(
+        AutomationDbContext dbContext,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset? effectiveTo = to.HasValue ? (to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value) : null;
+        var runsQuery = dbContext.PoGrnRuns.AsNoTracking();
+        if (from.HasValue) runsQuery = runsQuery.Where(r => r.StartedAtUtc >= from.Value);
+        if (effectiveTo.HasValue) runsQuery = runsQuery.Where(r => r.StartedAtUtc <= effectiveTo.Value);
+
+        var runs = await runsQuery.ToListAsync(cancellationToken);
+
+        int totalTriggerAttempts = runs.Count;
+        int emptyTriggers = runs.Count(r => r.PosExamined == 0);
+        int totalPosExamined = runs.Sum(r => r.PosExamined);
+        int totalGrnsCreated = runs.Sum(r => r.GrnsCreated);
+        int totalPosSkipped = runs.Sum(r => r.PosSkipped);
+        int totalPosFailed = runs.Sum(r => r.PosFailed);
+
+        var completedRuns = runs.Where(r => r.CompletedAtUtc.HasValue).ToList();
+        double? avgDuration = completedRuns.Count > 0
+            ? Math.Round(completedRuns.Average(r => (r.CompletedAtUtc!.Value - r.StartedAtUtc).TotalMilliseconds), 1)
+            : null;
+
+        double? successRate = totalPosExamined > 0
+            ? Math.Round((double)totalGrnsCreated / totalPosExamined, 4)
+            : null;
+
+        var counts = new Dictionary<string, int>
+        {
+            ["Completed"] = totalGrnsCreated,
+            ["Skipped"] = totalPosSkipped,
+            ["Failed"] = totalPosFailed,
+        };
+
+        return new ProcessJobSummaryResponse(
+            TotalJobs: totalPosExamined,
+            CountsByStatus: counts,
+            SuccessCount: totalGrnsCreated,
+            SuccessRate: successRate,
+            AverageDurationMs: avgDuration,
+            TotalTriggerAttempts: totalTriggerAttempts,
+            TriggerAttemptsWithoutEligibleIndent: emptyTriggers,
+            BusinessRefusalCount: totalPosSkipped,
+            TechnicalFailureCount: totalPosFailed,
+            TotalPosExamined: totalPosExamined,
+            TotalGrnsCreated: totalGrnsCreated,
+            TotalPosSkipped: totalPosSkipped,
+            TotalPosFailed: totalPosFailed,
+            TriggerAttemptsWithoutEligiblePo: emptyTriggers);
     }
 
     /// <summary>The two charts on the dashboard, one row per UTC day over the trailing window.</summary>
-    private static async Task<IResult> GetDailyStatsAsync(
+    internal static async Task<IResult> GetDailyStatsAsync(
         IProcessJobService processJobs,
+        IServiceProvider sp,
         CancellationToken cancellationToken,
+        string? module = null,
+        string? workflow = null,
         int days = 30)
     {
-        var stats = await processJobs.GetDailyStatsAsync(days, cancellationToken);
+        var selected = (module ?? workflow)?.Trim().ToLowerInvariant();
+        bool isGrnOnly = selected is "po-to-grn" or "potogrn" or "grn" or "po_to_grn";
+        bool isIndentOnly = selected is "indent-to-po" or "indenttopo" or "indent" or "indenttopurchaseorder" or "indent_to_po";
 
-        return Results.Ok(stats.Select(ProcessJobMapper.ToResponse).ToList());
+        var dbContext = sp.GetService<AutomationDbContext>();
+
+        if (isGrnOnly)
+        {
+            if (dbContext is null)
+            {
+                return Results.Ok(new List<DailyConversionStatResponse>());
+            }
+
+            var grnDaily = await ComputePoGrnDailyStatsAsync(dbContext, days, cancellationToken);
+            return Results.Ok(grnDaily);
+        }
+
+        if (isIndentOnly || dbContext is null)
+        {
+            var stats = await processJobs.GetDailyStatsAsync(days, cancellationToken);
+            return Results.Ok(stats.Select(ProcessJobMapper.ToResponse).ToList());
+        }
+
+        var indentStats = (await processJobs.GetDailyStatsAsync(days, cancellationToken))
+            .Select(ProcessJobMapper.ToResponse)
+            .ToList();
+
+        var grnDailyStats = await ComputePoGrnDailyStatsAsync(dbContext, days, cancellationToken);
+
+        var byDate = new Dictionary<string, (int Created, int Converted, int Failed)>();
+        foreach (var s in indentStats)
+        {
+            byDate[s.Date] = (s.PurchaseOrdersCreated, s.IndentsConverted, s.IndentsFailed);
+        }
+        foreach (var s in grnDailyStats)
+        {
+            if (byDate.TryGetValue(s.Date, out var existing))
+            {
+                byDate[s.Date] = (existing.Created + s.PurchaseOrdersCreated, existing.Converted + s.IndentsConverted, existing.Failed + s.IndentsFailed);
+            }
+            else
+            {
+                byDate[s.Date] = (s.PurchaseOrdersCreated, s.IndentsConverted, s.IndentsFailed);
+            }
+        }
+
+        var result = byDate.OrderBy(kv => kv.Key)
+            .Select(kv => new DailyConversionStatResponse(kv.Key, kv.Value.Created, kv.Value.Converted, kv.Value.Failed))
+            .ToList();
+
+        return Results.Ok(result);
+    }
+
+    private static async Task<List<DailyConversionStatResponse>> ComputePoGrnDailyStatsAsync(
+        AutomationDbContext dbContext,
+        int days,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = DateTimeOffset.UtcNow.Date.AddDays(-days);
+        var runs = await dbContext.PoGrnRuns.AsNoTracking()
+            .Where(r => r.StartedAtUtc >= cutoff)
+            .ToListAsync(cancellationToken);
+
+        return runs
+            .GroupBy(r => r.StartedAtUtc.ToString("yyyy-MM-dd"))
+            .OrderBy(g => g.Key)
+            .Select(g => new DailyConversionStatResponse(
+                g.Key,
+                PurchaseOrdersCreated: g.Sum(r => r.GrnsCreated),
+                IndentsConverted: g.Sum(r => r.PosExamined),
+                IndentsFailed: g.Sum(r => r.PosFailed),
+                GrnsCreated: g.Sum(r => r.GrnsCreated),
+                PosExamined: g.Sum(r => r.PosExamined),
+                PosFailed: g.Sum(r => r.PosFailed)))
+            .ToList();
     }
 
     /// <summary>
@@ -238,7 +443,7 @@ public static class ProcessJobEndpoints
                     known.Equals(stage.Trim(), StringComparison.OrdinalIgnoreCase)),
             IndentKind = indentKind,
             FromUtc = from,
-            ToUtc = to,
+            ToUtc = to.HasValue ? (to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value) : null,
             Page = page,
             PageSize = pageSize,
         }, null);
@@ -341,21 +546,47 @@ public static class ProcessJobEndpoints
     }
 
     /// <summary>What one trigger did — including a trigger that converted nothing.</summary>
-    private static async Task<IResult> GetRunAsync(
+    /// <summary>What one trigger did — including a trigger that converted nothing.</summary>
+    internal static async Task<IResult> GetRunAsync(
         Guid runId,
         IProcessJobService processJobs,
+        IServiceProvider sp,
         CancellationToken cancellationToken)
     {
         var detail = await processJobs.GetRunAsync(runId, cancellationToken);
 
-        return detail is null
-            ? Results.NotFound()
-            : Results.Ok(ProcessJobMapper.ToResponse(detail));
+        if (detail is not null)
+        {
+            return Results.Ok(ProcessJobMapper.ToResponse(detail));
+        }
+
+        var dbContext = sp.GetService<AutomationDbContext>();
+        if (dbContext is not null)
+        {
+            var grnRun = await dbContext.PoGrnRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == runId, cancellationToken);
+            if (grnRun is not null)
+            {
+                var receipts = await dbContext.PoGrnReceipts.AsNoTracking()
+                    .Where(r => r.RunId == runId)
+                    .ToListAsync(cancellationToken);
+
+                return Results.Ok(new
+                {
+                    run = ProcessJobMapper.ToResponse(grnRun, receipts),
+                    receipts
+                });
+            }
+        }
+
+        return Results.NotFound();
     }
 
-    private static async Task<IResult> ListRunsAsync(
+    internal static async Task<IResult> ListRunsAsync(
         IProcessJobService processJobs,
+        IServiceProvider sp,
         CancellationToken cancellationToken,
+        string? module = null,
+        string? workflow = null,
         string? trigger = null,
         string? status = null,
         DateTimeOffset? from = null,
@@ -393,23 +624,122 @@ public static class ProcessJobEndpoints
             runStatus = parsed;
         }
 
-        var result = await processJobs.ListRunsAsync(
+        var selected = (module ?? workflow)?.Trim().ToLowerInvariant();
+        bool isGrnOnly = selected is "po-to-grn" or "potogrn" or "grn" or "po_to_grn";
+        bool isIndentOnly = selected is "indent-to-po" or "indenttopo" or "indent" or "indenttopurchaseorder" or "indent_to_po";
+
+        var dbContext = sp.GetService<AutomationDbContext>();
+        DateTimeOffset? effectiveTo = to.HasValue ? (to.Value.TimeOfDay == TimeSpan.Zero ? to.Value.Date.AddDays(1).AddTicks(-1) : to.Value) : null;
+        int clampedPage = Math.Max(1, page);
+        int clampedPageSize = Math.Clamp(pageSize, 1, 200);
+
+        // 1. PO → GRN only
+        if (isGrnOnly)
+        {
+            if (dbContext is null)
+            {
+                return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>([], 0, clampedPage, clampedPageSize));
+            }
+
+            var grnQuery = dbContext.PoGrnRuns.AsNoTracking();
+            if (triggerSource.HasValue) grnQuery = grnQuery.Where(r => r.Trigger == triggerSource.Value);
+            if (runStatus.HasValue) grnQuery = grnQuery.Where(r => r.Status == runStatus.Value);
+            if (from.HasValue) grnQuery = grnQuery.Where(r => r.StartedAtUtc >= from.Value);
+            if (effectiveTo.HasValue) grnQuery = grnQuery.Where(r => r.StartedAtUtc <= effectiveTo.Value);
+
+            var total = await grnQuery.CountAsync(cancellationToken);
+            var items = await grnQuery.OrderByDescending(r => r.StartedAtUtc)
+                .Skip((clampedPage - 1) * clampedPageSize)
+                .Take(clampedPageSize)
+                .ToListAsync(cancellationToken);
+
+            var runIds = items.Select(r => r.Id).ToList();
+            var receipts = runIds.Count > 0
+                ? await dbContext.PoGrnReceipts.AsNoTracking()
+                    .Where(r => runIds.Contains(r.RunId))
+                    .ToListAsync(cancellationToken)
+                : [];
+
+            var receiptsByRun = receipts.GroupBy(r => r.RunId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PoGrnReceipt>)g.ToList());
+
+            return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>(
+                [.. items.Select(run => ProcessJobMapper.ToResponse(run, receiptsByRun.GetValueOrDefault(run.Id)))],
+                total,
+                clampedPage,
+                clampedPageSize));
+        }
+
+        // 2. Indent → PO only
+        if (isIndentOnly || dbContext is null)
+        {
+            var result = await processJobs.ListRunsAsync(
+                new ProcessRunQuery
+                {
+                    TriggerSource = triggerSource,
+                    Status = runStatus,
+                    FromUtc = from,
+                    ToUtc = effectiveTo,
+                    Page = clampedPage,
+                    PageSize = clampedPageSize,
+                },
+                cancellationToken);
+
+            return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>(
+                [.. result.Items.Select(ProcessJobMapper.ToResponse)],
+                result.TotalCount,
+                result.Page,
+                result.PageSize));
+        }
+
+        // 3. No parameter passed (or "all") → Merge both Indent → PO and PO → GRN runs
+        var indentRunsResult = await processJobs.ListRunsAsync(
             new ProcessRunQuery
             {
                 TriggerSource = triggerSource,
                 Status = runStatus,
                 FromUtc = from,
-                ToUtc = to,
-                Page = page,
-                PageSize = pageSize,
+                ToUtc = effectiveTo,
+                Page = 1,
+                PageSize = Math.Max(clampedPageSize * clampedPage, 100),
             },
             cancellationToken);
 
+        var allGrnQuery = dbContext.PoGrnRuns.AsNoTracking();
+        if (triggerSource.HasValue) allGrnQuery = allGrnQuery.Where(r => r.Trigger == triggerSource.Value);
+        if (runStatus.HasValue) allGrnQuery = allGrnQuery.Where(r => r.Status == runStatus.Value);
+        if (from.HasValue) allGrnQuery = allGrnQuery.Where(r => r.StartedAtUtc >= from.Value);
+        if (effectiveTo.HasValue) allGrnQuery = allGrnQuery.Where(r => r.StartedAtUtc <= effectiveTo.Value);
+
+        var grnTotal = await allGrnQuery.CountAsync(cancellationToken);
+        var grnItems = await allGrnQuery.OrderByDescending(r => r.StartedAtUtc)
+            .Take(Math.Max(clampedPageSize * clampedPage, 100))
+            .ToListAsync(cancellationToken);
+
+        var grnRunIds = grnItems.Select(r => r.Id).ToList();
+        var grnReceipts = grnRunIds.Count > 0
+            ? await dbContext.PoGrnReceipts.AsNoTracking()
+                .Where(r => grnRunIds.Contains(r.RunId))
+                .ToListAsync(cancellationToken)
+            : [];
+
+        var grnReceiptsByRun = grnReceipts.GroupBy(r => r.RunId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PoGrnReceipt>)g.ToList());
+
+        var merged = indentRunsResult.Items.Select(ProcessJobMapper.ToResponse)
+            .Concat(grnItems.Select(run => ProcessJobMapper.ToResponse(run, grnReceiptsByRun.GetValueOrDefault(run.Id))))
+            .OrderByDescending(r => r.StartedAtUtc)
+            .Skip((clampedPage - 1) * clampedPageSize)
+            .Take(clampedPageSize)
+            .ToList();
+
+        var totalMergedCount = indentRunsResult.TotalCount + grnTotal;
+
         return Results.Ok(new Application.Jobs.PagedResult<ProcessRunResponse>(
-            [.. result.Items.Select(ProcessJobMapper.ToResponse)],
-            result.TotalCount,
-            result.Page,
-            result.PageSize));
+            merged,
+            totalMergedCount,
+            clampedPage,
+            clampedPageSize));
     }
 
     /// <summary>

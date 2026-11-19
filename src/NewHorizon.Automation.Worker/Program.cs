@@ -17,6 +17,7 @@ using NewHorizon.Automation.Worker.Flows.IndentToPo;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Endpoints;
 using NewHorizon.Automation.Worker.Flows.DcToInvoice;
+using NewHorizon.Automation.Worker.Flows.PoToGrn;
 using NewHorizon.Automation.Worker.Logging;
 using NewHorizon.Automation.Worker.Services;
 using Serilog;
@@ -202,6 +203,9 @@ try
 
             // Each automation flow's own timers, under the same usable-database gate.
             builder.Services.AddIndentToPoScheduler();
+
+            // PO → GRN's daily timer. Inert until its settings row is switched on and scheduled.
+            builder.Services.AddPoToGrnScheduler();
         }
     }
     else
@@ -230,6 +234,7 @@ try
     builder.Services.AddIndentToPoOrchestration();
     builder.Services.AddSoAllocationToDcServices(builder.Configuration);
     builder.Services.AddDcToInvoiceServices(builder.Configuration);
+    builder.Services.AddPoToGrnServices();
 
     // Sign in to the ERP at startup so the token is cached before the first cycle runs.
     builder.Services.AddErpLoginStartup();
@@ -282,6 +287,9 @@ try
     app.MapIndentToPoEndpoints(databaseConfigured, database.Usable, inboundJwt.IsConfigured);
     app.MapSoAllocationToDcEndpoints();
     app.MapDcToInvoiceEndpoints();
+
+    // PO → GRN: settings (/api/automation/grn-automation) and trigger (/api/automation/po-to-grn).
+    app.MapPoToGrnEndpoints();
 
     // The startup verdict on the database, logged after the host is built so it reaches the
     // configured sinks rather than only the bootstrap console.

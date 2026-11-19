@@ -140,6 +140,422 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
                     b.ToTable("AutomationError", (string)null);
                 });
 
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoAutomationConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("DryRun")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("IndentKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("IndentNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastRunReference")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastRunStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateOnly?>("LastScheduledRunDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset?>("LastTriggeredAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("MaxIndentsPerRun")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RunMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<TimeOnly?>("ScheduleTime")
+                        .HasColumnType("time");
+
+                    b.Property<string>("Sites")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IndentKind")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IndentPoAutomationConfig_IndentKind");
+
+                    b.ToTable("IndentPoAutomationConfig", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("6f1d4c20-0000-0000-0000-00000000000a"),
+                            DryRun = false,
+                            IndentKind = "Regular",
+                            IsActive = false,
+                            RunMode = "Api",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("6f1d4c20-0000-0000-0000-00000000000b"),
+                            DryRun = false,
+                            IndentKind = "Capital",
+                            IsActive = false,
+                            RunMode = "Api",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("6f1d4c20-0000-0000-0000-00000000000c"),
+                            DryRun = false,
+                            IndentKind = "Service",
+                            IsActive = false,
+                            RunMode = "Api",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
+                });
+
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoConversion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("FirstSeenAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateOnly?>("IndentDate")
+                        .HasColumnType("date");
+
+                    b.Property<long>("IndentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("IndentKind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("IndentNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("SiteId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IndentNumber")
+                        .HasDatabaseName("IX_IndentPoConversion_IndentNumber");
+
+                    b.HasIndex("SiteId")
+                        .HasDatabaseName("IX_IndentPoConversion_SiteId");
+
+                    b.HasIndex("IndentKind", "IndentId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IndentPoConversion_Indent");
+
+                    b.ToTable("IndentPoConversion", (string)null);
+                });
+
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoOutcome", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("LineCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<long?>("PoId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PoNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("RateStructureCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("StepId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("VendorCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PoId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IndentPoOutcome_PoId")
+                        .HasFilter("[PoId] IS NOT NULL");
+
+                    b.HasIndex("StepId");
+
+                    b.HasIndex("VendorCode")
+                        .HasDatabaseName("IX_IndentPoOutcome_VendorCode");
+
+                    b.HasIndex("JobId", "Sequence")
+                        .IsUnique()
+                        .HasDatabaseName("UX_IndentPoOutcome_Job_Sequence");
+
+                    b.ToTable("IndentPoOutcome", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_IndentPoOutcome_Result", "([Outcome] = 'Created' AND [PoId] IS NOT NULL AND [PoNumber] IS NOT NULL) OR ([Outcome] <> 'Created' AND [Reason] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnAutomationConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("DryRun")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("InvoiceNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastRunReference")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastRunStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateOnly?>("LastScheduledRunDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset?>("LastTriggeredAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("MaxPosPerRun")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PoNumbers")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("PoTypes")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ReceiptMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("RunMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<TimeOnly?>("ScheduleTime")
+                        .HasColumnType("time");
+
+                    b.Property<string>("Sites")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PoGrnAutomationConfig", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("7a2e5d30-0000-0000-0000-000000000001"),
+                            DryRun = false,
+                            IsActive = false,
+                            ReceiptMode = "Complete",
+                            RunMode = "Api",
+                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 9, 24, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
+                });
+
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("GrnId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("GrnNumber")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("LinesReceived")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LinesSkipped")
+                        .HasColumnType("int");
+
+                    b.Property<long>("PoId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PoNumber")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("PoType")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SiteId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("VendorCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("WarehouseId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("PoId", "RecordedAtUtc")
+                        .HasDatabaseName("IX_PoGrnReceipt_PoId_RecordedAtUtc");
+
+                    b.ToTable("PoGrnReceipt", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PoGrnReceipt_Result", "([Status] = 'Created' AND [GrnNumber] IS NOT NULL) OR ([Status] <> 'Created' AND [Reason] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("GrnsCreated")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PosExamined")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PosFailed")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PosSkipped")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReceiptMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("RequestedSites")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("StartedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("TriggerReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("TriggeredBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAtUtc")
+                        .HasDatabaseName("IX_PoGrnRun_StartedAtUtc");
+
+                    b.ToTable("PoGrnRun", (string)null);
+                });
+
             modelBuilder.Entity("NewHorizon.Automation.Domain.Jobs.AutomationRun", b =>
                 {
                     b.Property<Guid>("Id")
@@ -488,209 +904,27 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
                     b.ToTable("AutomationLog", (string)null);
                 });
 
-            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoAutomationConfig", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("DryRun")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("IndentKind")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("IndentNumbers")
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastRunReference")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("LastRunStatus")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateOnly?>("LastScheduledRunDate")
-                        .HasColumnType("date");
-
-                    b.Property<DateTimeOffset?>("LastTriggeredAtUtc")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<int?>("MaxIndentsPerRun")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RunMode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<TimeOnly?>("ScheduleTime")
-                        .HasColumnType("time");
-
-                    b.Property<string>("Sites")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("IndentKind")
-                        .IsUnique()
-                        .HasDatabaseName("UX_IndentPoAutomationConfig_IndentKind");
-
-                    b.ToTable("IndentPoAutomationConfig", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = new Guid("6f1d4c20-0000-0000-0000-00000000000a"),
-                            DryRun = false,
-                            IndentKind = "Regular",
-                            IsActive = false,
-                            RunMode = "Api",
-                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
-                        },
-                        new
-                        {
-                            Id = new Guid("6f1d4c20-0000-0000-0000-00000000000b"),
-                            DryRun = false,
-                            IndentKind = "Capital",
-                            IsActive = false,
-                            RunMode = "Api",
-                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
-                        },
-                        new
-                        {
-                            Id = new Guid("6f1d4c20-0000-0000-0000-00000000000c"),
-                            DryRun = false,
-                            IndentKind = "Service",
-                            IsActive = false,
-                            RunMode = "Api",
-                            UpdatedAtUtc = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
-                        });
-                });
-
-            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoConversion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("FirstSeenAtUtc")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateOnly?>("IndentDate")
-                        .HasColumnType("date");
-
-                    b.Property<long>("IndentId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("IndentKind")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<string>("IndentNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<int>("SiteId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("IndentNumber")
-                        .HasDatabaseName("IX_IndentPoConversion_IndentNumber");
-
-                    b.HasIndex("SiteId")
-                        .HasDatabaseName("IX_IndentPoConversion_SiteId");
-
-                    b.HasIndex("IndentKind", "IndentId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_IndentPoConversion_Indent");
-
-                    b.ToTable("IndentPoConversion", (string)null);
-                });
-
             modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoOutcome", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
+                    b.HasOne("NewHorizon.Automation.Domain.Jobs.Job", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.HasOne("NewHorizon.Automation.Domain.Jobs.JobStep", null)
+                        .WithMany()
+                        .HasForeignKey("StepId")
+                        .OnDelete(DeleteBehavior.NoAction);
+                });
 
-                    b.Property<string>("CurrencyCode")
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
-
-                    b.Property<Guid>("JobId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("LineCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Outcome")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<long?>("PoId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("PoNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<string>("RateStructureCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<int>("Sequence")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("StepId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("VendorCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PoId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_IndentPoOutcome_PoId")
-                        .HasFilter("[PoId] IS NOT NULL");
-
-                    b.HasIndex("StepId");
-
-                    b.HasIndex("VendorCode")
-                        .HasDatabaseName("IX_IndentPoOutcome_VendorCode");
-
-                    b.HasIndex("JobId", "Sequence")
-                        .IsUnique()
-                        .HasDatabaseName("UX_IndentPoOutcome_Job_Sequence");
-
-                    b.ToTable("IndentPoOutcome", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_IndentPoOutcome_Result", "([Outcome] = 'Created' AND [PoId] IS NOT NULL AND [PoNumber] IS NOT NULL) OR ([Outcome] <> 'Created' AND [Reason] IS NOT NULL)");
-                        });
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnReceipt", b =>
+                {
+                    b.HasOne("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnRun", null)
+                        .WithMany()
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("NewHorizon.Automation.Domain.Jobs.Job", b =>
@@ -713,20 +947,6 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
                         .HasForeignKey("JobId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.IndentToPo.IndentPoOutcome", b =>
-                {
-                    b.HasOne("NewHorizon.Automation.Domain.Jobs.Job", null)
-                        .WithMany()
-                        .HasForeignKey("JobId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("NewHorizon.Automation.Domain.Jobs.JobStep", null)
-                        .WithMany()
-                        .HasForeignKey("StepId")
-                        .OnDelete(DeleteBehavior.NoAction);
                 });
 
             modelBuilder.Entity("NewHorizon.Automation.Domain.Jobs.Job", b =>

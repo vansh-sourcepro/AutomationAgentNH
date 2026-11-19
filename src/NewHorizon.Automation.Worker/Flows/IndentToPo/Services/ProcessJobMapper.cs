@@ -1,6 +1,7 @@
 using NewHorizon.Automation.Application.Flows.IndentToPo;
 using NewHorizon.Automation.Domain.Errors;
 using NewHorizon.Automation.Domain.Flows.IndentToPo;
+using NewHorizon.Automation.Domain.Flows.PoToGrn;
 using NewHorizon.Automation.Domain.Jobs;
 using NewHorizon.Automation.Worker.Contracts;
 using NewHorizon.Automation.Worker.Flows.IndentToPo.Contracts;
@@ -33,6 +34,51 @@ internal static class ProcessJobMapper
             run.StartedAtUtc,
             run.CompletedAtUtc,
             run.DurationMs);
+
+    public static ProcessRunResponse ToResponse(PoGrnRun run, IReadOnlyList<PoGrnReceipt>? receipts = null)
+    {
+        var validReceipts = receipts ?? [];
+        var createdGrns = validReceipts
+            .Where(r => !string.IsNullOrWhiteSpace(r.GrnNumber))
+            .Select(r => r.GrnNumber!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var poNumbers = validReceipts
+            .Where(r => !string.IsNullOrWhiteSpace(r.PoNumber))
+            .Select(r => r.PoNumber.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        string? grnNumber = createdGrns.Count > 0 ? string.Join(", ", createdGrns) : null;
+        IReadOnlyList<string>? grnNumbers = createdGrns.Count > 0 ? createdGrns : null;
+        string? poNumberStr = poNumbers.Count > 0 ? string.Join(", ", poNumbers) : null;
+
+        return new(
+            run.Id,
+            CorrelationId: run.TriggerReference ?? string.Empty,
+            Workflow: "PoToGrn",
+            run.Trigger.ToString(),
+            run.TriggeredBy,
+            run.TriggerReference,
+            Mode: run.ReceiptMode.ToString(),
+            IndentTypes: "PO to GRN",
+            Sites: run.RequestedSites,
+            MaxIndents: null,
+            run.Status.ToString(),
+            IndentsExamined: run.PosExamined,
+            ExecutionsTracked: run.PosExamined,
+            PurchaseOrdersCreated: run.GrnsCreated,
+            run.FailureReason,
+            run.StartedAtUtc,
+            run.CompletedAtUtc,
+            run.CompletedAtUtc.HasValue ? (long?)(run.CompletedAtUtc.Value - run.StartedAtUtc).TotalMilliseconds : null,
+            PosExamined: run.PosExamined,
+            GrnsCreated: run.GrnsCreated,
+            GrnNumber: grnNumber,
+            GrnNumbers: grnNumbers,
+            PoNumbers: poNumberStr);
+    }
 
     /// <summary>
     /// One grid line. The company is passed in rather than read from the row: it is configuration,

@@ -6,6 +6,7 @@ using NewHorizon.Automation.Application.Configuration;
 using NewHorizon.Automation.Application.Jobs;
 using NewHorizon.Automation.Application.Notifications;
 using NewHorizon.Automation.Infrastructure.Flows.IndentToPo;
+using NewHorizon.Automation.Infrastructure.Flows.PoToGrn;
 using NewHorizon.Automation.Infrastructure.Hosting;
 using NewHorizon.Automation.Infrastructure.Notifications;
 using NewHorizon.Automation.Infrastructure.Persistence;
@@ -41,6 +42,7 @@ public static class DependencyInjection
 
         // Each automation flow's repositories. A new flow adds its own line here.
         services.AddIndentToPoPersistence();
+        services.AddPoToGrnPersistence();
 
         // Log-based until the client confirms the real channel (§18). TryAdd so a host that
         // registers a real notifier keeps it.
