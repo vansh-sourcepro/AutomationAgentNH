@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using NewHorizon.Automation.Infrastructure.Persistence;
 
 namespace NewHorizon.Automation.IntegrationTests;
 
@@ -17,7 +20,20 @@ public sealed class AgentApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureHostConfiguration(configuration =>
             configuration.AddInMemoryCollection(TestConfiguration.Valid));
 
-        return base.CreateHost(builder);
+        var host = base.CreateHost(builder);
+
+        using (var scope = host.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetService<AutomationDbContext>();
+            if (db is not null && db.Database.CanConnect())
+            {
+                db.Database.Migrate();
+                db.Database.ExecuteSqlRaw(
+                    "UPDATE IssueToShopFloorAutomationConfig SET IsActive = 1");
+            }
+        }
+
+        return host;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

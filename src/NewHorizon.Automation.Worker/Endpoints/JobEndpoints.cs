@@ -45,20 +45,54 @@ public static class JobEndpoints
 
         endpoints.MapGet("/api/automation/types", GetAutomationTypes)
             .WithName("GetAutomationTypes")
-            .AddEndpointFilter<ErpUserOrApiKeyFilter>();
+            .AllowAnonymous();
 
         return endpoints;
     }
 
-
-    private static IResult GetAutomationTypes() =>
-        Results.Ok(new[]
+    private static IResult GetAutomationTypes()
+    {
+        var types = new[]
         {
-            new { id = "IndentToPo", name = "Indent-to-PO", description = "Convert authorised material and service indents into purchase orders", configEndpoint = "po-automation", dashboardEndpoint = "process-jobs/dashboard", historyEndpoint = "process-jobs/runs" },
-            new { id = "PoToGrn", name = "PO-to-GRN", description = "Convert authorised purchase orders into goods receipt notes", configEndpoint = "grn-automation", dashboardEndpoint = "po-to-grn/dashboard", historyEndpoint = "po-to-grn/history" },
-            new { id = "SjoToIssue", name = "SJO-to-Issue-to-Shop-Floor", description = "Reserve stock and create shop floor issues from SJO, Work Order, or Sales OAF", configEndpoint = "issue-to-shop-floor/config", dashboardEndpoint = "issue-to-shop-floor/dashboard", historyEndpoint = "issue-to-shop-floor/history" },
-            new { id = "SjoToDc", name = "SJO-to-DC", description = "Create Delivery Challans from Sales Order Allocations", configEndpoint = "v1/sales/SalesAllocationDeAllocation/AutomationConfig", dashboardEndpoint = "sales/SalesAllocationDeAllocation/dashboard", historyEndpoint = "sales/SalesAllocationDeAllocation/history" }
-        });
+            new AutomationTypeItem(
+                "IndentToPo",
+                "Indent-to-PO",
+                "Convert authorised material and service indents into purchase orders",
+                "po-automation",
+                "process-jobs/dashboard",
+                "process-jobs/runs"),
+            new AutomationTypeItem(
+                "PoToGrn",
+                "PO-to-GRN",
+                "Convert authorised purchase orders into goods receipt notes",
+                "grn-automation",
+                "po-to-grn/dashboard",
+                "po-to-grn/history"),
+            new AutomationTypeItem(
+                "SjoToIssue",
+                "SJO-to-Issue-to-Shop-Floor",
+                "Reserve stock and create shop floor issues from SJO, Work Order, or Sales OAF",
+                "issue-to-shop-floor/config",
+                "issue-to-shop-floor/dashboard",
+                "issue-to-shop-floor/history"),
+            new AutomationTypeItem(
+                "SjoToDc",
+                "SJO-to-DC",
+                "Create Delivery Challans from Sales Order Allocations",
+                "v1/sales/SalesAllocationDeAllocation/AutomationConfig",
+                "sales/SalesAllocationDeAllocation/dashboard",
+                "sales/SalesAllocationDeAllocation/history"),
+            new AutomationTypeItem(
+                "DcToInvoice",
+                "DC-to-Invoice",
+                "Create Sales Invoices from Delivery Challans",
+                "v1/sales/salesinvoice/AutomationConfig",
+                "sales/salesinvoice/Dashboard",
+                "sales/salesinvoice/History")
+        };
+
+        return Results.Ok(types);
+    }
     private static async Task<IResult> ListJobsAsync(
         IJobRepository jobs,
         CancellationToken cancellationToken,
@@ -312,3 +346,12 @@ public static class JobEndpoints
         job.Steps.Count,
         job.Steps.Count(step => step.Status is StepStatus.Completed or StepStatus.Skipped));
 }
+
+public sealed record AutomationTypeItem(
+    string Id,
+    string Name,
+    string Description,
+    string ConfigEndpoint,
+    string DashboardEndpoint,
+    string HistoryEndpoint);
+

@@ -71,7 +71,19 @@ public sealed class JobRepository : IJobRepository
             var winner = await FindLiveEquivalentAsync(job, cancellationToken);
             if (winner is null)
             {
-                throw;
+                // The winner may have completed or failed between the duplicate key violation
+                // and this query. Look for the most recent job matching the idempotency key.
+                winner = await _dbContext.Jobs
+                    .Include(candidate => candidate.Steps.OrderBy(step => step.Sequence))
+                    .OrderByDescending(candidate => candidate.CreatedAtUtc)
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.IdempotencyKey == job.IdempotencyKey,
+                        cancellationToken);
+
+                if (winner is null)
+                {
+                    throw;
+                }
             }
 
             _logger.LogInformation(

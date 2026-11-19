@@ -18,6 +18,7 @@ using NewHorizon.Automation.Worker.Flows.SoAllocationToDC;
 using NewHorizon.Automation.Worker.Flows.SoAllocationToDC.Endpoints;
 using NewHorizon.Automation.Worker.Flows.DcToInvoice;
 using NewHorizon.Automation.Worker.Flows.PoToGrn;
+using NewHorizon.Automation.Worker.Flows.IssueToShopFloor;
 using NewHorizon.Automation.Worker.Logging;
 using NewHorizon.Automation.Worker.Services;
 using Serilog;
@@ -203,9 +204,9 @@ try
 
             // Each automation flow's own timers, under the same usable-database gate.
             builder.Services.AddIndentToPoScheduler();
-
             // PO → GRN's daily timer. Inert until its settings row is switched on and scheduled.
             builder.Services.AddPoToGrnScheduler();
+            builder.Services.AddIssueToShopFloorScheduler();
         }
     }
     else
@@ -275,14 +276,6 @@ try
 
     app.MapHealthEndpoints();
 
-    // Available automation types for the WebApp2 dashboard
-    app.MapGet("/api/automation/types", () => Results.Ok(new[]
-    {
-        new { Id = "IndentToPo", Name = "Indent to Purchase Order" },
-        new { Id = "SjoToIssue", Name = "SJO to Issue to Shop Floor" },
-        new { Id = "SjoToDc", Name = "SJO to Delivery Challan" }
-    })).AllowAnonymous();
-
     // Each automation flow maps its own endpoints and applies its own database/JWT gates.
     app.MapIndentToPoEndpoints(databaseConfigured, database.Usable, inboundJwt.IsConfigured);
     app.MapSoAllocationToDcEndpoints();
@@ -290,6 +283,9 @@ try
 
     // PO → GRN: settings (/api/automation/grn-automation) and trigger (/api/automation/po-to-grn).
     app.MapPoToGrnEndpoints();
+
+    // SJO → Issue to Shop Floor: settings (/api/automation/issue-to-shop-floor/config), trigger, dashboard & history.
+    app.MapIssueToShopFloorEndpoints();
 
     // The startup verdict on the database, logged after the host is built so it reaches the
     // configured sinks rather than only the bootstrap console.

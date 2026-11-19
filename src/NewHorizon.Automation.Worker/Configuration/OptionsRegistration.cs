@@ -4,6 +4,7 @@ using NewHorizon.Automation.Application.Erp;
 using NewHorizon.Automation.ErpClient;
 using NewHorizon.Automation.Worker.Flows.IndentToPo;
 using NewHorizon.Automation.Worker.Flows.PoToGrn;
+using NewHorizon.Automation.Worker.Flows.IssueToShopFloor;
 
 namespace NewHorizon.Automation.Worker.Configuration;
 
@@ -53,7 +54,9 @@ public static class OptionsRegistration
 
         // Each automation flow's own configuration section. A new flow adds its own line here.
         services.AddIndentToPoOptions(configuration);
+        services.AddIndentToPoOptions(configuration);
         services.AddPoToGrnOptions(configuration);
+        services.AddIssueToShopFloorOptions(configuration);
 
         services.AddOptions<AutoShopFieldMap>()
             .Bind(configuration.GetSection($"{AutomationAgentOptions.SectionName}:AutoShop"))

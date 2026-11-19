@@ -1339,7 +1339,8 @@ public sealed class ProcessJobApiValidationTests
         // The host is built first: WebApplicationFactory builds it lazily on first touch, and two
         // threads racing that is a different race from the one under test.
         var services = _fixture.Services;
-        var barrier = new Barrier(2);
+        var startBarrier = new Barrier(2);
+        var completeBarrier = new Barrier(2);
 
         async Task ConvertAsync()
         {
@@ -1350,9 +1351,12 @@ public sealed class ProcessJobApiValidationTests
                 new StartRunRequest(TriggerSource.Api, "Regular"),
                 CancellationToken.None);
 
-            barrier.SignalAndWait(TimeSpan.FromSeconds(10));
+            startBarrier.SignalAndWait(TimeSpan.FromSeconds(10));
 
             await tracker.StartExecutionAsync(indent, CancellationToken.None);
+
+            completeBarrier.SignalAndWait(TimeSpan.FromSeconds(10));
+
             await tracker.CompleteExecutionAsync(
                 [TrackedOutcome.Note("Nothing outstanding.")],
                 CancellationToken.None);

@@ -22,6 +22,7 @@ public static class WorkflowNames
     /// so tracked jobs, runs and their AutomationConfig row all agree on what to call it.
     /// </summary>
     public const string IndentToPurchaseOrder = "IndentToPurchaseOrder";
+    public const string IssueToShopFloor = "IssueToShopFloor";
 
     /// <summary>
     /// Every workflow name, for validating a caller's filter. Listing them back in a refusal is
@@ -37,6 +38,7 @@ public static class WorkflowNames
         AutoShop,
         AutoShopCycle,
         IndentToPurchaseOrder,
+        IssueToShopFloor,
     ];
 }
 
