@@ -383,6 +383,28 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             validItems,
             taxLines);
 
+        // Safeguard: Ensure no line in RateDtl violates the ERP zero-tax database rule (csp_xDocTxDtl_Insert)
+        var rateLines = payload["RateDtl"] as JsonArray;
+        if (rateLines != null)
+        {
+            foreach (var rLine in rateLines)
+            {
+                if (rLine is JsonObject rObj)
+                {
+                    var perc = rObj["XDTDPERCVAL"] != null ? Convert.ToDecimal(rObj["XDTDPERCVAL"]!.ToString(), CultureInfo.InvariantCulture) : 0m;
+                    var amt = rObj["XDTDRATEAMT"] != null ? Convert.ToDecimal(rObj["XDTDRATEAMT"]!.ToString(), CultureInfo.InvariantCulture) : 0m;
+                    if (perc > 0 && amt <= 0)
+                    {
+                        var itm = rObj["XDTDTMCD"]?.ToString() ?? "Unknown";
+                        var rCode = rObj["XDTDRATECD"]?.ToString() ?? "Unknown";
+                        throw new InvoiceValidationException(
+                            "RateAmount",
+                            $"Tax Data of All Items are not Available, Please Verify and Try to Save Again. Item '{itm}' has Tax '{rCode}' ({perc}%) with Rate Amount {amt}.");
+                    }
+                }
+            }
+        }
+
         // ── Step 13: Call Existing ERP Save API ──
         var createResponse = await PostInvoiceCreateAsync(payload, cancellationToken);
 
@@ -718,7 +740,32 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 decimal rateAmt = tax.RateAmount;
                 if (rateAmt <= 0 && tax.TaxValue > 0 && item.Amount > 0)
                 {
-                    rateAmt = Math.Round(item.Amount * (tax.TaxValue / 100m), 2);
+                    decimal rawTax = item.Amount * (tax.TaxValue / 100m);
+                    if (tax.MprRoundOff == 1)
+                    {
+                        // Match ERP rounding logic (Math.round to nearest whole rupee)
+                        rateAmt = Math.Round(rawTax, 0, MidpointRounding.AwayFromZero);
+                    }
+                    else
+                    {
+                        rateAmt = Math.Round(rawTax, 2);
+                    }
+                }
+
+                // Stored procedure csp_xDocTxDtl_Insert enforcement:
+                // IF (@XDTDCATTYPE in ('PR','EX','SI', 'DI') and @XDTDSUBTYPE <> 'BP')
+                // BEGIN
+                //     IF (@XDTDPERCVAL > 0 AND @XDTDRATEAMT = 0)
+                //     BEGIN
+                //         RAISERROR('Tax Data of All Items are not Available, Please Verify and Try to Save Again.', 16, 2);
+                //         RETURN
+                //     END
+                // END
+                if (tax.TaxValue > 0 && rateAmt <= 0)
+                {
+                    throw new InvoiceValidationException(
+                        "RateAmount",
+                        $"Tax Data of All Items are not Available, Please Verify and Try to Save Again. Item '{item.SalesItemCode}' has Tax '{tax.RateCode}' ({tax.TaxValue}%) but calculated Rate Amount is {rateAmt}.");
                 }
 
                 rateDtl.Add(new JsonObject
@@ -1337,10 +1384,26 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
 
                 decimal taxVal = taxNode["taxValue"] != null ? Convert.ToDecimal(taxNode["taxValue"]!.ToString(), CultureInfo.InvariantCulture) : 0m;
                 decimal rateAmt = taxNode["rateAmount"] != null ? Convert.ToDecimal(taxNode["rateAmount"]!.ToString(), CultureInfo.InvariantCulture) : 0m;
+
+                int mprRoundOff = 0;
+                var rawRoundOff = taxNode["mprroundoff"] ?? taxNode["mprRoundOff"] ?? taxNode["roundOff"];
+                if (rawRoundOff != null)
+                {
+                    if (int.TryParse(rawRoundOff.ToString(), out var parsedRo)) mprRoundOff = parsedRo;
+                    else if (bool.TryParse(rawRoundOff.ToString(), out var boolRo)) mprRoundOff = boolRo ? 1 : 0;
+                }
+
                 if (rateAmt <= 0 && taxVal > 0 && itemsList.Count > 0)
                 {
                     var totalBaseAmt = itemsList.Sum(i => i.Amount);
-                    rateAmt = Math.Round(totalBaseAmt * (taxVal / 100m), 2);
+                    if (mprRoundOff == 1)
+                    {
+                        rateAmt = Math.Round(totalBaseAmt * (taxVal / 100m), 0, MidpointRounding.AwayFromZero);
+                    }
+                    else
+                    {
+                        rateAmt = Math.Round(totalBaseAmt * (taxVal / 100m), 2);
+                    }
                 }
 
                 int postNonPost = 1;
@@ -1378,7 +1441,8 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                     ItemCode: taxNode["itemCode"]?.ToString() ?? string.Empty,
                     SeqNo: taxNode["seqNo"] != null ? Convert.ToInt32(taxNode["seqNo"]!.ToString()) : seq++,
                     RateStructureCode: taxNode["ratestructurecd"]?.ToString() ?? rateStructureCode,
-                    DcAutoId: taxDcAutoId
+                    DcAutoId: taxDcAutoId,
+                    MprRoundOff: mprRoundOff
                 ));
             }
         }
