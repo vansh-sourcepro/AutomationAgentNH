@@ -738,7 +738,7 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
             {
                 var tax = distinctTaxes[tIdx];
                 decimal rateAmt = tax.RateAmount;
-                if (rateAmt <= 0 && tax.TaxValue > 0 && item.Amount > 0)
+                if (tax.TaxValue > 0 && item.Amount > 0)
                 {
                     decimal rawTax = item.Amount * (tax.TaxValue / 100m);
                     if (tax.MprRoundOff == 1)
@@ -791,6 +791,18 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 });
             }
         }
+
+        // Update header total amount with exact line-level calculated taxes
+        decimal totalCalculatedTax = 0m;
+        foreach (var rNode in rateDtl)
+        {
+            if (rNode is JsonObject rObj && rObj["XDTDRATEAMT"] != null &&
+                decimal.TryParse(rObj["XDTDRATEAMT"]!.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedTaxAmt))
+            {
+                totalCalculatedTax += parsedTaxAmt;
+            }
+        }
+        dtInvHdr[0]!["XIHTOTAMT"] = totalAmount + totalCalculatedTax;
 
         // Miscellaneous Details node required by ERP validator and CSP_XINVMISCDTL_INSERT
         var dtInvMiscDtl = new JsonArray
@@ -1391,19 +1403,6 @@ public sealed partial class DcToInvoiceService : IDcToInvoiceService
                 {
                     if (int.TryParse(rawRoundOff.ToString(), out var parsedRo)) mprRoundOff = parsedRo;
                     else if (bool.TryParse(rawRoundOff.ToString(), out var boolRo)) mprRoundOff = boolRo ? 1 : 0;
-                }
-
-                if (rateAmt <= 0 && taxVal > 0 && itemsList.Count > 0)
-                {
-                    var totalBaseAmt = itemsList.Sum(i => i.Amount);
-                    if (mprRoundOff == 1)
-                    {
-                        rateAmt = Math.Round(totalBaseAmt * (taxVal / 100m), 0, MidpointRounding.AwayFromZero);
-                    }
-                    else
-                    {
-                        rateAmt = Math.Round(totalBaseAmt * (taxVal / 100m), 2);
-                    }
                 }
 
                 int postNonPost = 1;
