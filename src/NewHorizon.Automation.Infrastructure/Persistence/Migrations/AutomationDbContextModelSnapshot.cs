@@ -1146,7 +1146,6 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("NewHorizon.Automation.Domain.Jobs.Job", b =>
             modelBuilder.Entity("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnReceipt", b =>
                 {
                     b.HasOne("NewHorizon.Automation.Domain.Flows.PoToGrn.PoGrnRun", null)
@@ -1155,6 +1154,8 @@ namespace NewHorizon.Automation.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
+
+            modelBuilder.Entity("NewHorizon.Automation.Domain.Jobs.Job", b =>
                 {
                     b.HasOne("NewHorizon.Automation.Domain.Jobs.AutomationRun", null)
                         .WithMany()
